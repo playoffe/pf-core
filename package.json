@@ -21,5 +21,10 @@
     "node": ">=20",
     "pnpm": ">=9"
   },
-  "packageManager": "pnpm@10.12.1"
+  "packageManager": "pnpm@10.12.1",
+  "pnpm": {
+    "overrides": {
+      "@supabase/supabase-js": "2.47.10"
+    }
+  }
 }

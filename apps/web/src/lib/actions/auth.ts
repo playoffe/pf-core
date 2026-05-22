@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { registerPlayerSchema, type RegisterPlayerInput } from '@pickleball/shared';
-import { getInitialRating } from '@pickleball/rating';
+import { INITIAL_RATING } from '@pickleball/rating';
 
 export async function registerAction(input: RegisterPlayerInput) {
   const parsed = registerPlayerSchema.safeParse(input);
@@ -13,7 +13,7 @@ export async function registerAction(input: RegisterPlayerInput) {
 
   const { email, password, full_name, username, gender, dob, location } = parsed.data;
 
-  const admin = await createAdminClient();
+  const admin = createAdminClient();
 
   const { data: usernameCheck } = await admin.rpc('check_username_available', {
     p_username: username,
@@ -60,8 +60,8 @@ export async function registerAction(input: RegisterPlayerInput) {
     wins: 0,
     losses: 0,
     win_rate: 0,
-    current_rating: getInitialRating(),
-    peak_rating: getInitialRating(),
+    current_rating: INITIAL_RATING,
+    peak_rating: INITIAL_RATING,
     singles_matches: 0,
     singles_wins: 0,
     doubles_matches: 0,

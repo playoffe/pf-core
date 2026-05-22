@@ -1,15 +1,12 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '../database.types';
+import type { DbClient } from '../types';
 
-type Client = SupabaseClient<Database>;
-
-export async function getClubById(client: Client, clubId: string) {
+export async function getClubById(client: DbClient, clubId: string) {
   const { data, error } = await client.from('clubs').select('*').eq('id', clubId).single();
   if (error) throw error;
   return data;
 }
 
-export async function getClubMembers(client: Client, clubId: string) {
+export async function getClubMembers(client: DbClient, clubId: string) {
   const { data, error } = await client
     .from('club_affiliations')
     .select('*, players(id, username, full_name, photo_url, gender)')
@@ -20,7 +17,7 @@ export async function getClubMembers(client: Client, clubId: string) {
 }
 
 export async function addPlayerToClub(
-  client: Client,
+  client: DbClient,
   playerId: string,
   clubId: string,
 ) {
@@ -36,7 +33,6 @@ export async function addPlayerToClub(
   const { data, error } = await client
     .from('club_affiliations')
     .insert({
-      id: crypto.randomUUID(),
       player_id: playerId,
       club_id: clubId,
       is_current: true,

@@ -1,8 +1,7 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '@pickleball/db';
+import type { DbClient } from '@pickleball/db';
 
 export async function generateUsernameFromName(
-  client: SupabaseClient<Database>,
+  client: DbClient,
   fullName: string,
 ): Promise<string> {
   const base = fullName

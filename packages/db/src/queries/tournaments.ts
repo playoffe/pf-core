@@ -1,9 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '../database.types';
+import type { DbClient } from '../types';
 
-type Client = SupabaseClient<Database>;
-
-export async function getTournamentByDisplayCode(client: Client, code: string) {
+export async function getTournamentByDisplayCode(client: DbClient, code: string) {
   const { data, error } = await client
     .from('tournaments')
     .select('*, clubs(id, name, logo_url, brand_primary_color, brand_secondary_color)')
@@ -13,7 +10,7 @@ export async function getTournamentByDisplayCode(client: Client, code: string) {
   return data;
 }
 
-export async function getTournamentWithCategories(client: Client, tournamentId: string) {
+export async function getTournamentWithCategories(client: DbClient, tournamentId: string) {
   const { data, error } = await client
     .from('tournaments')
     .select('*, tournament_categories(*)')
@@ -23,10 +20,12 @@ export async function getTournamentWithCategories(client: Client, tournamentId: 
   return data;
 }
 
-export async function getLiveMatches(client: Client, tournamentId: string) {
+export async function getLiveMatches(client: DbClient, tournamentId: string) {
   const { data, error } = await client
     .from('matches')
-    .select('*, tournament_entries!entry_a_id(player_id, partner_id), tournament_entries!entry_b_id(player_id, partner_id)')
+    .select(
+      '*, tournament_entries!entry_a_id(player_id, partner_id), tournament_entries!entry_b_id(player_id, partner_id)',
+    )
     .eq('tournament_id', tournamentId)
     .eq('status', 'in_progress')
     .order('scheduled_time');
@@ -34,7 +33,7 @@ export async function getLiveMatches(client: Client, tournamentId: string) {
   return data;
 }
 
-export async function getUpcomingMatches(client: Client, tournamentId: string, limit = 8) {
+export async function getUpcomingMatches(client: DbClient, tournamentId: string, limit = 8) {
   const { data, error } = await client
     .from('matches')
     .select('*')
@@ -46,7 +45,7 @@ export async function getUpcomingMatches(client: Client, tournamentId: string, l
   return data;
 }
 
-export async function getDisplayState(client: Client, tournamentId: string) {
+export async function getDisplayState(client: DbClient, tournamentId: string) {
   const { data, error } = await client
     .from('display_state')
     .select('*')
@@ -56,7 +55,7 @@ export async function getDisplayState(client: Client, tournamentId: string) {
   return data;
 }
 
-export async function getClubTournaments(client: Client, clubId: string) {
+export async function getClubTournaments(client: DbClient, clubId: string) {
   const { data, error } = await client
     .from('tournaments')
     .select('*')

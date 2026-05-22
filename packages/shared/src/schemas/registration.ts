@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const csvImportRowSchema = z.object({
   full_name: z.string().min(2).max(100),
   email: z.string().email(),
-  category: z.string().min(1),
+  category: z.string().min(1).optional().nullable(),
   gender: z.enum(['male', 'female', 'other', 'Male', 'Female', 'Other', 'M', 'F']).transform((v) =>
     v.toLowerCase() === 'm' || v.toLowerCase() === 'male' ? 'male' :
     v.toLowerCase() === 'f' || v.toLowerCase() === 'female' ? 'female' : 'other'

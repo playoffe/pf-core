@@ -1,9 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '../database.types';
+import type { DbClient } from '../types';
 
-type Client = SupabaseClient<Database>;
-
-export async function getPlayerByUsername(client: Client, username: string) {
+export async function getPlayerByUsername(client: DbClient, username: string) {
   const { data, error } = await client
     .from('players')
     .select('*, player_profiles(*), global_stats(*)')
@@ -13,7 +10,7 @@ export async function getPlayerByUsername(client: Client, username: string) {
   return data;
 }
 
-export async function getPlayerById(client: Client, id: string) {
+export async function getPlayerById(client: DbClient, id: string) {
   const { data, error } = await client
     .from('players')
     .select('*, player_profiles(*), global_stats(*)')
@@ -23,13 +20,13 @@ export async function getPlayerById(client: Client, id: string) {
   return data;
 }
 
-export async function isUsernameAvailable(client: Client, username: string): Promise<boolean> {
+export async function isUsernameAvailable(client: DbClient, username: string): Promise<boolean> {
   const { data, error } = await client.rpc('check_username_available', { p_username: username });
   if (error) throw error;
   return data;
 }
 
-export async function getPlayerClubs(client: Client, playerId: string) {
+export async function getPlayerClubs(client: DbClient, playerId: string) {
   const { data, error } = await client
     .from('club_affiliations')
     .select('*, clubs(*)')
@@ -40,7 +37,7 @@ export async function getPlayerClubs(client: Client, playerId: string) {
 }
 
 export async function getPlayerMatchHistory(
-  client: Client,
+  client: DbClient,
   playerId: string,
   limit = 20,
   offset = 0,
@@ -56,7 +53,7 @@ export async function getPlayerMatchHistory(
 }
 
 export async function createProvisionalPlayer(
-  client: Client,
+  client: DbClient,
   input: {
     email: string;
     full_name: string;

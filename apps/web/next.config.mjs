@@ -1,7 +1,6 @@
-import type { NextConfig } from 'next';
-
-const nextConfig: NextConfig = {
-  transpilePackages: ['@pickleball/ui', '@pickleball/db', '@pickleball/shared'],
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  transpilePackages: ['@pickleball/ui', '@pickleball/db', '@pickleball/shared', '@pickleball/rating'],
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: '*.supabase.co' },

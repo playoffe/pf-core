@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { csvImportRowSchema } from '@pickleball/shared';
-import { getInitialRating } from '@pickleball/rating';
+import { INITIAL_RATING } from '@pickleball/rating';
 import { generateUsernameFromName } from '@/lib/utils/username';
+import { sendEmail } from '@/lib/email/service';
+import { buildProvisionalInviteEmail } from '@/lib/email/templates/provisional-invite';
 import { randomBytes } from 'crypto';
 
 export async function POST(request: Request) {
@@ -13,7 +15,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
 
-  const admin = await createAdminClient();
+  const admin = createAdminClient();
+
+  // Fetch tournament + club info once for invite emails
+  const { data: tournament } = await admin
+    .from('tournaments')
+    .select('name, clubs(name)')
+    .eq('id', tournament_id)
+    .single();
+
+  const tournamentName = tournament?.name ?? 'a tournament';
+  const clubName = (tournament?.clubs as { name: string } | null)?.name ?? 'the organiser';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
   const results = { linked: 0, provisional: 0, skipped: 0, errors: [] as string[] };
 
@@ -39,22 +53,22 @@ export async function POST(request: Request) {
       playerId = existing.id;
       results.linked++;
     } else {
+      // ── Create provisional player ──────────────────────────────
       const claimToken = randomBytes(32).toString('hex');
-      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-      const fakeAuthUser = await admin.auth.admin.createUser({
+      const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
         email: email.toLowerCase(),
         email_confirm: false,
       });
 
-      if (fakeAuthUser.error || !fakeAuthUser.data.user) {
+      if (authErr || !authUser.user) {
         results.errors.push(`Failed to create provisional account for ${email}`);
         results.skipped++;
         continue;
       }
 
       await admin.from('players').insert({
-        id: fakeAuthUser.data.user.id,
+        id: authUser.user.id,
         email: email.toLowerCase(),
         username: await generateUsernameFromName(admin, full_name),
         full_name,
@@ -66,43 +80,43 @@ export async function POST(request: Request) {
       });
 
       await admin.from('global_stats').insert({
-        player_id: fakeAuthUser.data.user.id,
-        total_matches: 0,
-        wins: 0,
-        losses: 0,
-        win_rate: 0,
-        current_rating: getInitialRating(),
-        peak_rating: getInitialRating(),
-        singles_matches: 0,
-        singles_wins: 0,
-        doubles_matches: 0,
-        doubles_wins: 0,
-        mixed_doubles_matches: 0,
-        mixed_doubles_wins: 0,
-        updated_at: new Date().toISOString(),
+        player_id: authUser.user.id,
+        current_rating: INITIAL_RATING,
+        peak_rating: INITIAL_RATING,
       });
 
       await admin.from('player_profiles').insert({
-        player_id: fakeAuthUser.data.user.id,
-        bio: null,
-        headline: null,
-        career_history: [],
-        certifications: [],
-        playing_since: null,
-        preferred_style: null,
-        updated_at: new Date().toISOString(),
+        player_id: authUser.user.id,
       });
 
-      playerId = fakeAuthUser.data.user.id;
+      // ── Send SES / Mailpit provisional invite email ────────────
+      const emailPayload = buildProvisionalInviteEmail({
+        recipientName: full_name,
+        tournamentName,
+        clubName,
+        claimToken,
+        appUrl,
+        expiresAt,
+      });
+      // Fire-and-forget: don't block the import on email delivery
+      sendEmail({ to: email.toLowerCase(), ...emailPayload }).catch((err) => {
+        console.error(`[email] Failed to send invite to ${email}:`, err);
+      });
+
+      playerId = authUser.user.id;
       results.provisional++;
     }
 
-    await admin.from('tournament_entries').upsert({
-      tournament_id,
-      category_id,
-      player_id: playerId,
-      status: 'active',
-    }, { onConflict: 'category_id,player_id', ignoreDuplicates: true });
+    // ── Upsert tournament entry ────────────────────────────────
+    await admin.from('tournament_entries').upsert(
+      {
+        tournament_id,
+        category_id,
+        player_id: playerId,
+        status: 'active',
+      },
+      { onConflict: 'category_id,player_id', ignoreDuplicates: true },
+    );
   }
 
   return NextResponse.json({ success: true, results });
