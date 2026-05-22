@@ -1,3 +1,4 @@
+﻿
 export type Json =
   | string
   | number
@@ -877,6 +878,7 @@ export type Database = {
       }
       tournaments: {
         Row: {
+          auto_approve_entries: boolean
           club_id: string
           court_count: number
           created_at: string
@@ -895,6 +897,7 @@ export type Database = {
           venue: string | null
         }
         Insert: {
+          auto_approve_entries?: boolean
           club_id: string
           court_count?: number
           created_at?: string
@@ -913,6 +916,7 @@ export type Database = {
           venue?: string | null
         }
         Update: {
+          auto_approve_entries?: boolean
           club_id?: string
           court_count?: number
           created_at?: string
@@ -986,7 +990,12 @@ export type Database = {
         | "double_elimination"
         | "group_stage_knockout"
         | "swiss"
-      entry_status_enum: "active" | "withdrawn" | "provisional"
+      entry_status_enum:
+        | "active"
+        | "withdrawn"
+        | "provisional"
+        | "pending"
+        | "waitlisted"
       gender_enum: "male" | "female" | "other"
       match_result_enum: "win" | "loss" | "walkover_win" | "walkover_loss"
       match_status_enum:
@@ -1178,7 +1187,13 @@ export const Constants = {
         "group_stage_knockout",
         "swiss",
       ],
-      entry_status_enum: ["active", "withdrawn", "provisional"],
+      entry_status_enum: [
+        "active",
+        "withdrawn",
+        "provisional",
+        "pending",
+        "waitlisted",
+      ],
       gender_enum: ["male", "female", "other"],
       match_result_enum: ["win", "loss", "walkover_win", "walkover_loss"],
       match_status_enum: [
@@ -1222,4 +1237,6 @@ export const Constants = {
     },
   },
 } as const
+
+
 
