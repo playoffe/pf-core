@@ -14,25 +14,27 @@ export default async function DashboardPage() {
     .single();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="border-b border-gray-200 bg-white px-6 py-4">
+    <div className="min-h-screen bg-surface">
+      <nav className="border-b border-surface-border bg-surface-card px-6 py-4">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
-          <span className="text-lg font-bold text-gray-900">Pickleball Platform</span>
+          <span className="text-lg font-black text-white">
+            PLAY<span className="text-brand-600">OFFE</span>
+          </span>
           <div className="flex items-center gap-4">
             {player && (
-              <Link href={`/p/${player.username}`} className="text-sm text-gray-600 hover:text-gray-900">
+              <Link href={`/p/${player.username}`} className="text-sm text-slate-400 hover:text-white transition-colors">
                 @{player.username}
               </Link>
             )}
             <form action="/api/auth/signout" method="POST">
-              <button className="text-sm text-gray-500 hover:text-gray-700">Sign out</button>
+              <button className="text-sm text-slate-500 hover:text-slate-300 transition-colors">Sign out</button>
             </form>
           </div>
         </div>
       </nav>
 
       <main className="mx-auto max-w-6xl px-6 py-10">
-        <h1 className="text-2xl font-bold text-gray-900">
+        <h1 className="text-2xl font-bold text-white">
           Welcome back, {player?.full_name ?? 'Player'} 👋
         </h1>
 
@@ -43,30 +45,30 @@ export default async function DashboardPage() {
             { label: 'Wins', value: player?.global_stats?.wins ?? 0 },
             { label: 'Win rate', value: `${((player?.global_stats?.win_rate ?? 0) * 100).toFixed(0)}%` },
           ].map((stat) => (
-            <div key={stat.label} className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
-              <p className="text-3xl font-bold text-gray-900">{stat.value}</p>
-              <p className="mt-1 text-sm text-gray-500">{stat.label}</p>
+            <div key={stat.label} className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
+              <p className="text-3xl font-bold text-white">{stat.value}</p>
+              <p className="mt-1 text-sm text-slate-400">{stat.label}</p>
             </div>
           ))}
         </div>
 
         <div className="mt-10 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
-            <h2 className="text-base font-semibold text-gray-900">Quick actions</h2>
+          <div className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
+            <h2 className="text-base font-semibold text-white">Quick actions</h2>
             <div className="mt-4 space-y-3">
-              <Link href="/tournaments/new" className="flex items-center gap-3 rounded-lg border border-gray-200 p-3 hover:bg-gray-50">
+              <Link href="/tournaments/new" className="flex items-center gap-3 rounded-lg border border-surface-border p-3 hover:bg-surface transition-colors">
                 <span className="text-xl">🏆</span>
-                <span className="text-sm font-medium text-gray-700">Create tournament</span>
+                <span className="text-sm font-medium text-slate-300">Create tournament</span>
               </Link>
-              <Link href={player ? `/p/${player.username}` : '#'} className="flex items-center gap-3 rounded-lg border border-gray-200 p-3 hover:bg-gray-50">
+              <Link href={player ? `/p/${player.username}` : '#'} className="flex items-center gap-3 rounded-lg border border-surface-border p-3 hover:bg-surface transition-colors">
                 <span className="text-xl">👤</span>
-                <span className="text-sm font-medium text-gray-700">View my profile</span>
+                <span className="text-sm font-medium text-slate-300">View my profile</span>
               </Link>
             </div>
           </div>
-          <div className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
-            <h2 className="text-base font-semibold text-gray-900">Recent activity</h2>
-            <p className="mt-4 text-sm text-gray-400">No recent activity yet — enter a tournament to get started.</p>
+          <div className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
+            <h2 className="text-base font-semibold text-white">Recent activity</h2>
+            <p className="mt-4 text-sm text-slate-500">No recent activity yet — enter a tournament to get started.</p>
           </div>
         </div>
       </main>

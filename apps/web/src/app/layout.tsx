@@ -5,15 +5,15 @@ import './globals.css';
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: { default: 'Pickleball Platform', template: '%s | Pickleball Platform' },
-  description: 'Professional tournament management, player network, and venue display for pickleball clubs.',
+  title: { default: 'PLAYOFFE', template: '%s | PLAYOFFE' },
+  description: 'Professional tournament management, player network, and venue display.',
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} min-h-screen bg-white font-sans antialiased`}>
+      <body className={`${inter.variable} min-h-screen bg-surface font-sans antialiased`}>
         {children}
       </body>
     </html>

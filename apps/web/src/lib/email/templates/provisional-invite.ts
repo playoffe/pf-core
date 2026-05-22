@@ -29,7 +29,7 @@ Hi ${recipientName},
 
 You've been registered for ${tournamentName} at ${clubName}.
 
-To confirm your entry and set up your Pickleball Platform account, click the link below:
+To confirm your entry and set up your PLAYOFFE account, click the link below:
 
 ${claimUrl}
 
@@ -37,7 +37,7 @@ This link expires on ${expiryDate}.
 
 If you didn't expect this invitation, you can safely ignore this email.
 
-— The Pickleball Platform Team
+— The PLAYOFFE Team
 `.trim();
 
   const html = `
@@ -50,7 +50,7 @@ If you didn't expect this invitation, you can safely ignore this email.
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #111827;">
   <div style="margin-bottom: 32px;">
     <h1 style="font-size: 24px; font-weight: 700; color: #111827; margin: 0 0 8px;">
-      🏓 Pickleball Platform
+      🏓 PLAYOFFE
     </h1>
   </div>
 
@@ -61,12 +61,12 @@ If you didn't expect this invitation, you can safely ignore this email.
   <p style="color: #374151; line-height: 1.6;">
     Hi <strong>${recipientName}</strong>,<br><br>
     <strong>${clubName}</strong> has registered you for <strong>${tournamentName}</strong>.
-    Click the button below to confirm your entry and set up your Pickleball Platform account.
+    Click the button below to confirm your entry and set up your PLAYOFFE account.
   </p>
 
   <div style="margin: 32px 0; text-align: center;">
     <a href="${claimUrl}"
-       style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px;
+       style="display: inline-block; background: #7c3aed; color: white; padding: 14px 28px;
               border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 16px;">
       Claim your account &amp; confirm entry
     </a>

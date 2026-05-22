@@ -18,10 +18,11 @@ interface Props {
 
 export function DisplayScreen({ tournament, initialDisplayState }: Props) {
   const [displayState, setDisplayState] = useState<DisplayState>(initialDisplayState);
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [isConnected, setIsConnected] = useState(true);
 
   useEffect(() => {
+    setCurrentTime(new Date());
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -53,7 +54,7 @@ export function DisplayScreen({ tournament, initialDisplayState }: Props) {
   }, [tournament.id]);
 
   const club = tournament.clubs;
-  const primaryColor = club?.brand_primary_color ?? '#16a34a';
+  const primaryColor = club?.brand_primary_color ?? '#7c3aed';
 
   return (
     <div
@@ -98,7 +99,7 @@ function TopBar({
 }: {
   tournamentName: string;
   clubName: string;
-  currentTime: Date;
+  currentTime: Date | null;
   primaryColor: string;
   currentSlide: DisplaySlide;
 }) {
@@ -123,7 +124,7 @@ function TopBar({
         <p className="text-sm opacity-80">{clubName} · {slideLabels[currentSlide]}</p>
       </div>
       <div className="text-right font-mono text-2xl font-bold tabular-nums">
-        {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        {currentTime?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) ?? ''}
       </div>
     </div>
   );

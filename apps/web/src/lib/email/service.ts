@@ -51,7 +51,7 @@ async function sendViaMailpit(payload: EmailPayload): Promise<void> {
   });
 
   await transporter.sendMail({
-    from: 'Pickleball Platform <noreply@localhost>',
+    from: 'PLAYOFFE <noreply@localhost>',
     to: payload.to,
     subject: payload.subject,
     html: payload.html,
