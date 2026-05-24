@@ -1,5 +1,7 @@
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { NotificationBell } from './NotificationBell';
+import type { Notification } from '@/lib/actions/notifications';
 
 export async function AppNav() {
   const supabase = await createClient();
@@ -10,6 +12,19 @@ export async function AppNav() {
   const { data: player } = user
     ? await supabase.from('players').select('username, full_name').eq('id', user.id).single()
     : { data: null };
+
+  // Fetch initial notifications for the bell (last 30, server-side)
+  let initialNotifications: Notification[] = [];
+  if (user) {
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from('notifications')
+      .select('id, type, title, body, link, is_read, created_at')
+      .eq('player_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    initialNotifications = (data ?? []) as Notification[];
+  }
 
   return (
     <nav className="border-b border-surface-border bg-surface-card px-6 py-3.5">
@@ -35,6 +50,12 @@ export async function AppNav() {
         <div className="flex items-center gap-4">
           {player ? (
             <>
+              {/* Notification bell */}
+              <NotificationBell
+                initialNotifications={initialNotifications}
+                userId={user!.id}
+              />
+
               {/* Avatar / username */}
               <Link
                 href={`/p/${player.username}`}

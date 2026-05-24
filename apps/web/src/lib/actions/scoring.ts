@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { calculateRatingChange } from '@pickleball/rating';
+import { createNotificationsForPlayers } from './notifications';
 
 interface SetScore {
   set_number: number;
@@ -240,9 +241,23 @@ export async function submitResultAction(
 
   const { data: catSlugRow } = await admin
     .from('tournament_categories')
-    .select('slug')
+    .select('slug, name')
     .eq('id', match.category_id)
     .maybeSingle();
+
+  // ── In-app notifications to both players ────────────────────────────────
+  const scoreStr = sets.map((s) => `${s.score_a}-${s.score_b}`).join(', ');
+  const drawLink = catSlugRow?.slug
+    ? `/events/${ctx.tournamentSlug}/draw/${catSlugRow.slug}`
+    : null;
+  void createNotificationsForPlayers(
+    [entryA.player_id, entryB.player_id],
+    'match_result',
+    'Match result recorded',
+    `${catSlugRow?.name ?? 'Match'}: ${scoreStr}`,
+    drawLink ?? undefined,
+  );
+
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring/${matchId}`);
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/categories/${catSlugRow?.slug ?? match.category_id}`);
   return { success: true, ratingChangeA: resultA.change, ratingChangeB: resultB.change };

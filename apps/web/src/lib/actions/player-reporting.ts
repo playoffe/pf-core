@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/server';
 import { sendScoreReportedNotification } from '@/lib/email/notifications';
+import { createNotificationsForPlayers } from './notifications';
 
 interface SetScore {
   score_a: number;
@@ -68,7 +69,7 @@ export async function submitPlayerReportAction(
       .select(`
         slug, name, club_id,
         tc:tournament_categories!inner(name),
-        club_managers!club_id(players!player_id(email))
+        club_managers!club_id(player_id, players!player_id(email))
       `)
       .eq('id', match.tournament_id)
       .single();
@@ -79,7 +80,7 @@ export async function submitPlayerReportAction(
 
     // Notify all club managers by email (fire-and-forget)
     if (t) {
-      type ManagerRow = { players: { email: string } | null };
+      type ManagerRow = { player_id: string; players: { email: string } | null };
       const managers = (t.club_managers as unknown as ManagerRow[]) ?? [];
       const organiserEmails = managers
         .map((m) => m.players?.email)
@@ -98,6 +99,20 @@ export async function submitPlayerReportAction(
 
       const scoreStr = sets.map((s) => `${s.score_a}-${s.score_b}`).join(', ');
       const catName = (t.tc as unknown as { name: string }[] | null)?.[0]?.name ?? '';
+
+      // In-app notification to managers
+      const managerPlayerIds = managers
+        .map((m) => m.player_id)
+        .filter((id): id is string => !!id);
+      if (managerPlayerIds.length > 0) {
+        void createNotificationsForPlayers(
+          managerPlayerIds,
+          'score_reported',
+          'Player score report',
+          `${catName}: ${nameOf(match.entry_a_id ?? '')} vs ${nameOf(match.entry_b_id ?? '')} — ${scoreStr}`,
+          `/tournaments/${t.slug}/scoring/${matchId}`,
+        );
+      }
 
       if (organiserEmails.length > 0) {
         void sendScoreReportedNotification({
