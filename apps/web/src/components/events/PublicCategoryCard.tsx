@@ -24,6 +24,7 @@ interface Props {
   isLoggedIn: boolean;
   playFormatLabel: string;
   drawFormatLabel: string;
+  matchProgress: { total: number; completed: number } | null;
 }
 
 const MY_STATUS_BADGE: Record<string, { label: string; className: string }> = {
@@ -52,6 +53,7 @@ export function PublicCategoryCard({
   isLoggedIn,
   playFormatLabel,
   drawFormatLabel,
+  matchProgress,
 }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -146,6 +148,21 @@ export function PublicCategoryCard({
             </div>
           </div>
 
+          {/* Match progress for standings-type formats */}
+          {matchProgress !== null && matchProgress.total > 0 && (
+            <div className="mt-2 flex items-center gap-2">
+              <div className="w-20 h-1 rounded-full bg-surface overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-accent-500"
+                  style={{ width: `${Math.round((matchProgress.completed / matchProgress.total) * 100)}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500">
+                {matchProgress.completed}/{matchProgress.total} matches done
+              </span>
+            </div>
+          )}
+
           {/* Invite sent confirmation */}
           {inviteSent && (
             <p className="mt-2 text-xs text-brand-400">
@@ -215,13 +232,13 @@ export function PublicCategoryCard({
             </button>
           )}
 
-          {/* View draw */}
+          {/* View draw / standings */}
           {(category.status === 'draw_generated' || category.status === 'in_progress' || category.status === 'completed') && (
             <Link
               href={`/events/${tournamentSlug}/draw/${category.slug}`}
               className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
             >
-              View draw →
+              {matchProgress !== null ? 'View standings →' : 'View draw →'}
             </Link>
           )}
         </div>

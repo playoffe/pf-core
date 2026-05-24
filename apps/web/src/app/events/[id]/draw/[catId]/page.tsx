@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { BracketView } from '@/components/tournaments/BracketView';
+import { StandingsTable } from '@/components/tournaments/StandingsTable';
 import { getMatchesForCategory } from '@/lib/actions/draws';
 import type { Metadata } from 'next';
 
@@ -77,7 +78,15 @@ export default async function PublicDrawPage({ params }: Props) {
             <p className="text-sm text-slate-500">Draw not yet available.</p>
           </div>
         ) : (
-          <BracketView matches={matches} format={cat.draw_format} tournamentSlug={tournamentSlug} />
+          <>
+            <StandingsTable matches={matches} format={cat.draw_format} />
+            <div className="mt-8">
+              <h2 className="mb-4 text-sm font-semibold uppercase tracking-widest text-slate-500">
+                {cat.draw_format === 'group_stage_knockout' ? 'Bracket' : 'Draw'}
+              </h2>
+              <BracketView matches={matches} format={cat.draw_format} tournamentSlug={tournamentSlug} />
+            </div>
+          </>
         )}
       </main>
     </div>

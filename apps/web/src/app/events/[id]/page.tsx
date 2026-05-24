@@ -93,6 +93,32 @@ export default async function PublicTournamentPage({ params }: Props) {
     countByCategory[e.category_id] = (countByCategory[e.category_id] ?? 0) + 1;
   }
 
+  // Match progress for in-progress/completed categories (for standings formats)
+  const standingsFormats = new Set(['round_robin', 'swiss', 'group_stage_knockout']);
+  const standingsCatIds = (categories ?? [])
+    .filter((c) => standingsFormats.has(c.draw_format) && ['draw_generated', 'in_progress', 'completed'].includes(c.status))
+    .map((c) => c.id);
+
+  type MatchProgressRow = { category_id: string; status: string };
+  let matchProgressRaw: MatchProgressRow[] = [];
+  if (standingsCatIds.length > 0) {
+    const { data: mpRows } = await admin
+      .from('matches')
+      .select('category_id, status')
+      .in('category_id', standingsCatIds)
+      .not('entry_a_id', 'is', null)
+      .not('entry_b_id', 'is', null);
+    matchProgressRaw = (mpRows ?? []) as MatchProgressRow[];
+  }
+
+  // Build per-category { total, completed } counts
+  const matchProgress: Record<string, { total: number; completed: number }> = {};
+  for (const m of matchProgressRaw) {
+    if (!matchProgress[m.category_id]) matchProgress[m.category_id] = { total: 0, completed: 0 };
+    matchProgress[m.category_id].total++;
+    if (m.status === 'completed' || m.status === 'walkover') matchProgress[m.category_id].completed++;
+  }
+
   // Who is the current viewer?
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -207,6 +233,7 @@ export default async function PublicTournamentPage({ params }: Props) {
                   isLoggedIn={!!user}
                   playFormatLabel={PLAY_FORMAT_LABEL[cat.play_format] ?? cat.play_format}
                   drawFormatLabel={DRAW_FORMAT_LABEL[cat.draw_format] ?? cat.draw_format}
+                  matchProgress={matchProgress[cat.id] ?? null}
                 />
               ))}
             </div>
