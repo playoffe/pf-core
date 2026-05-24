@@ -42,12 +42,13 @@ export default async function RegistrationsPage({ params }: Props) {
     .eq('tournament_id', t.id)
     .order('created_at');
 
-  // Fetch all non-withdrawn entries with player details
+  // Fetch all non-withdrawn entries with player + partner details
   const { data: entries } = await admin
     .from('tournament_entries')
     .select(`
       id, status, registered_at, category_id, seed,
-      players!player_id(id, full_name, username, global_stats(current_rating))
+      players!player_id(id, full_name, username, global_stats(current_rating)),
+      partner:players!partner_id(full_name, username)
     `)
     .eq('tournament_id', t.id)
     .not('status', 'eq', 'withdrawn')
@@ -65,6 +66,7 @@ export default async function RegistrationsPage({ params }: Props) {
       username: string;
       global_stats: { current_rating: number } | null;
     } | null;
+    partner: { full_name: string; username: string } | null;
   };
 
   const allEntries = (entries ?? []) as unknown as EntryRow[];

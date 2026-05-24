@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { MatchScoreCard } from '@/components/scoring/MatchScoreCard';
+import { CopyLinkButton } from '@/components/ui/CopyLinkButton';
 
 export const metadata: Metadata = { title: 'Score match' };
 
@@ -40,6 +41,7 @@ export default async function MatchScoringPage({ params }: Props) {
     .select(`
       id, round, round_name, group_name, status, court, sets,
       started_at, completed_at, winner_entry_id,
+      player_reported_winner_id, player_reported_sets,
       ea:tournament_entries!entry_a_id(
         id, seed,
         players!player_id(id, full_name, username, global_stats(current_rating))
@@ -102,6 +104,21 @@ export default async function MatchScoringPage({ params }: Props) {
           </h1>
         </div>
 
+        {/* Player self-report link — only for unscored matches */}
+        {(match.status === 'scheduled' || match.status === 'in_progress') && (
+          <div className="mb-5 rounded-xl bg-surface-card ring-1 ring-surface-border px-5 py-4">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Player self-report link
+            </p>
+            <p className="text-xs text-slate-600 mb-3">
+              Share this link with players so they can submit the score from their phone after the match.
+            </p>
+            <CopyLinkButton
+              url={`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/events/${slug}/score-report/${matchId}`}
+            />
+          </div>
+        )}
+
         <MatchScoreCard
           matchId={matchId}
           tournamentSlug={slug}
@@ -125,6 +142,10 @@ export default async function MatchScoringPage({ params }: Props) {
             player_username: eb.players?.username ?? '',
             rating: eb.players?.global_stats?.current_rating ?? 3.5,
           } : null}
+          playerReportedWinnerId={match.player_reported_winner_id ?? null}
+          playerReportedSets={
+            (match.player_reported_sets as { set_number: number; score_a: number; score_b: number }[] | null) ?? null
+          }
         />
       </main>
     </div>

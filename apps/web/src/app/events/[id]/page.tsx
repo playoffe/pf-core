@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { PublicCategoryCard } from '@/components/events/PublicCategoryCard';
+import { DeadlineCountdown } from '@/components/events/DeadlineCountdown';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -151,11 +152,9 @@ export default async function PublicTournamentPage({ params }: Props) {
                     {banner.label}
                   </span>
                   {t.registration_deadline && t.status === 'registration_open' && (
-                    <span className={`text-xs ${deadlinePassed ? 'text-red-400' : 'text-slate-500'}`}>
-                      {deadlinePassed
-                        ? '⛔ Registration closed'
-                        : `⏰ Closes ${fmt(t.registration_deadline)}`}
-                    </span>
+                    deadlinePassed
+                      ? <span className="text-xs text-red-400">⛔ Registration closed</span>
+                      : <DeadlineCountdown deadline={t.registration_deadline} />
                   )}
                 </div>
               </div>

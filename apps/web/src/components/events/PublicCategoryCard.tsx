@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { registerForCategoryAction, withdrawEntryAction } from '@/lib/actions/registration';
+import { registerForCategoryAction, registerDoublesAction, withdrawEntryAction } from '@/lib/actions/registration';
 
 interface Category {
   id: string;
@@ -27,9 +27,10 @@ interface Props {
 }
 
 const MY_STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  active:     { label: 'Registered ✓',     className: 'bg-accent-500/20 text-accent-400' },
-  pending:    { label: 'Pending approval',  className: 'bg-amber-900/40 text-amber-300' },
-  waitlisted: { label: 'Waitlisted',        className: 'bg-slate-700/60 text-slate-300' },
+  active:      { label: 'Registered ✓',     className: 'bg-accent-500/20 text-accent-400' },
+  pending:     { label: 'Pending approval',  className: 'bg-amber-900/40 text-amber-300' },
+  waitlisted:  { label: 'Waitlisted',        className: 'bg-slate-700/60 text-slate-300' },
+  provisional: { label: 'Invite sent ⏳',    className: 'bg-brand-900/40 text-brand-300' },
 };
 
 const CAT_STATUS: Record<string, string> = {
@@ -39,6 +40,8 @@ const CAT_STATUS: Record<string, string> = {
   in_progress:    'In progress',
   completed:      'Completed',
 };
+
+const isDoubles = (fmt: string) => fmt === 'doubles' || fmt === 'mixed_doubles';
 
 export function PublicCategoryCard({
   tournamentSlug,
@@ -55,10 +58,18 @@ export function PublicCategoryCard({
   const [error, setError] = useState<string | null>(null);
   const [localStatus, setLocalStatus] = useState(myStatus);
 
+  // Doubles partner form state
+  const [showPartnerForm, setShowPartnerForm] = useState(false);
+  const [partnerUsername, setPartnerUsername] = useState('');
+  const [inviteSent, setInviteSent] = useState<string | null>(null); // partner name on success
+
+  const doubles = isDoubles(category.play_format);
   const isFull = category.max_entries !== null && entryCount >= category.max_entries;
   const categoryAcceptsEntries = category.status === 'registration';
-  const canRegister = registrationOpen && categoryAcceptsEntries && !localStatus && !isFull;
-  const canWaitlist = registrationOpen && categoryAcceptsEntries && !localStatus && isFull;
+  const canAct = registrationOpen && categoryAcceptsEntries && !localStatus;
+  const canRegister = canAct && !isFull && !doubles;
+  const canWaitlist = canAct && isFull && !doubles;
+  const canRegisterDoubles = canAct && doubles;
   const canWithdraw = !!localStatus && localStatus !== 'withdrawn';
 
   async function handleRegister() {
@@ -69,6 +80,22 @@ export function PublicCategoryCard({
       setError(result.error);
     } else {
       setLocalStatus(result.status ?? 'active');
+      router.refresh();
+    }
+    setLoading(false);
+  }
+
+  async function handleDoubles() {
+    if (!partnerUsername.trim()) { setError('Enter your partner\'s username.'); return; }
+    setLoading(true);
+    setError(null);
+    const result = await registerDoublesAction(category.id, partnerUsername.trim());
+    if (result.error) {
+      setError(result.error);
+    } else {
+      setLocalStatus('provisional');
+      setInviteSent(result.partnerName ?? partnerUsername);
+      setShowPartnerForm(false);
       router.refresh();
     }
     setLoading(false);
@@ -98,40 +125,43 @@ export function PublicCategoryCard({
             {playFormatLabel} · {drawFormatLabel}
           </p>
 
-          {/* Entry count */}
+          {/* Entry count / capacity bar */}
           <div className="mt-2 flex items-center gap-3">
             <div className="flex items-center gap-1.5">
-              <div
-                className="h-1.5 rounded-full bg-brand-600"
-                style={{
-                  width: category.max_entries
-                    ? `${Math.min(100, (entryCount / category.max_entries) * 100)}%`
-                    : '0%',
-                  minWidth: entryCount > 0 ? '4px' : '0',
-                  maxWidth: '80px',
-                }}
-              />
+              {category.max_entries && (
+                <div className="w-20 h-1.5 rounded-full bg-surface overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${isFull ? 'bg-slate-500' : 'bg-brand-600'}`}
+                    style={{ width: `${Math.min(100, (entryCount / category.max_entries) * 100)}%` }}
+                  />
+                </div>
+              )}
               <span className="text-xs text-slate-400">
                 {entryCount}
-                {category.max_entries ? ` / ${category.max_entries}` : ' entries'}
+                {category.max_entries ? ` / ${category.max_entries}` : doubles ? ' teams' : ' entries'}
               </span>
               {isFull && (
-                <span className="rounded-full bg-slate-700/60 px-2 py-0.5 text-[10px] text-slate-400">
-                  Full
-                </span>
+                <span className="rounded-full bg-slate-700/60 px-2 py-0.5 text-[10px] text-slate-400">Full</span>
               )}
             </div>
           </div>
+
+          {/* Invite sent confirmation */}
+          {inviteSent && (
+            <p className="mt-2 text-xs text-brand-400">
+              ✓ Invite sent to {inviteSent} — waiting for them to confirm.
+            </p>
+          )}
         </div>
 
-        {/* Right: action */}
+        {/* Right: actions */}
         <div className="shrink-0 flex flex-col items-end gap-2">
-          {/* Category draw status badge */}
+          {/* Category non-registration status */}
           {category.status !== 'registration' && category.status !== 'pending' && (
             <span className="text-xs text-slate-500">{CAT_STATUS[category.status] ?? category.status}</span>
           )}
 
-          {/* Register */}
+          {/* Singles register */}
           {isLoggedIn && canRegister && (
             <button
               onClick={handleRegister}
@@ -142,7 +172,7 @@ export function PublicCategoryCard({
             </button>
           )}
 
-          {/* Join waitlist */}
+          {/* Singles waitlist */}
           {isLoggedIn && canWaitlist && (
             <button
               onClick={handleRegister}
@@ -153,8 +183,19 @@ export function PublicCategoryCard({
             </button>
           )}
 
+          {/* Doubles register */}
+          {isLoggedIn && canRegisterDoubles && !showPartnerForm && (
+            <button
+              onClick={() => setShowPartnerForm(true)}
+              disabled={loading}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
+            >
+              Register with partner
+            </button>
+          )}
+
           {/* Log in prompt */}
-          {!isLoggedIn && (registrationOpen && categoryAcceptsEntries) && (
+          {!isLoggedIn && registrationOpen && categoryAcceptsEntries && (
             <Link
               href={`/login?return=${encodeURIComponent(`/events/${tournamentSlug}`)}`}
               className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-surface-card hover:text-white transition-colors"
@@ -185,6 +226,43 @@ export function PublicCategoryCard({
           )}
         </div>
       </div>
+
+      {/* Doubles partner form */}
+      {showPartnerForm && (
+        <div className="mt-4 rounded-xl border border-brand-700/40 bg-brand-950/20 p-4 space-y-3">
+          <p className="text-xs font-semibold text-brand-300">Enter your partner&apos;s username</p>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-sm">@</span>
+              <input
+                type="text"
+                value={partnerUsername}
+                onChange={(e) => setPartnerUsername(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleDoubles()}
+                placeholder="username"
+                autoFocus
+                className="w-full rounded-lg border border-slate-700 bg-surface pl-7 pr-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-brand-500 focus:outline-none"
+              />
+            </div>
+            <button
+              onClick={handleDoubles}
+              disabled={loading || !partnerUsername.trim()}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
+            >
+              {loading ? '…' : 'Send invite'}
+            </button>
+            <button
+              onClick={() => { setShowPartnerForm(false); setError(null); }}
+              className="px-2 text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+          <p className="text-xs text-slate-600">
+            They&apos;ll see the invite on their dashboard and can confirm or decline.
+          </p>
+        </div>
+      )}
 
       {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
     </div>

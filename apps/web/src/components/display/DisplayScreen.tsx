@@ -1,9 +1,20 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { Database } from '@pickleball/db';
 import type { DisplaySlide } from '@pickleball/shared';
+
+// Slides that participate in auto-rotation (announcement is always organiser-triggered)
+const ROTATION_SLIDES: DisplaySlide[] = [
+  'live_scores',
+  'upcoming_matches',
+  'group_standings',
+  'live_bracket',
+  'category_podium',
+  'full_schedule',
+  'wrap_up',
+];
 
 type Tournament = Database['public']['Tables']['tournaments']['Row'] & {
   clubs: Pick<
@@ -41,15 +52,24 @@ function extractName(entry: unknown): string {
 
 export function DisplayScreen({ tournament, initialDisplayState }: Props) {
   const [displayState, setDisplayState] = useState<DisplayState>(initialDisplayState);
+  const [currentSlide, setCurrentSlide] = useState<DisplaySlide>(
+    initialDisplayState.current_slide as DisplaySlide,
+  );
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [isConnected, setIsConnected] = useState(true);
 
+  // Track seconds elapsed for rotation progress bar
+  const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef(0);
+
+  // Clock
   useEffect(() => {
     setCurrentTime(new Date());
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
+  // Realtime subscription for display_state updates
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
@@ -57,14 +77,62 @@ export function DisplayScreen({ tournament, initialDisplayState }: Props) {
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'display_state', filter: `tournament_id=eq.${tournament.id}` },
-        (payload) => setDisplayState(payload.new as DisplayState),
+        (payload) => {
+          const ds = payload.new as DisplayState;
+          setDisplayState(ds);
+          // Organiser override: jump to the pinned slide immediately and reset timer
+          if (ds.is_pinned) {
+            setCurrentSlide(ds.current_slide as DisplaySlide);
+          }
+          elapsedRef.current = 0;
+          setElapsed(0);
+        },
       )
       .subscribe((status) => setIsConnected(status === 'SUBSCRIBED'));
     return () => { supabase.removeChannel(channel); };
   }, [tournament.id]);
 
+  // Auto-rotation timer
+  useEffect(() => {
+    const intervalMs = 1000;
+    const timer = setInterval(() => {
+      const ds = displayState;
+      if (ds.is_pinned || ds.is_paused) {
+        // Reset elapsed when paused/pinned so bar shows full on resume
+        elapsedRef.current = 0;
+        setElapsed(0);
+        return;
+      }
+
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+
+      if (elapsedRef.current >= ds.rotation_interval_secs) {
+        elapsedRef.current = 0;
+        setElapsed(0);
+        setCurrentSlide((prev) => {
+          const idx = ROTATION_SLIDES.indexOf(prev);
+          const next = (idx + 1) % ROTATION_SLIDES.length;
+          return ROTATION_SLIDES[next];
+        });
+      }
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [displayState]);
+
+  // When displayState changes and not pinned, keep currentSlide at current (don't reset)
+  // but if pinned, track the pinned slide
+  useEffect(() => {
+    if (displayState.is_pinned) {
+      setCurrentSlide(displayState.current_slide as DisplaySlide);
+    }
+  }, [displayState]);
+
   const club = tournament.clubs;
   const primaryColor = club?.brand_primary_color ?? '#7c3aed';
+  const rotationProgress = displayState.is_pinned || displayState.is_paused
+    ? 0
+    : Math.min(elapsed / displayState.rotation_interval_secs, 1);
 
   return (
     <div
@@ -85,17 +153,19 @@ export function DisplayScreen({ tournament, initialDisplayState }: Props) {
         clubName={club?.name ?? ''}
         currentTime={currentTime}
         primaryColor={primaryColor}
-        currentSlide={displayState.current_slide as DisplaySlide}
+        currentSlide={currentSlide}
+        isPinned={displayState.is_pinned}
+        isPaused={displayState.is_paused}
       />
 
       <main className="flex flex-1 items-center justify-center p-8 overflow-hidden">
         <SlideContent
-          slide={displayState.current_slide as DisplaySlide}
+          slide={currentSlide}
           tournamentId={tournament.id}
         />
       </main>
 
-      <BottomBar primaryColor={primaryColor} />
+      <BottomBar primaryColor={primaryColor} progress={rotationProgress} />
     </div>
   );
 }
@@ -107,12 +177,16 @@ function TopBar({
   currentTime,
   primaryColor,
   currentSlide,
+  isPinned,
+  isPaused,
 }: {
   tournamentName: string;
   clubName: string;
   currentTime: Date | null;
   primaryColor: string;
   currentSlide: DisplaySlide;
+  isPinned: boolean;
+  isPaused: boolean;
 }) {
   const slideLabels: Record<DisplaySlide, string> = {
     live_scores: 'Live Scores',
@@ -129,7 +203,19 @@ function TopBar({
     <div className="flex shrink-0 items-center justify-between px-10 py-5" style={{ backgroundColor: primaryColor }}>
       <div>
         <p className="text-xl font-black leading-tight tracking-tight">{tournamentName}</p>
-        <p className="text-sm opacity-75">{clubName} · {slideLabels[currentSlide]}</p>
+        <div className="mt-0.5 flex items-center gap-2">
+          <p className="text-sm opacity-75">{clubName} · {slideLabels[currentSlide]}</p>
+          {isPinned && (
+            <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+              📌 Pinned
+            </span>
+          )}
+          {isPaused && !isPinned && (
+            <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+              ⏸ Paused
+            </span>
+          )}
+        </div>
       </div>
       <div className="text-right font-mono text-3xl font-black tabular-nums">
         {currentTime?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) ?? ''}
@@ -139,11 +225,20 @@ function TopBar({
 }
 
 // ── Bottom bar ────────────────────────────────────────────────────────────────
-function BottomBar({ primaryColor }: { primaryColor: string }) {
+function BottomBar({ primaryColor, progress }: { primaryColor: string; progress: number }) {
   return (
-    <div className="flex shrink-0 items-center justify-between bg-gray-900/80 px-10 py-2.5">
-      <p className="text-xs font-bold tracking-widest opacity-40">PLAYOFFE</p>
-      <div className="h-1 w-24 rounded-full opacity-30" style={{ backgroundColor: primaryColor }} />
+    <div className="flex shrink-0 flex-col bg-gray-900/80">
+      {/* Rotation progress bar */}
+      <div className="h-0.5 w-full bg-white/5">
+        <div
+          className="h-full transition-all duration-1000 ease-linear rounded-full opacity-60"
+          style={{ width: `${progress * 100}%`, backgroundColor: primaryColor }}
+        />
+      </div>
+      <div className="flex items-center justify-between px-10 py-2.5">
+        <p className="text-xs font-bold tracking-widest opacity-40">PLAYOFFE</p>
+        <div className="h-1 w-24 rounded-full opacity-30" style={{ backgroundColor: primaryColor }} />
+      </div>
     </div>
   );
 }
@@ -158,10 +253,11 @@ function SlideContent({ slide, tournamentId }: { slide: DisplaySlide; tournament
     case 'live_bracket':     return <LiveBracketSlide tournamentId={tournamentId} />;
     case 'category_podium':  return <CategoryPodiumSlide tournamentId={tournamentId} />;
     case 'wrap_up':          return <WrapUpSlide tournamentId={tournamentId} />;
+    case 'full_schedule':    return <FullScheduleSlide tournamentId={tournamentId} />;
     default:
       return (
         <div className="text-center opacity-20">
-          <p className="text-5xl font-black">{slide.replace(/_/g, ' ').toUpperCase()}</p>
+          <p className="text-5xl font-black">{(slide as string).replace(/_/g, ' ').toUpperCase()}</p>
           <p className="mt-2 text-sm">Coming soon</p>
         </div>
       );
@@ -902,6 +998,123 @@ function WrapUpSlide({ tournamentId }: { tournamentId: string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Full Schedule ─────────────────────────────────────────────────────────────
+type ScheduleMatch = {
+  id: string;
+  court: number | null;
+  round_name: string | null;
+  scheduled_time: string | null;
+  status: string;
+  category_name: string;
+  name_a: string;
+  name_b: string;
+};
+
+function FullScheduleSlide({ tournamentId }: { tournamentId: string }) {
+  const [matches, setMatches] = useState<ScheduleMatch[]>([]);
+  const supabase = createClient();
+
+  useEffect(() => {
+    supabase
+      .from('matches')
+      .select(`
+        id, court, round_name, scheduled_time, status,
+        tc:tournament_categories!category_id(name),
+        ea:tournament_entries!entry_a_id(players!player_id(full_name)),
+        eb:tournament_entries!entry_b_id(players!player_id(full_name))
+      `)
+      .eq('tournament_id', tournamentId)
+      .not('entry_a_id', 'is', null)
+      .not('entry_b_id', 'is', null)
+      .in('status', ['scheduled', 'in_progress', 'completed', 'walkover'])
+      .order('scheduled_time', { nullsFirst: false })
+      .order('court', { nullsFirst: false })
+      .limit(20)
+      .then(({ data }) => {
+        setMatches(
+          (data ?? []).map((m) => ({
+            id: m.id,
+            court: m.court,
+            round_name: m.round_name,
+            scheduled_time: m.scheduled_time,
+            status: m.status,
+            category_name: (m.tc as { name: string } | null)?.name ?? '',
+            name_a: extractName(m.ea),
+            name_b: extractName(m.eb),
+          })),
+        );
+      });
+  }, [tournamentId, supabase]);
+
+  if (matches.length === 0) {
+    return (
+      <div className="text-center">
+        <p className="text-6xl mb-4">📅</p>
+        <p className="text-3xl font-semibold text-gray-500">No matches scheduled</p>
+      </div>
+    );
+  }
+
+  const statusStyle: Record<string, string> = {
+    scheduled: 'text-gray-500',
+    in_progress: 'text-green-400 font-bold',
+    completed: 'text-gray-600 line-through',
+    walkover: 'text-gray-600',
+  };
+  const statusLabel: Record<string, string> = {
+    scheduled: '—',
+    in_progress: '● Live',
+    completed: '✓',
+    walkover: 'W/O',
+  };
+
+  return (
+    <div className="w-full overflow-auto max-h-full space-y-1.5">
+      {matches.map((m) => (
+        <div
+          key={m.id}
+          className={`flex items-center gap-4 rounded-xl px-5 py-3 ring-1 ${
+            m.status === 'in_progress'
+              ? 'bg-green-900/20 ring-green-500/30'
+              : m.status === 'completed' || m.status === 'walkover'
+              ? 'bg-gray-900/40 ring-white/5 opacity-50'
+              : 'bg-gray-800/60 ring-white/5'
+          }`}
+        >
+          {/* Time */}
+          <p className="w-14 shrink-0 font-mono text-xs text-gray-400">
+            {m.scheduled_time
+              ? new Date(m.scheduled_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : '--:--'}
+          </p>
+
+          {/* Court */}
+          <p className="w-16 shrink-0 text-center text-sm font-bold text-gray-300">
+            {m.court ? `Ct ${m.court}` : ''}
+          </p>
+
+          {/* Match */}
+          <p className="flex-1 text-base font-semibold truncate">
+            {m.name_a}
+            <span className="mx-2 text-gray-600 font-normal text-sm">vs</span>
+            {m.name_b}
+          </p>
+
+          {/* Category / Round */}
+          <p className="shrink-0 text-xs text-gray-500 hidden lg:block">
+            {m.category_name}{m.category_name && m.round_name ? ' · ' : ''}{m.round_name ?? ''}
+          </p>
+
+          {/* Status */}
+          <p className={`shrink-0 text-xs w-12 text-right ${statusStyle[m.status] ?? 'text-gray-500'}`}>
+            {statusLabel[m.status] ?? m.status}
+          </p>
+        </div>
+      ))}
     </div>
   );
 }

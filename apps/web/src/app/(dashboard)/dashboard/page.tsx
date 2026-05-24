@@ -4,7 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { getMyTournaments } from '@/lib/actions/tournaments';
 import { getMyClubs } from '@/lib/actions/clubs';
-import { getMyEntries } from '@/lib/actions/registration';
+import { getMyEntries, getMyPartnerInvites } from '@/lib/actions/registration';
+import { PartnerInvitesBanner } from '@/components/events/PartnerInvitesBanner';
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   draft: { label: 'Draft', className: 'bg-slate-700 text-slate-300' },
@@ -27,10 +28,11 @@ export default async function DashboardPage() {
     .eq('id', user.id)
     .single();
 
-  const [tournaments, clubs, myEntries] = await Promise.all([
+  const [tournaments, clubs, myEntries, partnerInvites] = await Promise.all([
     getMyTournaments(),
     getMyClubs(),
     getMyEntries(),
+    getMyPartnerInvites(),
   ]);
 
   return (
@@ -67,6 +69,12 @@ export default async function DashboardPage() {
         </div>
 
         <div className="mt-10 grid gap-6 lg:grid-cols-3">
+          {/* Partner invites — shown prominently when present */}
+          {partnerInvites.length > 0 && (
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            <PartnerInvitesBanner invites={partnerInvites as any} />
+          )}
+
           {/* My registrations */}
           {myEntries.length > 0 && (() => {
             const ENTRY_STATUS_BADGE: Record<string, { label: string; className: string }> = {

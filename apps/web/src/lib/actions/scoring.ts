@@ -482,3 +482,131 @@ export async function overrideMatchResultAction(
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/categories/${category?.slug ?? match.category_id}`);
   return { success: true };
 }
+
+// ── Approve a player self-report ──────────────────────────────────────────────
+// Reads player_reported_winner_id / player_reported_sets, runs rating + bracket
+// logic, then marks the match completed.  Organiser-only.
+export async function approvePlayerReportAction(matchId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const ctx = await assertMatchManager(matchId, user.id);
+  if (!ctx) return { error: 'Permission denied' };
+
+  const { match } = ctx;
+  if (match.status === 'completed' || match.status === 'walkover') {
+    return { error: 'Match is already completed' };
+  }
+  if (!match.entry_a_id || !match.entry_b_id) {
+    return { error: 'Match has missing entries' };
+  }
+
+  // Fetch the player-reported data (not in assertMatchManager select)
+  const admin = createAdminClient();
+  const { data: reportRow } = await admin
+    .from('matches')
+    .select('player_reported_winner_id, player_reported_sets')
+    .eq('id', matchId)
+    .single();
+
+  const reportedWinnerId = reportRow?.player_reported_winner_id as string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const reportedSets = ((reportRow?.player_reported_sets ?? []) as any[]) as SetScore[];
+
+  if (!reportedWinnerId) return { error: 'No player-reported score to approve' };
+  if (reportedSets.length === 0) return { error: 'Player report contains no set scores' };
+  if (reportedWinnerId !== match.entry_a_id && reportedWinnerId !== match.entry_b_id) {
+    return { error: 'Reported winner is not a valid entry for this match' };
+  }
+
+  const loserEntryId = reportedWinnerId === match.entry_a_id ? match.entry_b_id : match.entry_a_id;
+
+  // ── Resolve player IDs and current ratings ────────────────────────────────
+  const [{ data: entryA }, { data: entryB }] = await Promise.all([
+    admin.from('tournament_entries').select('player_id').eq('id', match.entry_a_id).single(),
+    admin.from('tournament_entries').select('player_id').eq('id', match.entry_b_id).single(),
+  ]);
+  if (!entryA || !entryB) return { error: 'Could not load entry player data' };
+
+  const [{ data: statsA }, { data: statsB }] = await Promise.all([
+    admin.from('global_stats').select('current_rating, peak_rating, singles_matches, doubles_matches, mixed_doubles_matches, singles_wins, doubles_wins, mixed_doubles_wins').eq('player_id', entryA.player_id).single(),
+    admin.from('global_stats').select('current_rating, peak_rating, singles_matches, doubles_matches, mixed_doubles_matches, singles_wins, doubles_wins, mixed_doubles_wins').eq('player_id', entryB.player_id).single(),
+  ]);
+
+  // ── Fetch play format ─────────────────────────────────────────────────────
+  const { data: category } = await admin
+    .from('tournament_categories')
+    .select('play_format, slug')
+    .eq('id', match.category_id)
+    .single();
+  const isDoubles = category?.play_format === 'doubles' || category?.play_format === 'mixed_doubles';
+  const playFormat = (category?.play_format ?? 'singles') as 'singles' | 'doubles' | 'mixed_doubles';
+
+  // ── Calculate ratings ─────────────────────────────────────────────────────
+  const aWins = reportedWinnerId === match.entry_a_id;
+  const totalScoreA = reportedSets.reduce((s, set) => s + set.score_a, 0);
+  const totalScoreB = reportedSets.reduce((s, set) => s + set.score_b, 0);
+  const ratingA = statsA?.current_rating ?? 3.5;
+  const ratingB = statsB?.current_rating ?? 3.5;
+
+  const resultA = calculateRatingChange({
+    playerRating: ratingA, opponentRating: ratingB,
+    playerScore: totalScoreA, opponentScore: totalScoreB,
+    isWin: aWins, playedAt: new Date(), isDoubles,
+  });
+  const resultB = calculateRatingChange({
+    playerRating: ratingB, opponentRating: ratingA,
+    playerScore: totalScoreB, opponentScore: totalScoreA,
+    isWin: !aWins, playedAt: new Date(), isDoubles,
+  });
+
+  // ── Complete the match ────────────────────────────────────────────────────
+  const { error: matchErr } = await admin.from('matches').update({
+    status: 'completed',
+    winner_entry_id: reportedWinnerId,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    sets: reportedSets as any,
+    completed_at: new Date().toISOString(),
+  }).eq('id', matchId);
+  if (matchErr) return { error: 'Failed to save approved result' };
+
+  // ── Update global_stats ───────────────────────────────────────────────────
+  const formatMatchKey = playFormat === 'singles' ? 'singles_matches'
+    : playFormat === 'doubles' ? 'doubles_matches' : 'mixed_doubles_matches';
+  const formatWinKey = playFormat === 'singles' ? 'singles_wins'
+    : playFormat === 'doubles' ? 'doubles_wins' : 'mixed_doubles_wins';
+
+  await Promise.all([
+    admin.from('global_stats').update({
+      current_rating: resultA.newRating,
+      peak_rating: Math.max(resultA.newRating, statsA?.peak_rating ?? resultA.newRating),
+      [formatMatchKey]: ((statsA?.[formatMatchKey] ?? 0) as number) + 1,
+      [formatWinKey]:   ((statsA?.[formatWinKey]   ?? 0) as number) + (aWins ? 1 : 0),
+      updated_at: new Date().toISOString(),
+    }).eq('player_id', entryA.player_id),
+    admin.from('global_stats').update({
+      current_rating: resultB.newRating,
+      peak_rating: Math.max(resultB.newRating, statsB?.peak_rating ?? resultB.newRating),
+      [formatMatchKey]: ((statsB?.[formatMatchKey] ?? 0) as number) + 1,
+      [formatWinKey]:   ((statsB?.[formatWinKey]   ?? 0) as number) + (!aWins ? 1 : 0),
+      updated_at: new Date().toISOString(),
+    }).eq('player_id', entryB.player_id),
+  ]);
+
+  // ── Fix rating fields in match_history ───────────────────────────────────
+  await Promise.all([
+    admin.from('match_history').update({ rating_after: resultA.newRating, rating_change: resultA.change })
+      .eq('match_id', matchId).eq('player_id', entryA.player_id),
+    admin.from('match_history').update({ rating_after: resultB.newRating, rating_change: resultB.change })
+      .eq('match_id', matchId).eq('player_id', entryB.player_id),
+  ]);
+
+  // ── Bracket advancement ───────────────────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await advanceMatch(admin, match as any, reportedWinnerId, loserEntryId);
+
+  revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring/${matchId}`);
+  revalidatePath(`/tournaments/${ctx.tournamentSlug}/categories/${category?.slug ?? match.category_id}`);
+  return { success: true, ratingChangeA: resultA.change, ratingChangeB: resultB.change };
+}

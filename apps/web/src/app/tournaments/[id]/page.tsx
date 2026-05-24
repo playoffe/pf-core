@@ -181,6 +181,12 @@ export default async function TournamentPage({ params }: Props) {
             <span>🎾</span> Scoring
           </Link>
           <Link
+            href={`/tournaments/${slug}/schedule`}
+            className="flex items-center gap-2 rounded-lg border border-surface-border px-4 py-2 text-sm text-slate-300 hover:bg-surface-card transition-colors"
+          >
+            <span>📅</span> Schedule
+          </Link>
+          <Link
             href={`/tournaments/${slug}/registrations`}
             className="relative flex items-center gap-2 rounded-lg border border-surface-border px-4 py-2 text-sm text-slate-300 hover:bg-surface-card transition-colors"
           >
@@ -197,6 +203,18 @@ export default async function TournamentPage({ params }: Props) {
             className="flex items-center gap-2 rounded-lg border border-surface-border px-4 py-2 text-sm text-slate-300 hover:bg-surface-card transition-colors"
           >
             <span>📺</span> Display screen
+          </Link>
+          <Link
+            href={`/tournaments/${slug}/display-control`}
+            className="flex items-center gap-2 rounded-lg border border-surface-border px-4 py-2 text-sm text-slate-300 hover:bg-surface-card transition-colors"
+          >
+            <span>🎛️</span> Display control
+          </Link>
+          <Link
+            href={`/tournaments/${slug}/analytics`}
+            className="flex items-center gap-2 rounded-lg border border-surface-border px-4 py-2 text-sm text-slate-300 hover:bg-surface-card transition-colors"
+          >
+            <span>📈</span> Analytics
           </Link>
           <Link
             href={`/events/${slug}`}

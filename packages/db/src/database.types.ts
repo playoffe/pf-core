@@ -471,6 +471,8 @@ export type Database = {
           id: string
           loser_slot: string | null
           loser_to_match_id: string | null
+          player_reported_sets: Json | null
+          player_reported_winner_id: string | null
           round: number
           round_name: string | null
           scheduled_time: string | null
@@ -495,6 +497,8 @@ export type Database = {
           id?: string
           loser_slot?: string | null
           loser_to_match_id?: string | null
+          player_reported_sets?: Json | null
+          player_reported_winner_id?: string | null
           round: number
           round_name?: string | null
           scheduled_time?: string | null
@@ -519,6 +523,8 @@ export type Database = {
           id?: string
           loser_slot?: string | null
           loser_to_match_id?: string | null
+          player_reported_sets?: Json | null
+          player_reported_winner_id?: string | null
           round?: number
           round_name?: string | null
           scheduled_time?: string | null
@@ -557,6 +563,13 @@ export type Database = {
             columns: ["loser_to_match_id"]
             isOneToOne: false
             referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matches_player_reported_winner_id_fkey"
+            columns: ["player_reported_winner_id"]
+            isOneToOne: false
+            referencedRelation: "tournament_entries"
             referencedColumns: ["id"]
           },
           {
@@ -802,6 +815,7 @@ export type Database = {
           category_id: string
           id: string
           partner_id: string | null
+          partner_invite_token: string
           player_id: string
           registered_at: string
           seed: number | null
@@ -812,6 +826,7 @@ export type Database = {
           category_id: string
           id?: string
           partner_id?: string | null
+          partner_invite_token?: string
           player_id: string
           registered_at?: string
           seed?: number | null
@@ -822,6 +837,7 @@ export type Database = {
           category_id?: string
           id?: string
           partner_id?: string | null
+          partner_invite_token?: string
           player_id?: string
           registered_at?: string
           seed?: number | null

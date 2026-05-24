@@ -8,6 +8,7 @@ export const metadata: Metadata = { title: 'Scoring' };
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ date?: string }>;
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -24,8 +25,9 @@ const STATUS_LABEL: Record<string, string> = {
   walkover: 'W/O',
 };
 
-export default async function ScoringHubPage({ params }: Props) {
+export default async function ScoringHubPage({ params, searchParams }: Props) {
   const { id: slug } = await params;
+  const { date: dateFilter } = await searchParams;
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -35,7 +37,7 @@ export default async function ScoringHubPage({ params }: Props) {
 
   const { data: t } = await admin
     .from('tournaments')
-    .select('id, name, club_id')
+    .select('id, name, club_id, start_date, end_date')
     .eq('slug', slug)
     .single();
   if (!t) notFound();
@@ -52,6 +54,7 @@ export default async function ScoringHubPage({ params }: Props) {
     .from('matches')
     .select(`
       id, round, round_name, group_name, status, court, scheduled_time, sets,
+      player_reported_winner_id, player_reported_sets,
       ea:tournament_entries!entry_a_id(id, seed, players!player_id(full_name)),
       eb:tournament_entries!entry_b_id(id, seed, players!player_id(full_name)),
       tc:tournament_categories!category_id(name)
@@ -72,6 +75,8 @@ export default async function ScoringHubPage({ params }: Props) {
     court: number | null;
     scheduled_time: string | null;
     sets: { set_number: number; score_a: number; score_b: number }[];
+    player_reported_winner_id: string | null;
+    player_reported_sets: unknown;
     ea: { id: string; seed: number | null; players: { full_name: string } | null } | null;
     eb: { id: string; seed: number | null; players: { full_name: string } | null } | null;
     tc: { name: string } | null;
@@ -79,11 +84,41 @@ export default async function ScoringHubPage({ params }: Props) {
 
   const rows = (matches ?? []) as unknown as MatchRow[];
 
-  const live = rows.filter((m) => m.status === 'in_progress');
-  const scheduled = rows.filter((m) => m.status === 'scheduled');
-  const done = rows.filter((m) => m.status === 'completed' || m.status === 'walkover');
+  // ── Multi-day grouping ────────────────────────────────────────────────────
 
-  function MatchRow({ match }: { match: MatchRow }) {
+  // Collect all unique dates that have matches with scheduled_time
+  const allDates = [...new Set(
+    rows
+      .filter((m) => m.scheduled_time)
+      .map((m) => m.scheduled_time!.slice(0, 10)),
+  )].sort();
+
+  const isMultiDay = allDates.length > 1;
+
+  // Active date filter (null = show all / single-day tournaments)
+  const activeDate = isMultiDay ? (dateFilter ?? allDates[0] ?? null) : null;
+
+  // Filter rows for the selected date
+  const filteredRows = activeDate
+    ? rows.filter((m) => {
+        if (!m.scheduled_time) return m.status === 'in_progress'; // always show live
+        return m.scheduled_time.slice(0, 10) === activeDate;
+      })
+    : rows;
+
+  const live = filteredRows.filter((m) => m.status === 'in_progress');
+  const scheduled = filteredRows.filter((m) => m.status === 'scheduled');
+  const done = filteredRows.filter((m) => m.status === 'completed' || m.status === 'walkover');
+
+  // Player-reported matches pending review
+  const pendingReport = rows.filter(
+    (m) =>
+      m.player_reported_winner_id &&
+      m.status !== 'completed' &&
+      m.status !== 'walkover',
+  );
+
+  function MatchCard({ match }: { match: MatchRow }) {
     const aName = match.ea?.players?.full_name ?? 'TBD';
     const bName = match.eb?.players?.full_name ?? 'TBD';
     const sets = match.sets as { score_a: number; score_b: number }[] ?? [];
@@ -91,19 +126,35 @@ export default async function ScoringHubPage({ params }: Props) {
       ? sets.map((s) => `${s.score_a}-${s.score_b}`).join(', ')
       : null;
 
+    const hasPlayerReport = !!match.player_reported_winner_id &&
+      match.status !== 'completed' &&
+      match.status !== 'walkover';
+
     return (
       <Link
         href={`/tournaments/${slug}/scoring/${match.id}`}
-        className="flex items-center gap-4 rounded-xl bg-surface-card px-5 py-3.5 ring-1 ring-surface-border hover:ring-brand-500/40 transition-all"
+        className={`flex items-center gap-4 rounded-xl px-5 py-3.5 ring-1 transition-all hover:ring-brand-500/40 ${
+          hasPlayerReport
+            ? 'bg-amber-950/30 ring-amber-700/50'
+            : 'bg-surface-card ring-surface-border'
+        }`}
       >
-        <div className="w-14 shrink-0 text-center">
+        <div className="w-16 shrink-0 text-center space-y-0.5">
+          {match.scheduled_time && (
+            <p className="text-xs font-mono text-slate-400">
+              {new Date(match.scheduled_time).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </p>
+          )}
           {match.court ? (
-            <span className="rounded bg-surface px-2 py-0.5 text-xs font-mono text-slate-400">
+            <span className="rounded bg-surface px-2 py-0.5 text-xs font-mono text-slate-500">
               Ct {match.court}
             </span>
-          ) : (
+          ) : !match.scheduled_time ? (
             <span className="text-xs text-slate-700">—</span>
-          )}
+          ) : null}
         </div>
 
         <div className="flex-1 min-w-0">
@@ -112,10 +163,17 @@ export default async function ScoringHubPage({ params }: Props) {
             <span className="mx-2 text-slate-600">vs</span>
             {bName}
           </p>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {match.tc?.name ?? ''}{match.round_name ? ` · ${match.round_name}` : ''}
-            {match.group_name ? ` · ${match.group_name}` : ''}
-          </p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <p className="text-xs text-slate-500">
+              {match.tc?.name ?? ''}{match.round_name ? ` · ${match.round_name}` : ''}
+              {match.group_name ? ` · ${match.group_name}` : ''}
+            </p>
+            {hasPlayerReport && (
+              <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400">
+                Score reported
+              </span>
+            )}
+          </div>
         </div>
 
         {scoreStr && (
@@ -131,6 +189,14 @@ export default async function ScoringHubPage({ params }: Props) {
     );
   }
 
+  function formatDate(d: string) {
+    return new Date(d + 'T00:00:00').toLocaleDateString('en-AU', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  }
+
   return (
     <div className="min-h-screen bg-surface">
       <AppNav />
@@ -144,7 +210,44 @@ export default async function ScoringHubPage({ params }: Props) {
           <span className="text-slate-400">Scoring</span>
         </nav>
 
-        <h1 className="mb-8 text-2xl font-bold text-white">Match scoring</h1>
+        <div className="mb-8 flex items-center justify-between flex-wrap gap-3">
+          <h1 className="text-2xl font-bold text-white">Match scoring</h1>
+          {pendingReport.length > 0 && (
+            <span className="flex items-center gap-1.5 rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+              {pendingReport.length} player report{pendingReport.length !== 1 ? 's' : ''} pending
+            </span>
+          )}
+        </div>
+
+        {/* Multi-day date picker */}
+        {isMultiDay && (
+          <div className="mb-6 flex flex-wrap gap-2">
+            {allDates.map((d) => (
+              <Link
+                key={d}
+                href={`/tournaments/${slug}/scoring?date=${d}`}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                  activeDate === d
+                    ? 'bg-brand-600 text-white'
+                    : 'border border-surface-border text-slate-400 hover:border-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {formatDate(d)}
+              </Link>
+            ))}
+            <Link
+              href={`/tournaments/${slug}/scoring`}
+              className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                !dateFilter
+                  ? 'bg-brand-600 text-white'
+                  : 'border border-surface-border text-slate-400 hover:border-slate-500 hover:text-slate-300'
+              }`}
+            >
+              All days
+            </Link>
+          </div>
+        )}
 
         {live.length > 0 && (
           <section className="mb-8">
@@ -152,7 +255,7 @@ export default async function ScoringHubPage({ params }: Props) {
               Live now — {live.length} match{live.length !== 1 ? 'es' : ''}
             </h2>
             <div className="space-y-2">
-              {live.map((m) => <MatchRow key={m.id} match={m} />)}
+              {live.map((m) => <MatchCard key={m.id} match={m} />)}
             </div>
           </section>
         )}
@@ -163,7 +266,7 @@ export default async function ScoringHubPage({ params }: Props) {
               Upcoming — {scheduled.length}
             </h2>
             <div className="space-y-2">
-              {scheduled.map((m) => <MatchRow key={m.id} match={m} />)}
+              {scheduled.map((m) => <MatchCard key={m.id} match={m} />)}
             </div>
           </section>
         )}
@@ -174,17 +277,21 @@ export default async function ScoringHubPage({ params }: Props) {
               Completed — {done.length}
             </h2>
             <div className="space-y-2">
-              {done.map((m) => <MatchRow key={m.id} match={m} />)}
+              {done.map((m) => <MatchCard key={m.id} match={m} />)}
             </div>
           </section>
         )}
 
-        {rows.length === 0 && (
+        {filteredRows.length === 0 && (
           <div className="rounded-xl bg-surface-card p-10 text-center ring-1 ring-surface-border">
             <p className="text-2xl mb-2">🎾</p>
-            <p className="text-sm font-medium text-white mb-1">No matches yet</p>
+            <p className="text-sm font-medium text-white mb-1">
+              {activeDate ? `No matches on ${formatDate(activeDate)}` : 'No matches yet'}
+            </p>
             <p className="text-xs text-slate-500">
-              Generate a draw for at least one category to start scoring.
+              {activeDate
+                ? 'Select a different day or generate a draw for a category.'
+                : 'Generate a draw for at least one category to start scoring.'}
             </p>
           </div>
         )}

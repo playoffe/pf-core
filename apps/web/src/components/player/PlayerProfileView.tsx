@@ -52,12 +52,20 @@ export function PlayerProfileView({ player, matchHistory, isOwnProfile }: Props)
               </div>
 
               {isOwnProfile && (
-                <Link
-                  href="/dashboard"
-                  className="mb-1 rounded-lg border border-surface-border px-4 py-2 text-xs font-semibold text-slate-400 hover:bg-surface hover:text-white transition-colors"
-                >
-                  ← Dashboard
-                </Link>
+                <div className="mb-1 flex items-center gap-2">
+                  <Link
+                    href="/settings/profile"
+                    className="rounded-lg bg-brand-600/20 border border-brand-600/40 px-3 py-1.5 text-xs font-semibold text-brand-300 hover:bg-brand-600/30 transition-colors"
+                  >
+                    Edit profile
+                  </Link>
+                  <Link
+                    href="/dashboard"
+                    className="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-slate-400 hover:bg-surface hover:text-white transition-colors"
+                  >
+                    ← Dashboard
+                  </Link>
+                </div>
               )}
             </div>
 
@@ -68,11 +76,18 @@ export function PlayerProfileView({ player, matchHistory, isOwnProfile }: Props)
               {profile?.headline && (
                 <p className="mt-1 text-sm text-slate-400">{profile.headline}</p>
               )}
-              {player.location && (
-                <p className="mt-1 flex items-center gap-1 text-xs text-slate-600">
-                  <span>📍</span> {player.location}
-                </p>
-              )}
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                {player.location && (
+                  <p className="flex items-center gap-1 text-xs text-slate-600">
+                    <span>📍</span> {player.location}
+                  </p>
+                )}
+                {profile?.playing_since && (
+                  <p className="flex items-center gap-1 text-xs text-slate-600">
+                    <span>🏓</span> Playing since {profile.playing_since}
+                  </p>
+                )}
+              </div>
             </div>
 
             {profile?.bio && (
@@ -83,8 +98,8 @@ export function PlayerProfileView({ player, matchHistory, isOwnProfile }: Props)
             {stats && (
               <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <StatCard label="Rating" value={stats.current_rating.toFixed(2)} highlight />
+                <StatCard label="Peak" value={stats.peak_rating.toFixed(2)} />
                 <StatCard label="Matches" value={stats.total_matches.toString()} />
-                <StatCard label="Wins" value={stats.wins.toString()} />
                 <StatCard
                   label="Win rate"
                   value={`${(stats.win_rate * 100).toFixed(0)}%`}

@@ -315,13 +315,257 @@ export async function bulkApproveEntriesAction(categoryId: string) {
   return { success: true, approved: toApprove.length, waitlisted: toWaitlist.length };
 }
 
-// ── Player: get my registrations ──────────────────────────────────────────────
+// ── Doubles: register with partner ────────────────────────────────────────────
+
+export async function registerDoublesAction(categoryId: string, partnerUsername: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'You must be logged in to register.' };
+
+  const admin = createAdminClient();
+
+  // Load category + tournament
+  const { data: cat } = await admin
+    .from('tournament_categories')
+    .select('id, tournament_id, status, max_entries, play_format, name, tournaments(id, slug, status, registration_deadline, auto_approve_entries, name)')
+    .eq('id', categoryId)
+    .single();
+
+  if (!cat) return { error: 'Category not found.' };
+
+  const tournament = cat.tournaments as {
+    id: string; slug: string; status: string;
+    registration_deadline: string | null; auto_approve_entries: boolean; name: string;
+  } | null;
+
+  if (!tournament) return { error: 'Tournament not found.' };
+  if (tournament.status !== 'registration_open') return { error: 'Tournament is not accepting registrations.' };
+  if (cat.status !== 'registration') return { error: 'This category is not open for registration.' };
+  if (tournament.registration_deadline && new Date() > new Date(tournament.registration_deadline)) {
+    return { error: 'Registration deadline has passed.' };
+  }
+  if (!['doubles', 'mixed_doubles'].includes(cat.play_format)) {
+    return { error: 'This action is only for doubles and mixed doubles.' };
+  }
+
+  // Find partner by username
+  const { data: partner } = await admin
+    .from('players')
+    .select('id, full_name')
+    .eq('username', partnerUsername.toLowerCase().replace(/^@/, ''))
+    .maybeSingle();
+
+  if (!partner) return { error: `Player "@${partnerUsername}" not found.` };
+  if (partner.id === user.id) return { error: "You can't partner with yourself." };
+
+  // Duplicate checks
+  const { data: myExisting } = await admin
+    .from('tournament_entries')
+    .select('id, status')
+    .eq('category_id', categoryId)
+    .eq('player_id', user.id)
+    .not('status', 'eq', 'withdrawn')
+    .maybeSingle();
+
+  if (myExisting) {
+    const label = myExisting.status === 'provisional' ? 'already have a pending invite' : 'already registered';
+    return { error: `You are ${label} in this category.` };
+  }
+
+  const { data: partnerExisting } = await admin
+    .from('tournament_entries')
+    .select('id, status')
+    .eq('category_id', categoryId)
+    .eq('player_id', partner.id)
+    .not('status', 'eq', 'withdrawn')
+    .maybeSingle();
+
+  if (partnerExisting) return { error: `${partner.full_name} is already registered in this category.` };
+
+  // Check if partner is already someone else's partner in a provisional entry
+  const { data: partnerInvited } = await admin
+    .from('tournament_entries')
+    .select('id')
+    .eq('category_id', categoryId)
+    .eq('partner_id', partner.id)
+    .eq('status', 'provisional')
+    .maybeSingle();
+
+  if (partnerInvited) return { error: `${partner.full_name} has already been invited by another player.` };
+
+  // Capacity check (count active + pending — not provisional, those haven't confirmed yet)
+  const { count: activeCount } = await admin
+    .from('tournament_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('category_id', categoryId)
+    .in('status', ['active', 'pending', 'waitlisted']);
+
+  const isFull = cat.max_entries !== null && (activeCount ?? 0) >= cat.max_entries;
+
+  // Create provisional entry — partner must confirm before it becomes active/pending
+  const { error: insertErr } = await admin
+    .from('tournament_entries')
+    .insert({
+      tournament_id: tournament.id,
+      category_id: categoryId,
+      player_id: user.id,
+      partner_id: partner.id,
+      status: 'provisional',
+    });
+
+  if (insertErr) return { error: 'Failed to send invite. Please try again.' };
+
+  // If category is full, note it — partner will be put on waitlist on confirm
+  revalidatePath(`/events/${tournament.slug}`);
+  revalidatePath('/dashboard');
+  return { success: true, partnerName: partner.full_name, willBeWaitlisted: isFull };
+}
+
+// ── Doubles: partner confirm / decline ────────────────────────────────────────
+
+export async function confirmPartnerInviteAction(entryId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'You must be logged in.' };
+
+  const admin = createAdminClient();
+
+  const { data: entry } = await admin
+    .from('tournament_entries')
+    .select('id, player_id, partner_id, category_id, tournament_id, status, tournaments!tournament_id(slug)')
+    .eq('id', entryId)
+    .single();
+
+  if (!entry) return { error: 'Invite not found.' };
+  if (entry.partner_id !== user.id) return { error: 'This invite is not for you.' };
+  if (entry.status !== 'provisional') return { error: 'Invite is no longer pending.' };
+
+  const tSlug = (entry.tournaments as { slug: string } | null)?.slug ?? entry.tournament_id;
+
+  // Check capacity
+  const { data: cat } = await admin
+    .from('tournament_categories')
+    .select('max_entries, tournaments(auto_approve_entries)')
+    .eq('id', entry.category_id)
+    .single();
+
+  const { count: activeCount } = await admin
+    .from('tournament_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('category_id', entry.category_id)
+    .in('status', ['active', 'pending']);
+
+  const isFull = cat?.max_entries != null && (activeCount ?? 0) >= cat.max_entries;
+  const autoApprove = (cat?.tournaments as { auto_approve_entries: boolean } | null)?.auto_approve_entries ?? false;
+
+  let newStatus: 'active' | 'pending' | 'waitlisted';
+  if (isFull) newStatus = 'waitlisted';
+  else if (autoApprove) newStatus = 'active';
+  else newStatus = 'pending';
+
+  await admin
+    .from('tournament_entries')
+    .update({ status: newStatus })
+    .eq('id', entryId);
+
+  revalidatePath(`/events/${tSlug}`);
+  revalidatePath('/dashboard');
+  return { success: true, status: newStatus };
+}
+
+export async function declinePartnerInviteAction(entryId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'You must be logged in.' };
+
+  const admin = createAdminClient();
+
+  const { data: entry } = await admin
+    .from('tournament_entries')
+    .select('id, partner_id, status, tournament_id, tournaments!tournament_id(slug)')
+    .eq('id', entryId)
+    .single();
+
+  if (!entry) return { error: 'Invite not found.' };
+  if (entry.partner_id !== user.id) return { error: 'This invite is not for you.' };
+  if (entry.status !== 'provisional') return { error: 'Invite is no longer pending.' };
+
+  const tSlug = (entry.tournaments as { slug: string } | null)?.slug ?? entry.tournament_id;
+
+  await admin.from('tournament_entries').update({ status: 'withdrawn' }).eq('id', entryId);
+
+  revalidatePath(`/events/${tSlug}`);
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
+// ── Manager: remove entry (any non-withdrawn status) ──────────────────────────
+
+export async function removeEntryAction(entryId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated.' };
+
+  const entry = await assertManagerForEntry(entryId, user.id);
+  if (!entry) return { error: 'Permission denied.' };
+  if (entry.status === 'withdrawn') return { error: 'Already withdrawn.' };
+
+  const admin = createAdminClient();
+  const wasActive = entry.status === 'active';
+
+  await admin.from('tournament_entries').update({ status: 'withdrawn' }).eq('id', entryId);
+
+  if (wasActive) await promoteWaitlisted(entry.category_id);
+
+  revalidatePath(`/tournaments/${entry.tournamentSlug}/registrations`);
+  revalidatePath(`/tournaments/${entry.tournamentSlug}`);
+  return { success: true };
+}
+
+// ── Manager: set seed ─────────────────────────────────────────────────────────
+
+export async function updateEntrySeedAction(entryId: string, seed: number | null) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated.' };
+
+  const entry = await assertManagerForEntry(entryId, user.id);
+  if (!entry) return { error: 'Permission denied.' };
+
+  const admin = createAdminClient();
+  await admin.from('tournament_entries').update({ seed }).eq('id', entryId);
+
+  revalidatePath(`/tournaments/${entry.tournamentSlug}/registrations`);
+  return { success: true };
+}
+
+// ── Player: get my registrations + pending partner invites ────────────────────
 
 export async function getMyEntries() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from('tournament_entries')
+    .select(`
+      id, status, registered_at, partner_id,
+      tournament_categories!category_id(id, name, play_format, draw_format),
+      tournaments!tournament_id(id, name, start_date, status),
+      partner:players!partner_id(full_name, username)
+    `)
+    .eq('player_id', user.id)
+    .not('status', 'eq', 'withdrawn')
+    .order('registered_at', { ascending: false });
+
+  return data ?? [];
+}
+
+/** Invites where the current user is the partner (needs to confirm/decline). */
+export async function getMyPartnerInvites() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
   const admin = createAdminClient();
@@ -329,11 +573,12 @@ export async function getMyEntries() {
     .from('tournament_entries')
     .select(`
       id, status, registered_at,
-      tournament_categories!category_id(id, name, play_format, draw_format),
-      tournaments!tournament_id(id, name, start_date, status)
+      tournament_categories!category_id(id, name, play_format),
+      tournaments!tournament_id(id, name, slug, start_date),
+      initiator:players!player_id(full_name, username)
     `)
-    .eq('player_id', user.id)
-    .not('status', 'eq', 'withdrawn')
+    .eq('partner_id', user.id)
+    .eq('status', 'provisional')
     .order('registered_at', { ascending: false });
 
   return data ?? [];

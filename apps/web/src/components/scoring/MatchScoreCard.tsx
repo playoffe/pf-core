@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { startMatchAction, submitResultAction, walkoverAction, overrideMatchResultAction } from '@/lib/actions/scoring';
+import { startMatchAction, submitResultAction, walkoverAction, overrideMatchResultAction, approvePlayerReportAction } from '@/lib/actions/scoring';
 import { useRealtimeMatch } from '@/hooks/useRealtimeMatch';
 
 interface SetScore {
@@ -30,6 +30,9 @@ interface Props {
   winnerEntryId: string | null;
   entryA: EntryInfo | null;
   entryB: EntryInfo | null;
+  // Player self-report (optional)
+  playerReportedWinnerId?: string | null;
+  playerReportedSets?: SetScore[] | null;
 }
 
 function determineSetsWinner(sets: SetScore[]): { aWins: number; bWins: number } {
@@ -52,6 +55,8 @@ export function MatchScoreCard({
   winnerEntryId: initialWinner,
   entryA,
   entryB,
+  playerReportedWinnerId,
+  playerReportedSets,
 }: Props) {
   const router = useRouter();
   const [status, setStatus] = useState(initialStatus);
@@ -76,6 +81,10 @@ export function MatchScoreCard({
   const [overrideWinner, setOverrideWinner] = useState<string | null>(initialWinner);
   const [overriding, setOverriding] = useState(false);
   const [overrideError, setOverrideError] = useState<string | null>(null);
+
+  // Approve player report state
+  const [approvingReport, setApprovingReport] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
 
   // Realtime — react to another device completing this match
   const handleExternalComplete = useCallback((winnerId: string | null) => {
@@ -168,6 +177,26 @@ export function MatchScoreCard({
     setLoading(false);
   }
 
+  async function handleApproveReport() {
+    setApprovingReport(true);
+    setApproveError(null);
+    const result = await approvePlayerReportAction(matchId);
+    if (result.error) {
+      setApproveError(result.error);
+    } else {
+      setStatus('completed');
+      setWinnerEntryId(playerReportedWinnerId ?? null);
+      if (playerReportedSets) setSets(playerReportedSets);
+      const ratingA = typeof result.ratingChangeA === 'number' ? result.ratingChangeA : 0;
+      const ratingB = typeof result.ratingChangeB === 'number' ? result.ratingChangeB : 0;
+      setSuccessMsg(
+        `Report approved! Rating: ${entryA?.player_name} ${ratingA >= 0 ? '+' : ''}${ratingA.toFixed(2)}, ${entryB?.player_name} ${ratingB >= 0 ? '+' : ''}${ratingB.toFixed(2)}`,
+      );
+      router.refresh();
+    }
+    setApprovingReport(false);
+  }
+
   function updateOverrideSet(index: number, field: 'score_a' | 'score_b', value: number) {
     setOverrideSets((prev) =>
       prev.map((s, i) => (i === index ? { ...s, [field]: Math.max(0, value) } : s)),
@@ -214,6 +243,59 @@ export function MatchScoreCard({
 
   return (
     <div className="space-y-5">
+      {/* Player self-report banner */}
+      {playerReportedWinnerId && !isCompleted && (
+        <div className="rounded-xl border border-amber-700/40 bg-amber-950/20 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-400">
+              Player-reported score
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm text-slate-300">
+              Winner reported:{' '}
+              <span className="font-bold text-white">
+                {playerReportedWinnerId === entryA?.id
+                  ? entryA?.player_name
+                  : playerReportedWinnerId === entryB?.id
+                  ? entryB?.player_name
+                  : 'Unknown'}
+              </span>
+            </p>
+            {playerReportedSets && playerReportedSets.length > 0 && (
+              <p className="text-xs text-slate-500">
+                Scores:{' '}
+                {playerReportedSets.map((s, i) => (
+                  <span key={i} className="font-mono mr-2">
+                    {s.score_a}–{s.score_b}
+                  </span>
+                ))}
+              </p>
+            )}
+          </div>
+
+          {approveError && (
+            <p className="rounded-lg border border-red-800 bg-red-950 px-3 py-1.5 text-xs text-red-400">
+              {approveError}
+            </p>
+          )}
+
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              onClick={handleApproveReport}
+              disabled={approvingReport}
+              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
+            >
+              {approvingReport ? 'Approving…' : '✓ Approve & submit'}
+            </button>
+            <p className="text-xs text-slate-500">
+              or enter the official score manually below
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Live connection indicator */}
       {!isCompleted && liveStatus !== 'live' && liveStatus !== 'connecting' && (
         <div className="flex items-center gap-2 rounded-lg border border-yellow-800/50 bg-yellow-950/30 px-3 py-2 text-xs text-yellow-400">
