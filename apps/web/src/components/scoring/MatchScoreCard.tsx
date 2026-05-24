@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { startMatchAction, submitResultAction, walkoverAction } from '@/lib/actions/scoring';
+import { startMatchAction, submitResultAction, walkoverAction, overrideMatchResultAction } from '@/lib/actions/scoring';
 import { useRealtimeMatch } from '@/hooks/useRealtimeMatch';
 
 interface SetScore {
@@ -67,6 +67,15 @@ export function MatchScoreCard({
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [externallyUpdated, setExternallyUpdated] = useState(false);
+
+  // Override state — used when organiser corrects a completed result
+  const [showOverride, setShowOverride] = useState(false);
+  const [overrideSets, setOverrideSets] = useState<SetScore[]>(
+    initialSets.length > 0 ? initialSets : [{ set_number: 1, score_a: 0, score_b: 0 }],
+  );
+  const [overrideWinner, setOverrideWinner] = useState<string | null>(initialWinner);
+  const [overriding, setOverriding] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
 
   // Realtime — react to another device completing this match
   const handleExternalComplete = useCallback((winnerId: string | null) => {
@@ -159,6 +168,27 @@ export function MatchScoreCard({
     setLoading(false);
   }
 
+  function updateOverrideSet(index: number, field: 'score_a' | 'score_b', value: number) {
+    setOverrideSets((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, [field]: Math.max(0, value) } : s)),
+    );
+    setOverrideWinner(null);
+  }
+
+  async function handleOverride() {
+    if (!overrideWinner) { setOverrideError('Select the correct winner'); return; }
+    setOverriding(true);
+    setOverrideError(null);
+    const result = await overrideMatchResultAction(matchId, overrideWinner, overrideSets);
+    if (result.error) {
+      setOverrideError(result.error);
+    } else {
+      setShowOverride(false);
+      router.refresh();
+    }
+    setOverriding(false);
+  }
+
   // ── Player header ──────────────────────────────────────────────────────────
   function PlayerHeader({ entry, isWinner }: { entry: EntryInfo | null; isWinner: boolean }) {
     if (!entry) return <div className="flex-1 text-slate-600 italic text-sm">TBD</div>;
@@ -212,12 +242,113 @@ export function MatchScoreCard({
           <span className="text-sm font-medium text-accent-400">Match in progress · Court {court}</span>
         </div>
       )}
-      {isCompleted && (
-        <div className="rounded-lg bg-surface-card px-4 py-2 ring-1 ring-surface-border text-center">
-          <span className="text-sm text-slate-400">
-            {status === 'walkover' ? 'Walkover' : 'Match completed'} ·{' '}
-            {winnerEntryId === entryA?.id ? entryA?.player_name : entryB?.player_name} wins
-          </span>
+      {isCompleted && !externallyUpdated && (
+        <div className="space-y-2">
+          <div className="rounded-lg bg-surface-card px-4 py-2 ring-1 ring-surface-border flex items-center justify-between gap-3">
+            <span className="text-sm text-slate-400">
+              {status === 'walkover' ? 'Walkover' : 'Match completed'} ·{' '}
+              {winnerEntryId === entryA?.id ? entryA?.player_name : entryB?.player_name} wins
+            </span>
+            <button
+              onClick={() => {
+                setShowOverride((v) => !v);
+                setOverrideError(null);
+              }}
+              className="shrink-0 text-xs text-slate-500 hover:text-amber-400 transition-colors"
+            >
+              {showOverride ? 'Cancel override' : 'Override result'}
+            </button>
+          </div>
+
+          {/* ── Override panel ───────────────────────────────────────────── */}
+          {showOverride && (
+            <div className="rounded-xl border border-amber-700/40 bg-amber-950/20 p-5 space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-400 mb-0.5">
+                  Override result
+                </p>
+                <p className="text-xs text-slate-500">
+                  Corrects the winner, recalculates ratings, and re-advances the bracket.
+                  Blocked if any downstream match has already been played.
+                </p>
+              </div>
+
+              {/* Override score entry */}
+              <div className="rounded-lg bg-surface-card ring-1 ring-surface-border overflow-hidden">
+                <div className="border-b border-surface-border px-4 py-2">
+                  <p className="text-xs font-medium text-slate-400">Corrected scores</p>
+                </div>
+                <div className="divide-y divide-surface-border">
+                  <div className="grid grid-cols-[3rem_1fr_2rem_1fr] items-center gap-3 px-4 py-2">
+                    <span className="text-xs text-slate-600">Set</span>
+                    <span className="text-xs text-slate-500 text-center">{entryA?.player_name ?? 'A'}</span>
+                    <span />
+                    <span className="text-xs text-slate-500 text-center">{entryB?.player_name ?? 'B'}</span>
+                  </div>
+                  {overrideSets.map((set, i) => (
+                    <div key={i} className="grid grid-cols-[3rem_1fr_2rem_1fr] items-center gap-3 px-4 py-3">
+                      <span className="text-xs font-bold text-slate-500">{set.set_number}</span>
+                      <input
+                        type="number" min={0} max={99} value={set.score_a}
+                        onChange={(e) => updateOverrideSet(i, 'score_a', parseInt(e.target.value) || 0)}
+                        className="block w-full rounded border border-slate-600 bg-surface px-2 py-1.5 text-center text-base font-bold text-white outline-none focus:border-amber-500"
+                      />
+                      <span className="text-center text-slate-600 font-bold">–</span>
+                      <input
+                        type="number" min={0} max={99} value={set.score_b}
+                        onChange={(e) => updateOverrideSet(i, 'score_b', parseInt(e.target.value) || 0)}
+                        className="block w-full rounded border border-slate-600 bg-surface px-2 py-1.5 text-center text-base font-bold text-white outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  ))}
+                  <div className="flex gap-3 border-t border-surface-border px-4 py-2">
+                    <button onClick={() => setOverrideSets((p) => [...p, { set_number: p.length + 1, score_a: 0, score_b: 0 }])} className="text-xs text-slate-400 hover:text-amber-400 transition-colors">+ Add set</button>
+                    {overrideSets.length > 1 && (
+                      <button onClick={() => setOverrideSets((p) => p.slice(0, -1))} className="text-xs text-slate-400 hover:text-red-400 transition-colors">Remove last</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Correct winner selector */}
+              <div>
+                <p className="mb-2 text-xs font-medium text-slate-400">Correct winner</p>
+                <div className="flex gap-3">
+                  {[entryA, entryB].map((entry) => {
+                    if (!entry) return null;
+                    const isSelected = overrideWinner === entry.id;
+                    return (
+                      <button
+                        key={entry.id}
+                        onClick={() => setOverrideWinner(entry.id)}
+                        className={`flex-1 rounded-lg py-2 text-sm font-semibold transition-colors ${
+                          isSelected
+                            ? 'bg-amber-600 text-white ring-2 ring-amber-500'
+                            : 'bg-surface text-slate-400 hover:text-white ring-1 ring-surface-border'
+                        }`}
+                      >
+                        {entry.player_name}{isSelected ? ' ✓' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {overrideError && (
+                <p className="rounded-lg border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-400">
+                  {overrideError}
+                </p>
+              )}
+
+              <button
+                onClick={handleOverride}
+                disabled={overriding || !overrideWinner}
+                className="w-full rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
+              >
+                {overriding ? 'Applying override…' : 'Confirm override'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

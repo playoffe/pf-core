@@ -13,11 +13,14 @@ interface SetScore {
 type MatchRow = {
   id: string;
   category_id: string;
+  tournament_id: string | null;
   round: number;
   bracket_position: number | null;
   bracket_type: string | null;
   entry_a_id: string | null;
   entry_b_id: string | null;
+  winner_entry_id: string | null;
+  status: string;
   winner_to_match_id: string | null;
   loser_to_match_id: string | null;
   winner_slot: string | null;
@@ -62,7 +65,7 @@ async function assertMatchManager(matchId: string, userId: string) {
   const admin = createAdminClient();
   const { data: match } = await admin
     .from('matches')
-    .select('id, category_id, tournament_id, round, bracket_position, bracket_type, status, entry_a_id, entry_b_id, winner_entry_id, sets, winner_to_match_id, loser_to_match_id, winner_slot, loser_slot')
+    .select('id, category_id, tournament_id, round, bracket_position, bracket_type, status, entry_a_id, entry_b_id, winner_entry_id, sets, scheduled_time, winner_to_match_id, loser_to_match_id, winner_slot, loser_slot')
     .eq('id', matchId)
     .single();
   if (!match) return null;
@@ -280,5 +283,202 @@ export async function walkoverAction(matchId: string, winnerEntryId: string) {
     .maybeSingle();
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring/${matchId}`);
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/categories/${catSlugRow2?.slug ?? match.category_id}`);
+  return { success: true };
+}
+
+// ── Override / correct a completed match result ───────────────────────────────
+// Organiser override: undo old bracket advancement + rating changes, then apply
+// the corrected result.  Blocked if any downstream match has already started.
+export async function overrideMatchResultAction(
+  matchId: string,
+  newWinnerEntryId: string,
+  newSets: SetScore[],
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const ctx = await assertMatchManager(matchId, user.id);
+  if (!ctx) return { error: 'Permission denied' };
+
+  const { match, clubId } = ctx;
+
+  if (match.status !== 'completed' && match.status !== 'walkover') {
+    return { error: 'Can only override completed or walkover matches' };
+  }
+  if (!match.entry_a_id || !match.entry_b_id) {
+    return { error: 'Match has missing entries — cannot override' };
+  }
+  if (newWinnerEntryId !== match.entry_a_id && newWinnerEntryId !== match.entry_b_id) {
+    return { error: 'Winner must be one of the two entries' };
+  }
+
+  const admin = createAdminClient();
+
+  // ── Guard: downstream matches must not have started ───────────────────────
+  async function guardNextMatch(nextId: string | null): Promise<string | null> {
+    if (!nextId) return null;
+    const { data: nm } = await admin.from('matches').select('status').eq('id', nextId).single();
+    if (nm && nm.status !== 'scheduled' && nm.status !== 'walkover') {
+      return 'Cannot override — a subsequent match has already been played. Contact the tournament director to manually correct the bracket.';
+    }
+    return null;
+  }
+
+  const err1 = await guardNextMatch(match.winner_to_match_id);
+  if (err1) return { error: err1 };
+  const err2 = await guardNextMatch(match.loser_to_match_id);
+  if (err2) return { error: err2 };
+
+  // SE positional check (no explicit link)
+  if (!match.winner_to_match_id && match.bracket_position !== null) {
+    const nextPos = Math.floor(match.bracket_position / 2);
+    const { data: seNext } = await admin
+      .from('matches')
+      .select('status')
+      .eq('category_id', match.category_id)
+      .eq('round', match.round + 1)
+      .eq('bracket_position', nextPos)
+      .maybeSingle();
+    if (seNext && seNext.status !== 'scheduled') {
+      return { error: 'Cannot override — the next match has already been played.' };
+    }
+  }
+
+  // ── Resolve player IDs ────────────────────────────────────────────────────
+  const [{ data: entryA }, { data: entryB }] = await Promise.all([
+    admin.from('tournament_entries').select('player_id').eq('id', match.entry_a_id).single(),
+    admin.from('tournament_entries').select('player_id').eq('id', match.entry_b_id).single(),
+  ]);
+  if (!entryA || !entryB) return { error: 'Could not load entry player data' };
+
+  // ── Load old match_history (for rating_before baseline) ──────────────────
+  type MH = { rating_before: number; result: string } | null;
+  const [mhARes, mhBRes] = await Promise.all([
+    admin.from('match_history').select('rating_before, result')
+      .eq('match_id', matchId).eq('player_id', entryA.player_id).maybeSingle(),
+    admin.from('match_history').select('rating_before, result')
+      .eq('match_id', matchId).eq('player_id', entryB.player_id).maybeSingle(),
+  ]);
+  const mhA = mhARes.data as MH;
+  const mhB = mhBRes.data as MH;
+
+  // ── Load current global stats ─────────────────────────────────────────────
+  const { data: category } = await admin
+    .from('tournament_categories').select('play_format, slug').eq('id', match.category_id).single();
+  const playFormat = (category?.play_format ?? 'singles') as 'singles' | 'doubles' | 'mixed_doubles';
+  const isDoubles = playFormat === 'doubles' || playFormat === 'mixed_doubles';
+  const fmtMatch = playFormat === 'singles' ? 'singles_matches' : playFormat === 'doubles' ? 'doubles_matches' : 'mixed_doubles_matches';
+  const fmtWin   = playFormat === 'singles' ? 'singles_wins'   : playFormat === 'doubles' ? 'doubles_wins'   : 'mixed_doubles_wins';
+
+  const statsCols = 'current_rating, peak_rating, total_matches, wins, losses, singles_matches, doubles_matches, mixed_doubles_matches, singles_wins, doubles_wins, mixed_doubles_wins';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [{ data: statsA }, { data: statsB }]: [{ data: any }, { data: any }] = await Promise.all([
+    admin.from('global_stats').select(statsCols).eq('player_id', entryA.player_id).single(),
+    admin.from('global_stats').select(statsCols).eq('player_id', entryB.player_id).single(),
+  ]);
+
+  // ── Undo bracket advancement (null out old winner/loser slots) ────────────
+  if (match.winner_to_match_id && match.winner_slot) {
+    const slot = match.winner_slot === 'a' ? 'entry_a_id' : 'entry_b_id';
+    await admin.from('matches').update({ [slot]: null }).eq('id', match.winner_to_match_id);
+  } else if (match.bracket_position !== null) {
+    const nextPos = Math.floor(match.bracket_position / 2);
+    const slot    = match.bracket_position % 2 === 0 ? 'entry_a_id' : 'entry_b_id';
+    const { data: seNext } = await admin.from('matches').select('id')
+      .eq('category_id', match.category_id).eq('round', match.round + 1).eq('bracket_position', nextPos).maybeSingle();
+    if (seNext) await admin.from('matches').update({ [slot]: null }).eq('id', seNext.id);
+  }
+  if (match.loser_to_match_id && match.loser_slot) {
+    const slot = match.loser_slot === 'a' ? 'entry_a_id' : 'entry_b_id';
+    await admin.from('matches').update({ [slot]: null }).eq('id', match.loser_to_match_id);
+  }
+
+  // ── Calculate new ratings (using pre-match ratings as baseline) ───────────
+  const newAWins    = newWinnerEntryId === match.entry_a_id;
+  const newLoserEntryId = newAWins ? match.entry_b_id : match.entry_a_id;
+
+  // Use rating_before from match_history if available; else current rating
+  const ratingA = mhA?.rating_before ?? statsA?.current_rating ?? 3.5;
+  const ratingB = mhB?.rating_before ?? statsB?.current_rating ?? 3.5;
+
+  const totalScoreA = newSets.reduce((s, set) => s + set.score_a, 0);
+  const totalScoreB = newSets.reduce((s, set) => s + set.score_b, 0);
+
+  const resultA = calculateRatingChange({ playerRating: ratingA, opponentRating: ratingB, playerScore: totalScoreA, opponentScore: totalScoreB, isWin: newAWins,  playedAt: new Date(), isDoubles });
+  const resultB = calculateRatingChange({ playerRating: ratingB, opponentRating: ratingA, playerScore: totalScoreB, opponentScore: totalScoreA, isWin: !newAWins, playedAt: new Date(), isDoubles });
+
+  // ── Update the match row ──────────────────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: matchErr } = await admin.from('matches').update({
+    winner_entry_id: newWinnerEntryId,
+    sets: newSets as any,
+    status: 'completed',
+    completed_at: new Date().toISOString(),
+  }).eq('id', matchId);
+  if (matchErr) return { error: 'Failed to save override' };
+
+  // ── Patch global_stats in a single update per player ─────────────────────
+  // Net delta: remove old result, apply new result (total_matches unchanged).
+  if (statsA) {
+    const oldWinA = mhA?.result === 'win';
+    await admin.from('global_stats').update({
+      current_rating: resultA.newRating,
+      peak_rating: Math.max(resultA.newRating, statsA.peak_rating ?? resultA.newRating),
+      wins:   Math.max(0, (statsA.wins   ?? 0) - (oldWinA ? 1 : 0) + (newAWins  ? 1 : 0)),
+      losses: Math.max(0, (statsA.losses ?? 0) - (oldWinA ? 0 : 1) + (newAWins  ? 0 : 1)),
+      win_rate: statsA.total_matches > 0
+        ? Math.max(0, (statsA.wins ?? 0) - (oldWinA ? 1 : 0) + (newAWins ? 1 : 0)) / statsA.total_matches
+        : 0,
+      [fmtWin]: Math.max(0, (statsA[fmtWin] ?? 0) - (oldWinA ? 1 : 0) + (newAWins ? 1 : 0)),
+      updated_at: new Date().toISOString(),
+    }).eq('player_id', entryA.player_id);
+  }
+  if (statsB) {
+    const oldWinB = mhB?.result === 'win';
+    const newBWins = !newAWins;
+    await admin.from('global_stats').update({
+      current_rating: resultB.newRating,
+      peak_rating: Math.max(resultB.newRating, statsB.peak_rating ?? resultB.newRating),
+      wins:   Math.max(0, (statsB.wins   ?? 0) - (oldWinB ? 1 : 0) + (newBWins ? 1 : 0)),
+      losses: Math.max(0, (statsB.losses ?? 0) - (oldWinB ? 0 : 1) + (newBWins ? 0 : 1)),
+      win_rate: statsB.total_matches > 0
+        ? Math.max(0, (statsB.wins ?? 0) - (oldWinB ? 1 : 0) + (newBWins ? 1 : 0)) / statsB.total_matches
+        : 0,
+      [fmtWin]: Math.max(0, (statsB[fmtWin] ?? 0) - (oldWinB ? 1 : 0) + (newBWins ? 1 : 0)),
+      updated_at: new Date().toISOString(),
+    }).eq('player_id', entryB.player_id);
+  }
+
+  // ── Replace match_history records ─────────────────────────────────────────
+  await admin.from('match_history').delete().eq('match_id', matchId);
+  const tournamentId = match.tournament_id ?? '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (admin.from('match_history') as any).insert({
+      player_id: entryA.player_id, match_id: matchId, tournament_id: tournamentId, club_id: clubId,
+      result: newAWins ? 'win' : 'loss',
+      sets: newSets, opponent_entry_id: match.entry_b_id,
+      rating_before: ratingA, rating_after: resultA.newRating, rating_change: resultA.change,
+      played_at: new Date().toISOString(),
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (admin.from('match_history') as any).insert({
+      player_id: entryB.player_id, match_id: matchId, tournament_id: tournamentId, club_id: clubId,
+      result: !newAWins ? 'win' : 'loss',
+      sets: newSets, opponent_entry_id: match.entry_a_id,
+      rating_before: ratingB, rating_after: resultB.newRating, rating_change: resultB.change,
+      played_at: new Date().toISOString(),
+    }),
+  ]);
+
+  // ── Re-advance bracket with new winner/loser ──────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await advanceMatch(admin, match as any, newWinnerEntryId, newLoserEntryId);
+
+  revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring/${matchId}`);
+  revalidatePath(`/tournaments/${ctx.tournamentSlug}/categories/${category?.slug ?? match.category_id}`);
   return { success: true };
 }
