@@ -3,6 +3,8 @@ import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
+import { ClubManagersPanel } from '@/components/clubs/ClubManagersPanel';
+import { getClubManagers } from '@/lib/actions/clubs';
 
 export const metadata: Metadata = { title: 'Club' };
 
@@ -39,6 +41,10 @@ export default async function ClubPage({ params }: Props) {
     .order('start_date', { ascending: false });
 
   const role = (club.club_managers as { role: string }[])[0]?.role ?? 'manager';
+  const isOwner = role === 'owner';
+
+  // Fetch club managers for the team panel
+  const managers = await getClubManagers(id);
 
   return (
     <div className="min-h-screen bg-surface">
@@ -121,6 +127,14 @@ export default async function ClubPage({ params }: Props) {
             </div>
           )}
         </div>
+
+        {/* Club managers */}
+        <ClubManagersPanel
+          clubId={id}
+          managers={managers}
+          isOwner={isOwner}
+          currentUserId={user.id}
+        />
       </main>
     </div>
   );

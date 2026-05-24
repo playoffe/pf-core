@@ -79,6 +79,89 @@ export async function createClubAction(input: CreateClubInput) {
   redirect(`/clubs/${club.id}`);
 }
 
+// ── Club manager management ───────────────────────────────────────────────────
+
+export async function getClubManagers(clubId: string) {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from('club_managers')
+    .select('role, added_at, players!player_id(id, full_name, username, photo_url)')
+    .eq('club_id', clubId)
+    .order('added_at', { ascending: true });
+  return (data ?? []).map((m) => ({
+    role: m.role as string,
+    added_at: m.added_at as string,
+    player: m.players as { id: string; full_name: string; username: string; photo_url: string | null } | null,
+  }));
+}
+
+export async function addClubManagerAction(clubId: string, username: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  // Verify caller is owner of this club
+  const { data: myRole } = await admin
+    .from('club_managers')
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('player_id', user.id)
+    .maybeSingle();
+  if (!myRole || myRole.role !== 'owner') return { error: 'Only club owners can add managers.' };
+
+  // Look up the target player by username
+  const { data: target } = await admin
+    .from('players')
+    .select('id, full_name')
+    .eq('username', username.trim().toLowerCase())
+    .maybeSingle();
+  if (!target) return { error: `No player found with username @${username}.` };
+  if (target.id === user.id) return { error: 'You are already a manager of this club.' };
+
+  // Check not already a manager
+  const { data: existing } = await admin
+    .from('club_managers')
+    .select('id')
+    .eq('club_id', clubId)
+    .eq('player_id', target.id)
+    .maybeSingle();
+  if (existing) return { error: `${target.full_name} is already a manager of this club.` };
+
+  const { error } = await admin.from('club_managers').insert({
+    club_id: clubId,
+    player_id: target.id,
+    role: 'manager',
+  });
+  if (error) return { error: 'Failed to add manager. Please try again.' };
+
+  return { success: true, playerName: target.full_name };
+}
+
+export async function removeClubManagerAction(clubId: string, playerId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  // Verify caller is owner
+  const { data: myRole } = await admin
+    .from('club_managers')
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('player_id', user.id)
+    .maybeSingle();
+  if (!myRole || myRole.role !== 'owner') return { error: 'Only club owners can remove managers.' };
+
+  if (playerId === user.id) return { error: 'You cannot remove yourself as owner.' };
+
+  await admin.from('club_managers').delete().eq('club_id', clubId).eq('player_id', playerId);
+
+  return { success: true };
+}
+
 export async function getMyClubs() {
   const supabase = await createClient();
   const {
