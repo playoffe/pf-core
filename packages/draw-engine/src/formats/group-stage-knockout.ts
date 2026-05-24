@@ -18,6 +18,9 @@ export function groupStageKnockout(config: DrawConfig): GeneratedDraw {
   });
 
   const knockoutEntryCount = groups.length * top_per_group_advance;
+  // Use placeholder entries just to determine bracket structure — entry IDs are
+  // nulled out afterwards so they don't violate tournament_entries FK constraints.
+  // Real entries are filled in after the group stage completes.
   const knockoutEntries = Array.from({ length: knockoutEntryCount }, (_, i) => ({
     entry_id: makeId(),
     player_ids: [],
@@ -27,6 +30,15 @@ export function groupStageKnockout(config: DrawConfig): GeneratedDraw {
   }));
 
   const knockoutDraw = singleElimination({ ...config, entries: knockoutEntries, category_id });
+
+  // Null out all entry slots in knockout matches — slots are TBD until group
+  // stage results are recorded and standings are computed.
+  knockoutDraw.rounds.forEach((r) => {
+    r.matches.forEach((m) => {
+      m.entry_a = null;
+      m.entry_b = null;
+    });
+  });
 
   const groupRounds = drawGroups.flatMap((g) => {
     const matchesByRound = new Map<number, typeof g.matches>();
