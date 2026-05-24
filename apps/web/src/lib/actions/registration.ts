@@ -2,6 +2,12 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
+import {
+  sendPartnerInviteNotification,
+  sendEntryConfirmedNotification,
+  sendEntryRejectedNotification,
+  sendWaitlistPromotedNotification,
+} from '@/lib/email/notifications';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -16,12 +22,16 @@ async function getActiveCount(categoryId: string): Promise<number> {
   return count ?? 0;
 }
 
-/** Promote the oldest waitlisted entry in a category to active. */
+/** Promote the oldest waitlisted entry in a category to active and notify the player. */
 async function promoteWaitlisted(categoryId: string) {
   const admin = createAdminClient();
   const { data: next } = await admin
     .from('tournament_entries')
-    .select('id')
+    .select(`
+      id,
+      players!player_id(email, full_name),
+      tournament_categories!category_id(name, tournaments!tournament_id(name, slug))
+    `)
     .eq('category_id', categoryId)
     .eq('status', 'waitlisted')
     .order('registered_at', { ascending: true })
@@ -33,6 +43,21 @@ async function promoteWaitlisted(categoryId: string) {
       .from('tournament_entries')
       .update({ status: 'active' })
       .eq('id', next.id);
+
+    // Fire-and-forget email notification
+    type PlayerRow = { email: string; full_name: string } | null;
+    type CatRow = { name: string; tournaments: { name: string; slug: string } | null } | null;
+    const player = next.players as unknown as PlayerRow;
+    const cat = next.tournament_categories as unknown as CatRow;
+    if (player && cat?.tournaments) {
+      void sendWaitlistPromotedNotification({
+        playerEmail: player.email,
+        playerName: player.full_name,
+        tournamentName: cat.tournaments.name,
+        tournamentSlug: cat.tournaments.slug,
+        categoryName: cat.name,
+      });
+    }
   }
 }
 
@@ -175,7 +200,7 @@ async function assertManagerForEntry(entryId: string, userId: string) {
   const admin = createAdminClient();
   const { data: entry } = await admin
     .from('tournament_entries')
-    .select('id, category_id, tournament_id, status, tournaments(club_id, slug)')
+    .select('id, player_id, category_id, tournament_id, status, tournaments(club_id, slug)')
     .eq('id', entryId)
     .single();
 
@@ -210,7 +235,7 @@ export async function approveEntryAction(entryId: string) {
   // Check capacity before approving
   const { data: cat } = await admin
     .from('tournament_categories')
-    .select('max_entries')
+    .select('max_entries, name, tournaments!tournament_id(name, slug)')
     .eq('id', entry.category_id)
     .single();
 
@@ -222,6 +247,25 @@ export async function approveEntryAction(entryId: string) {
     .from('tournament_entries')
     .update({ status: newStatus })
     .eq('id', entryId);
+
+  // Notify the player if they were approved to active (not waitlisted)
+  if (newStatus === 'active') {
+    const { data: player } = await admin
+      .from('players')
+      .select('email, full_name')
+      .eq('id', entry.player_id)
+      .single();
+    const t = cat?.tournaments as { name: string; slug: string } | null;
+    if (player && t) {
+      void sendEntryConfirmedNotification({
+        playerEmail: player.email,
+        playerName: player.full_name,
+        tournamentName: t.name,
+        tournamentSlug: t.slug,
+        categoryName: cat?.name ?? '',
+      });
+    }
+  }
 
   revalidatePath(`/tournaments/${entry.tournamentSlug}/registrations`);
   revalidatePath(`/tournaments/${entry.tournamentSlug}`);
@@ -240,10 +284,34 @@ export async function rejectEntryAction(entryId: string) {
   if (entry.status !== 'pending') return { error: 'Entry is not pending.' };
 
   const admin = createAdminClient();
+
+  // Fetch player + category/tournament names for email before marking withdrawn
+  const { data: entryDetails } = await admin
+    .from('tournament_entries')
+    .select('players!player_id(email, full_name), tournament_categories!category_id(name, tournaments!tournament_id(name))')
+    .eq('id', entryId)
+    .single();
+
   await admin
     .from('tournament_entries')
     .update({ status: 'withdrawn' })
     .eq('id', entryId);
+
+  // Notify the player of the rejection
+  if (entryDetails) {
+    type PlayerRow = { email: string; full_name: string } | null;
+    type CatRow = { name: string; tournaments: { name: string } | null } | null;
+    const player = entryDetails.players as unknown as PlayerRow;
+    const cat = entryDetails.tournament_categories as unknown as CatRow;
+    if (player && cat?.tournaments) {
+      void sendEntryRejectedNotification({
+        playerEmail: player.email,
+        playerName: player.full_name,
+        tournamentName: cat.tournaments.name,
+        categoryName: cat.name,
+      });
+    }
+  }
 
   revalidatePath(`/tournaments/${entry.tournamentSlug}/registrations`);
   revalidatePath(`/tournaments/${entry.tournamentSlug}`);
@@ -351,7 +419,7 @@ export async function registerDoublesAction(categoryId: string, partnerUsername:
   // Find partner by username
   const { data: partner } = await admin
     .from('players')
-    .select('id, full_name')
+    .select('id, full_name, email')
     .eq('username', partnerUsername.toLowerCase().replace(/^@/, ''))
     .maybeSingle();
 
@@ -414,6 +482,22 @@ export async function registerDoublesAction(categoryId: string, partnerUsername:
     });
 
   if (insertErr) return { error: 'Failed to send invite. Please try again.' };
+
+  // Look up the inviter's name to include in the email
+  const { data: inviter } = await admin
+    .from('players')
+    .select('full_name')
+    .eq('id', user.id)
+    .single();
+
+  // Notify the partner via email (fire-and-forget)
+  void sendPartnerInviteNotification({
+    partnerEmail: partner.email,
+    partnerName: partner.full_name,
+    inviterName: inviter?.full_name ?? 'A player',
+    tournamentName: tournament.name,
+    categoryName: cat.name,
+  });
 
   // If category is full, note it — partner will be put on waitlist on confirm
   revalidatePath(`/events/${tournament.slug}`);

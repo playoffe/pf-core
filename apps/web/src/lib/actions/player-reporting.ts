@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/server';
+import { sendScoreReportedNotification } from '@/lib/email/notifications';
 
 interface SetScore {
   score_a: number;
@@ -61,15 +62,56 @@ export async function submitPlayerReportAction(
 
     if (updateErr) return { error: updateErr.message };
 
-    // Fetch tournament slug for revalidation
+    // Fetch tournament + category + organiser info for email + revalidation
     const { data: t } = await admin
       .from('tournaments')
-      .select('slug')
+      .select(`
+        slug, name, club_id,
+        tc:tournament_categories!inner(name),
+        club_managers!club_id(players!player_id(email))
+      `)
       .eq('id', match.tournament_id)
       .single();
 
     if (t?.slug) {
       revalidatePath(`/tournaments/${t.slug}/scoring`);
+    }
+
+    // Notify all club managers by email (fire-and-forget)
+    if (t) {
+      type ManagerRow = { players: { email: string } | null };
+      const managers = (t.club_managers as unknown as ManagerRow[]) ?? [];
+      const organiserEmails = managers
+        .map((m) => m.players?.email)
+        .filter((e): e is string => !!e);
+
+      // Fetch player names for the match summary
+      const { data: entries } = await admin
+        .from('tournament_entries')
+        .select('id, players!player_id(full_name)')
+        .in('id', [match.entry_a_id, match.entry_b_id].filter((id): id is string => id !== null));
+
+      const nameOf = (entryId: string) => {
+        const e = entries?.find((x) => x.id === entryId);
+        return (e?.players as { full_name: string } | null)?.full_name ?? 'Unknown';
+      };
+
+      const scoreStr = sets.map((s) => `${s.score_a}-${s.score_b}`).join(', ');
+      const catName = (t.tc as unknown as { name: string }[] | null)?.[0]?.name ?? '';
+
+      if (organiserEmails.length > 0) {
+        void sendScoreReportedNotification({
+          organiserEmails,
+          tournamentName: t.name,
+          tournamentSlug: t.slug,
+          matchId,
+          categoryName: catName,
+          roundName: 'Match',
+          playerA: nameOf(match.entry_a_id ?? ''),
+          playerB: nameOf(match.entry_b_id ?? ''),
+          reportedScore: scoreStr,
+        });
+      }
     }
 
     return { success: true };
