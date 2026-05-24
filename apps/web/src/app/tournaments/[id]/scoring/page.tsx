@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { RefereePinsPanel } from '@/components/tournaments/RefereePinsPanel';
+import { PrintButton } from '@/components/ui/PrintButton';
 
 export const metadata: Metadata = { title: 'Scoring' };
 
@@ -220,6 +221,7 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
 
         <div className="mb-8 flex items-center justify-between flex-wrap gap-3">
           <h1 className="text-2xl font-bold text-white">Match scoring</h1>
+          <PrintButton label="Print schedule" />
           {pendingReport.length > 0 && (
             <span className="flex items-center gap-1.5 rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-400">
               <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
@@ -304,7 +306,8 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
           </div>
         )}
 
-        {/* Referee PIN management */}
+        {/* Referee PIN management — hidden when printing */}
+        <div data-print-hide>
         <RefereePinsPanel
           tournamentId={t.id}
           pins={(refPins ?? []).map((p) => ({
@@ -314,6 +317,7 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
             is_revoked: p.is_revoked as boolean,
           }))}
         />
+        </div>
       </main>
     </div>
   );

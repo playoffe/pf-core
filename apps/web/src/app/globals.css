@@ -65,3 +65,59 @@ select {
   background-repeat: no-repeat;
   padding-right: 2.25rem;
 }
+
+/* ── Print / PDF styles ───────────────────────────────────────────────────────
+ * Activated when the user clicks "Print / Save as PDF" or presses Ctrl+P.
+ * Elements with [data-print-hide] are hidden; [data-print-only] become visible.
+ * The dark surface background is swapped for white with dark text.
+ */
+@media print {
+  /* Light base for print */
+  body {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  /* Collapse all dark surface cards to transparent */
+  .bg-surface,
+  .bg-surface-card {
+    background-color: transparent !important;
+  }
+
+  /* Make all ring / border colours visible on white */
+  * {
+    border-color: #cbd5e1 !important;
+  }
+
+  /* Force white text to near-black */
+  .text-white {
+    color: #0f172a !important;
+  }
+  .text-slate-400,
+  .text-slate-500,
+  .text-slate-600 {
+    color: #475569 !important;
+  }
+
+  /* Sections to hide when printing */
+  [data-print-hide],
+  nav.border-b {           /* AppNav */
+  display: none !important;
+  }
+
+  /* Show elements only in print */
+  [data-print-only] {
+    display: block !important;
+  }
+
+  /* Don't break match cards across pages */
+  .space-y-2 > * {
+    break-inside: avoid;
+  }
+
+  /* Keep brand colours for highlights */
+  .text-brand-400,
+  .text-accent-400 {
+    color: #6366f1 !important;
+  }
+}

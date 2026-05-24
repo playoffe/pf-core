@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { BracketView } from '@/components/tournaments/BracketView';
 import { StandingsTable } from '@/components/tournaments/StandingsTable';
+import { PrintButton } from '@/components/ui/PrintButton';
 import { getMatchesForCategory } from '@/lib/actions/draws';
 import type { Metadata } from 'next';
 
@@ -69,8 +70,14 @@ export default async function PublicDrawPage({ params }: Props) {
       <AppNav />
 
       <main className="mx-auto max-w-6xl px-6 py-10">
+        {/* Print-only header — hidden on screen */}
+        <div data-print-only className="hidden mb-6 border-b pb-4">
+          <p className="text-xl font-bold">{tournament.name}</p>
+          <p className="text-sm text-slate-500">{cat.name} · Draw</p>
+        </div>
+
         {/* Breadcrumb */}
-        <nav className="mb-6 flex items-center gap-2 text-sm text-slate-500">
+        <nav className="mb-6 flex items-center gap-2 text-sm text-slate-500" data-print-hide>
           <Link href="/events" className="hover:text-slate-300 transition-colors">Tournaments</Link>
           <span>/</span>
           <Link href={`/events/${tournamentSlug}`} className="hover:text-slate-300 transition-colors">
@@ -80,8 +87,13 @@ export default async function PublicDrawPage({ params }: Props) {
           <span className="text-slate-400">{cat.name} Draw</span>
         </nav>
 
-        <h1 className="mb-2 text-xl font-bold text-white">{cat.name}</h1>
-        <p className="mb-8 text-sm text-slate-500">{tournament.name}</p>
+        <div className="mb-8 flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="mb-1 text-xl font-bold text-white">{cat.name}</h1>
+            <p className="text-sm text-slate-500">{tournament.name}</p>
+          </div>
+          <PrintButton />
+        </div>
 
         {/* Winner banner — shown when category is completed */}
         {isCompleted && winnerEntry && (
