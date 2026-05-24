@@ -3,7 +3,16 @@ import Link from 'next/link';
 import { createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 
-export const metadata: Metadata = { title: 'Find tournaments · PLAYOFFE' };
+export const metadata: Metadata = {
+  title: 'Find tournaments · PLAYOFFE',
+  description: 'Browse upcoming pickleball tournaments, register to compete, and track live standings on PLAYOFFE.',
+  openGraph: {
+    title: 'Find tournaments · PLAYOFFE',
+    description: 'Browse upcoming pickleball tournaments, register to compete, and track live standings on PLAYOFFE.',
+    type: 'website',
+    siteName: 'PLAYOFFE',
+  },
+};
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   registration_open: { label: 'Registration open', className: 'bg-blue-900/60 text-blue-300' },
@@ -18,7 +27,16 @@ const FORMAT_LABEL: Record<string, string> = {
   mixed_doubles: 'Mixed doubles',
 };
 
-export default async function EventsPage() {
+export default async function EventsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; format?: string; status?: string }>;
+}) {
+  const sp = await searchParams;
+  const q = (sp.q ?? '').toLowerCase().trim();
+  const filterFormat = sp.format ?? 'all';
+  const filterStatus = sp.status ?? 'all';
+
   const admin = createAdminClient();
 
   // Fetch public tournaments (not cancelled, show upcoming and recent)
@@ -32,7 +50,7 @@ export default async function EventsPage() {
     .not('status', 'eq', 'cancelled')
     .order('start_date', { ascending: true });
 
-  const rows = (tournaments ?? []) as Array<{
+  const allRows = (tournaments ?? []) as Array<{
     id: string;
     name: string;
     slug: string;
@@ -44,6 +62,14 @@ export default async function EventsPage() {
     clubs: { id: string; name: string; brand_primary_color: string };
     tournament_categories: Array<{ id: string; play_format: string; status: string; max_entries: number | null }>;
   }>;
+
+  // Apply filters
+  const rows = allRows.filter((t) => {
+    if (q && !t.name.toLowerCase().includes(q) && !(t.venue ?? '').toLowerCase().includes(q) && !(t.clubs as {name:string}).name.toLowerCase().includes(q)) return false;
+    if (filterFormat !== 'all' && !t.tournament_categories.some((c) => c.play_format === filterFormat)) return false;
+    if (filterStatus !== 'all' && t.status !== filterStatus) return false;
+    return true;
+  });
 
   // Separate: open registration, upcoming, past
   const open      = rows.filter((t) => t.status === 'registration_open');
@@ -126,18 +152,74 @@ export default async function EventsPage() {
       <AppNav />
 
       <main className="mx-auto max-w-6xl px-6 py-10">
-        <div className="mb-8">
+        <div className="mb-6">
           <h1 className="text-2xl font-bold text-white">Find a tournament</h1>
           <p className="mt-1 text-sm text-slate-500">
             Browse upcoming PLAYOFFE events and register to compete.
           </p>
         </div>
 
+        {/* Search & filter bar */}
+        <form method="GET" className="mb-8 flex flex-wrap gap-3">
+          <input
+            type="search"
+            name="q"
+            defaultValue={sp.q ?? ''}
+            placeholder="Search by name, venue or club…"
+            className="flex-1 min-w-56 rounded-lg border border-surface-border bg-surface-card px-4 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-brand-500 focus:outline-none"
+          />
+          <select
+            name="format"
+            defaultValue={filterFormat}
+            className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-slate-300 focus:border-brand-500 focus:outline-none"
+          >
+            <option value="all">All formats</option>
+            <option value="singles">Singles</option>
+            <option value="doubles">Doubles</option>
+            <option value="mixed_doubles">Mixed doubles</option>
+          </select>
+          <select
+            name="status"
+            defaultValue={filterStatus}
+            className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-slate-300 focus:border-brand-500 focus:outline-none"
+          >
+            <option value="all">All statuses</option>
+            <option value="registration_open">Registration open</option>
+            <option value="in_progress">In progress</option>
+            <option value="draft">Coming soon</option>
+            <option value="completed">Completed</option>
+          </select>
+          <button
+            type="submit"
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
+          >
+            Search
+          </button>
+          {(q || filterFormat !== 'all' || filterStatus !== 'all') && (
+            <a
+              href="/events"
+              className="rounded-lg border border-surface-border px-4 py-2 text-sm text-slate-400 hover:text-slate-300 transition-colors"
+            >
+              Clear
+            </a>
+          )}
+        </form>
+
+
         {rows.length === 0 && (
           <div className="rounded-xl bg-surface-card p-16 text-center ring-1 ring-surface-border">
             <p className="text-4xl mb-3">🏓</p>
-            <p className="text-base font-medium text-white">No tournaments yet</p>
-            <p className="mt-1 text-sm text-slate-500">Check back soon — events will appear here.</p>
+            {q || filterFormat !== 'all' || filterStatus !== 'all' ? (
+              <>
+                <p className="text-base font-medium text-white">No tournaments match your search</p>
+                <p className="mt-1 text-sm text-slate-500">Try adjusting your filters or <a href="/events" className="text-brand-400 hover:text-brand-300">clear all</a>.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-base font-medium text-white">No tournaments yet</p>
+                <p className="mt-1 text-sm text-slate-500">Check back soon — events will appear here.</p>
+              </>
+            )}
           </div>
         )}
 
