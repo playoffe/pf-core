@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { startMatchAction, submitResultAction, walkoverAction } from '@/lib/actions/scoring';
+import { useRealtimeMatch } from '@/hooks/useRealtimeMatch';
 
 interface SetScore {
   set_number: number;
@@ -65,6 +66,19 @@ export function MatchScoreCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [externallyUpdated, setExternallyUpdated] = useState(false);
+
+  // Realtime — react to another device completing this match
+  const handleExternalComplete = useCallback((winnerId: string | null) => {
+    setExternallyUpdated(true);
+    setStatus('completed');
+    setWinnerEntryId(winnerId);
+  }, []);
+
+  const liveStatus = useRealtimeMatch(matchId, {
+    currentStatus: status,
+    onExternalComplete: handleExternalComplete,
+  });
 
   const isEditable = status === 'scheduled' || status === 'in_progress';
   const isCompleted = status === 'completed' || status === 'walkover';
@@ -170,8 +184,29 @@ export function MatchScoreCard({
 
   return (
     <div className="space-y-5">
+      {/* Live connection indicator */}
+      {!isCompleted && liveStatus !== 'live' && liveStatus !== 'connecting' && (
+        <div className="flex items-center gap-2 rounded-lg border border-yellow-800/50 bg-yellow-950/30 px-3 py-2 text-xs text-yellow-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-yellow-400 animate-pulse" />
+          {liveStatus === 'reconnecting' ? 'Reconnecting to live updates…' : 'Live updates offline — reload to reconnect'}
+        </div>
+      )}
+
+      {/* Externally updated banner */}
+      {externallyUpdated && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-brand-600/40 bg-brand-600/10 px-4 py-2.5">
+          <span className="text-sm text-brand-300">This match was completed on another device.</span>
+          <button
+            onClick={() => router.refresh()}
+            className="text-xs font-semibold text-brand-400 hover:text-brand-300 transition-colors"
+          >
+            Reload
+          </button>
+        </div>
+      )}
+
       {/* Status banner */}
-      {status === 'in_progress' && (
+      {status === 'in_progress' && !externallyUpdated && (
         <div className="flex items-center gap-2 rounded-lg bg-accent-500/10 px-4 py-2 ring-1 ring-accent-500/30">
           <span className="h-2 w-2 rounded-full bg-accent-400 animate-pulse" />
           <span className="text-sm font-medium text-accent-400">Match in progress · Court {court}</span>

@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { generateDrawAction, clearDrawAction, scheduleMatchesAction, generateNextSwissRoundAction } from '@/lib/actions/draws';
 import type { MatchWithPlayers } from '@/lib/actions/draws';
 import { BracketView } from './BracketView';
+import { useRealtimeCategoryMatches } from '@/hooks/useRealtimeCategoryMatches';
+import { StandingsTable } from './StandingsTable';
 
 interface Props {
   categoryId: string;
@@ -65,6 +67,9 @@ export function DrawSection({
   const canGenerateNextSwissRound =
     isSwiss && isDrawn && currentRoundComplete && maxRound < totalSwissRounds;
 
+  // Live subscription — auto-refreshes bracket when any match in this category changes
+  const liveStatus = useRealtimeCategoryMatches(categoryId);
+
   async function handleGenerate() {
     setLoading(true);
     setError(null);
@@ -119,7 +124,28 @@ export function DrawSection({
       {/* Section header */}
       <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">Draw</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">Draw</h2>
+            {/* Live indicator — only meaningful once a draw exists */}
+            {isDrawn && (
+              <span
+                title={
+                  liveStatus === 'live'
+                    ? 'Live — updates automatically'
+                    : liveStatus === 'connecting' || liveStatus === 'reconnecting'
+                      ? 'Connecting…'
+                      : 'Offline — reload to reconnect'
+                }
+                className={`h-1.5 w-1.5 rounded-full ${
+                  liveStatus === 'live'
+                    ? 'bg-accent-400 animate-pulse'
+                    : liveStatus === 'connecting' || liveStatus === 'reconnecting'
+                      ? 'bg-yellow-500 animate-pulse'
+                      : 'bg-red-500'
+                }`}
+              />
+            )}
+          </div>
           <p className="mt-0.5 text-xs text-slate-600">{FORMAT_LABEL[drawFormat] ?? drawFormat}</p>
         </div>
 
@@ -238,6 +264,11 @@ export function DrawSection({
       {/* Bracket / schedule */}
       {isDrawn && matches.length > 0 && (
         <BracketView matches={matches} format={drawFormat} tournamentSlug={tournamentSlug} />
+      )}
+
+      {/* Live standings — round-robin, swiss, group stage */}
+      {isDrawn && matches.length > 0 && (
+        <StandingsTable matches={matches} format={drawFormat} />
       )}
     </section>
   );
