@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import { TopProgressBar } from '@/components/layout/TopProgressBar';
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider';
 import { ToastProvider } from '@/components/ui/ToastProvider';
+import { PermissionProvider } from '@/components/PermissionProvider';
 import './globals.css';
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
@@ -20,7 +21,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <TopProgressBar />
         <ConfirmProvider>
           <ToastProvider>
-            {children}
+            <PermissionProvider>
+              {children}
+            </PermissionProvider>
           </ToastProvider>
         </ConfirmProvider>
       </body>
