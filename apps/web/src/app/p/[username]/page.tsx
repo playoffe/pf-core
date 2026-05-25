@@ -62,6 +62,17 @@ export default async function PlayerProfilePage({ params }: Props) {
 
   const isOwnProfile = user?.id === player.id;
 
+  // Fetch viewer's own username (for H2H link) if not own profile
+  let viewerUsername: string | null = null;
+  if (user && !isOwnProfile) {
+    const { data: viewerPlayer } = await supabase
+      .from('players')
+      .select('username')
+      .eq('id', user.id)
+      .maybeSingle();
+    viewerUsername = viewerPlayer?.username ?? null;
+  }
+
   // Fetch badges, follower count, and following state in parallel
   const [badges, isFollowing, followerCountResult] = await Promise.all([
     getPlayerBadges(player.id),
@@ -131,6 +142,7 @@ export default async function PlayerProfilePage({ params }: Props) {
       isFollowing={isFollowing}
       followerCount={followerCount}
       isLoggedIn={!!user}
+      viewerUsername={viewerUsername}
     />
   );
 }

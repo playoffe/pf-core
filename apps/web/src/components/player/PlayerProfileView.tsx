@@ -21,6 +21,7 @@ interface Props {
   isFollowing: boolean;
   followerCount: number;
   isLoggedIn: boolean;
+  viewerUsername: string | null;
 }
 
 const RESULT_STYLE: Record<string, { label: string; color: string }> = {
@@ -30,7 +31,7 @@ const RESULT_STYLE: Record<string, { label: string; color: string }> = {
   walkover_loss: { label: 'W/O', color: 'text-slate-500 bg-slate-700/30' },
 };
 
-export function PlayerProfileView({ player, matchHistory, isOwnProfile, badges, isFollowing, followerCount, isLoggedIn }: Props) {
+export function PlayerProfileView({ player, matchHistory, isOwnProfile, badges, isFollowing, followerCount, isLoggedIn, viewerUsername }: Props) {
   const stats = player.global_stats;
   const profile = player.player_profiles;
 
@@ -82,11 +83,22 @@ export function PlayerProfileView({ player, matchHistory, isOwnProfile, badges, 
                     </a>
                   </>
                 ) : isLoggedIn ? (
-                  <FollowButton
-                    targetId={player.id}
-                    initialIsFollowing={isFollowing}
-                    initialCount={followerCount}
-                  />
+                  <>
+                    <FollowButton
+                      targetId={player.id}
+                      initialIsFollowing={isFollowing}
+                      initialCount={followerCount}
+                    />
+                    {viewerUsername && (
+                      <Link
+                        href={`/p/${player.username}/h2h/${viewerUsername}`}
+                        className="rounded-lg border border-surface-border px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-surface hover:text-white transition-colors"
+                        title="Head-to-head record"
+                      >
+                        H2H
+                      </Link>
+                    )}
+                  </>
                 ) : null}
               </div>
             </div>

@@ -33,7 +33,7 @@ export default async function PlayerStatsPage({ params }: Props) {
   // ── All match history for charting (up to 100 most recent, asc for chart) ──
   const { data: rawHistory } = await admin
     .from('match_history')
-    .select('id, result, rating_before, rating_after, rating_change, played_at, tournament_id')
+    .select('id, result, rating_before, rating_after, rating_change, played_at, tournament_id, opponent_entry_id')
     .eq('player_id', player.id)
     .order('played_at', { ascending: true })
     .limit(100);
@@ -46,7 +46,55 @@ export default async function PlayerStatsPage({ params }: Props) {
     rating_change: Number(h.rating_change),
     played_at: h.played_at as string,
     tournament_id: h.tournament_id as string,
+    opponent_entry_id: h.opponent_entry_id as string | null,
   }));
+
+  // ── H2H opponent breakdown ─────────────────────────────────────────────────
+  const entryIds = history.map((h) => h.opponent_entry_id).filter(Boolean) as string[];
+  const h2hOpponentMap = new Map<string, { playerId: string; wins: number; losses: number }>();
+
+  if (entryIds.length > 0) {
+    const { data: opponentEntries } = await admin
+      .from('tournament_entries')
+      .select('id, player_id, players!player_id(id, full_name, username)')
+      .in('id', entryIds);
+
+    for (const h of history) {
+      if (!h.opponent_entry_id) continue;
+      const entry = opponentEntries?.find((e) => e.id === h.opponent_entry_id);
+      if (!entry) continue;
+      const opPlayer = entry.players as { id: string; full_name: string; username: string } | null;
+      if (!opPlayer) continue;
+      const isWin = h.result === 'win' || h.result === 'walkover_win';
+      const existing = h2hOpponentMap.get(opPlayer.id) ?? { playerId: opPlayer.id, wins: 0, losses: 0 };
+      if (isWin) existing.wins++; else existing.losses++;
+      h2hOpponentMap.set(opPlayer.id, existing);
+
+      // Store name on the entry object for display
+      (opPlayer as unknown as Record<string, unknown>)._stored = true;
+    }
+
+    // Attach player info to h2hOpponentMap values
+    for (const entry of opponentEntries ?? []) {
+      const opPlayer = entry.players as { id: string; full_name: string; username: string } | null;
+      if (!opPlayer) continue;
+      if (h2hOpponentMap.has(opPlayer.id)) {
+        const rec = h2hOpponentMap.get(opPlayer.id)!;
+        (rec as unknown as Record<string, string>).fullName = opPlayer.full_name;
+        (rec as unknown as Record<string, string>).username = opPlayer.username;
+      }
+    }
+  }
+
+  const h2hOpponents = [...h2hOpponentMap.values()]
+    .map((v) => ({
+      ...v,
+      fullName: (v as unknown as Record<string, string>).fullName ?? 'Unknown',
+      username: (v as unknown as Record<string, string>).username ?? '',
+      total: v.wins + v.losses,
+    }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
 
   // ── Monthly win/loss aggregation ───────────────────────────────────────────
   const monthlyMap = new Map<string, { wins: number; losses: number }>();
@@ -179,6 +227,44 @@ export default async function PlayerStatsPage({ params }: Props) {
               <div className="rounded-2xl bg-surface-card ring-1 ring-surface-border px-5 py-5">
                 <h2 className="text-sm font-semibold text-white mb-5">Monthly activity</h2>
                 <MonthlyBars monthly={monthly} />
+              </div>
+            )}
+
+            {/* H2H opponent breakdown */}
+            {h2hOpponents.length > 0 && (
+              <div className="rounded-2xl bg-surface-card ring-1 ring-surface-border px-5 py-5">
+                <h2 className="text-sm font-semibold text-white mb-4">Head-to-head records</h2>
+                <div className="space-y-2">
+                  {h2hOpponents.map((opp) => {
+                    const winPct = opp.total > 0 ? (opp.wins / opp.total) * 100 : 0;
+                    return (
+                      <div key={opp.playerId} className="flex items-center gap-3">
+                        <Link
+                          href={`/p/${username}/h2h/${opp.username}`}
+                          className="min-w-0 w-28 truncate text-xs font-medium text-slate-300 hover:text-brand-300 transition-colors"
+                        >
+                          {opp.fullName}
+                        </Link>
+                        <div className="flex-1 h-2 rounded-full bg-surface overflow-hidden ring-1 ring-surface-border">
+                          <div
+                            className="h-full rounded-full bg-brand-500"
+                            style={{ width: `${winPct}%` }}
+                          />
+                        </div>
+                        <span className="shrink-0 w-16 text-right text-xs text-slate-500 tabular-nums">
+                          {opp.wins}W {opp.losses}L
+                        </span>
+                        <Link
+                          href={`/p/${username}/h2h/${opp.username}`}
+                          className="shrink-0 text-xs text-slate-600 hover:text-brand-400 transition-colors"
+                          title="Full H2H record"
+                        >
+                          →
+                        </Link>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

@@ -636,6 +636,51 @@ export type Database = {
           },
         ]
       }
+      partner_requests: {
+        Row: {
+          created_at: string
+          from_player_id: string
+          id: string
+          message: string | null
+          status: string
+          to_player_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          from_player_id: string
+          id?: string
+          message?: string | null
+          status?: string
+          to_player_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          from_player_id?: string
+          id?: string
+          message?: string | null
+          status?: string
+          to_player_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "partner_requests_from_player_id_fkey"
+            columns: ["from_player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "partner_requests_to_player_id_fkey"
+            columns: ["to_player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       player_badges: {
         Row: {
           awarded_at: string
@@ -792,6 +837,54 @@ export type Database = {
           username?: string
         }
         Relationships: []
+      }
+      practice_logs: {
+        Row: {
+          created_at: string
+          drill_types: string[]
+          duration_minutes: number | null
+          id: string
+          notes: string | null
+          partner_id: string | null
+          player_id: string
+          practice_date: string
+        }
+        Insert: {
+          created_at?: string
+          drill_types?: string[]
+          duration_minutes?: number | null
+          id?: string
+          notes?: string | null
+          partner_id?: string | null
+          player_id: string
+          practice_date: string
+        }
+        Update: {
+          created_at?: string
+          drill_types?: string[]
+          duration_minutes?: number | null
+          id?: string
+          notes?: string | null
+          partner_id?: string | null
+          player_id?: string
+          practice_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "practice_logs_partner_id_fkey"
+            columns: ["partner_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "practice_logs_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       score_submissions: {
         Row: {
