@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import type { MatchWithPlayers } from '@/lib/actions/draws';
 
@@ -123,6 +124,75 @@ function RoundColumn({
   );
 }
 
+// ── Mobile round navigator (used inside elimination brackets) ─────────────────
+function MobileRoundNav({
+  rounds,
+  maxSlots,
+  tournamentSlug,
+}: {
+  rounds: [number, MatchWithPlayers[]][];
+  maxSlots: number;
+  tournamentSlug: string;
+}) {
+  const [idx, setIdx] = useState(0);
+  const [, roundMatches] = rounds[idx];
+  const name = roundMatches[0].round_name ?? `Round ${roundMatches[0].round}`;
+
+  return (
+    <div>
+      {/* Round navigator header */}
+      <div className="flex items-center justify-between mb-3">
+        <button
+          onClick={() => setIdx((i) => Math.max(0, i - 1))}
+          disabled={idx === 0}
+          className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-400 hover:bg-surface disabled:opacity-30 transition-colors"
+        >
+          ← Prev
+        </button>
+        <div className="text-center">
+          <p className="text-xs font-semibold uppercase tracking-wider text-white">{name}</p>
+          <p className="text-[10px] text-slate-600 mt-0.5">
+            Round {idx + 1} of {rounds.length}
+          </p>
+        </div>
+        <button
+          onClick={() => setIdx((i) => Math.min(rounds.length - 1, i + 1))}
+          disabled={idx === rounds.length - 1}
+          className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-400 hover:bg-surface disabled:opacity-30 transition-colors"
+        >
+          Next →
+        </button>
+      </div>
+
+      {/* Dot indicators */}
+      <div className="flex justify-center gap-1.5 mb-4">
+        {rounds.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => setIdx(i)}
+            className={`h-1.5 rounded-full transition-all ${
+              i === idx ? 'w-4 bg-brand-400' : 'w-1.5 bg-surface-border'
+            }`}
+          />
+        ))}
+      </div>
+
+      {/* Current round matches */}
+      <div
+        className="flex flex-col"
+        style={{ minHeight: `${Math.max(maxSlots * 72, 200)}px` }}
+      >
+        <RoundColumn
+          round_name=""
+          matches={roundMatches}
+          matchSlots={maxSlots}
+          tournamentSlug={tournamentSlug}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Bracket (single elimination) ─────────────────────────────────────────────
 function EliminationBracket({ matches, tournamentSlug }: { matches: MatchWithPlayers[]; tournamentSlug: string }) {
   // Group by round
@@ -138,25 +208,33 @@ function EliminationBracket({ matches, tournamentSlug }: { matches: MatchWithPla
   const maxSlots = rounds[0][1].length; // first round has the most matches
 
   return (
-    <div className="overflow-x-auto pb-4">
-      <div
-        className="flex gap-6"
-        style={{ minHeight: `${Math.max(maxSlots * 72, 200)}px` }}
-      >
-        {rounds.map(([, roundMatches]) => {
-          const name = roundMatches[0].round_name ?? `Round ${roundMatches[0].round}`;
-          return (
-            <RoundColumn
-              key={roundMatches[0].round}
-              round_name={name}
-              matches={roundMatches}
-              matchSlots={maxSlots}
-              tournamentSlug={tournamentSlug}
-            />
-          );
-        })}
+    <>
+      {/* Mobile: swipeable round-by-round navigator */}
+      <div className="md:hidden">
+        <MobileRoundNav rounds={rounds} maxSlots={maxSlots} tournamentSlug={tournamentSlug} />
       </div>
-    </div>
+
+      {/* Desktop: full horizontal bracket */}
+      <div className="hidden md:block overflow-x-auto pb-4">
+        <div
+          className="flex gap-6"
+          style={{ minHeight: `${Math.max(maxSlots * 72, 200)}px` }}
+        >
+          {rounds.map(([, roundMatches]) => {
+            const name = roundMatches[0].round_name ?? `Round ${roundMatches[0].round}`;
+            return (
+              <RoundColumn
+                key={roundMatches[0].round}
+                round_name={name}
+                matches={roundMatches}
+                matchSlots={maxSlots}
+                tournamentSlug={tournamentSlug}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -191,7 +269,10 @@ function DoubleEliminationBracket({ matches, tournamentSlug }: { matches: MatchW
           <p className="mb-3 text-xs font-bold uppercase tracking-widest text-green-500">
             Winners Bracket
           </p>
-          <div className="overflow-x-auto pb-2">
+          <div className="md:hidden">
+            <MobileRoundNav rounds={wbRounds} maxSlots={wbMaxSlots} tournamentSlug={tournamentSlug} />
+          </div>
+          <div className="hidden md:block overflow-x-auto pb-2">
             <div className="flex gap-6" style={{ minHeight: `${Math.max(wbMaxSlots * 72, 140)}px` }}>
               {wbRounds.map(([, roundMatches]) => (
                 <RoundColumn
@@ -213,7 +294,10 @@ function DoubleEliminationBracket({ matches, tournamentSlug }: { matches: MatchW
           <p className="mb-3 text-xs font-bold uppercase tracking-widest text-amber-500">
             Losers Bracket
           </p>
-          <div className="overflow-x-auto pb-2">
+          <div className="md:hidden">
+            <MobileRoundNav rounds={lbRounds} maxSlots={lbMaxSlots} tournamentSlug={tournamentSlug} />
+          </div>
+          <div className="hidden md:block overflow-x-auto pb-2">
             <div className="flex gap-6" style={{ minHeight: `${Math.max(lbMaxSlots * 72, 100)}px` }}>
               {lbRounds.map(([, roundMatches]) => (
                 <RoundColumn

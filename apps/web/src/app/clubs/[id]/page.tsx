@@ -27,7 +27,7 @@ export default async function ClubPage({ params }: Props) {
   // Fetch club + verify caller is a manager
   const { data: club } = await admin
     .from('clubs')
-    .select('*, club_managers!inner(role, player_id)')
+    .select('*, slug, club_managers!inner(role, player_id)')
     .eq('id', id)
     .eq('club_managers.player_id', user.id)
     .single();
@@ -75,6 +75,13 @@ export default async function ClubPage({ params }: Props) {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
+            <Link
+              href={`/c/${club.slug}`}
+              className="rounded-lg border border-surface-border px-4 py-2 text-sm font-medium text-slate-400 hover:bg-surface hover:text-white transition-colors"
+              title="View public profile"
+            >
+              Public page ↗
+            </Link>
             <DigestButton clubId={id} />
             <Link
               href={`/tournaments/new?club=${id}`}

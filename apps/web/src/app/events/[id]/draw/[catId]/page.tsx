@@ -92,7 +92,16 @@ export default async function PublicDrawPage({ params }: Props) {
             <h1 className="mb-1 text-xl font-bold text-white">{cat.name}</h1>
             <p className="text-sm text-slate-500">{tournament.name}</p>
           </div>
-          <PrintButton />
+          <div className="flex items-center gap-2" data-print-hide>
+            <a
+              href={`/api/tournaments/${tournamentSlug}/categories/${catSlug}/standings.csv`}
+              download
+              className="flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-2 text-xs font-medium text-slate-400 hover:bg-surface hover:text-white transition-colors"
+            >
+              ⬇ Export CSV
+            </a>
+            <PrintButton />
+          </div>
         </div>
 
         {/* Winner banner — shown when category is completed */}
