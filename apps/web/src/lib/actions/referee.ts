@@ -2,6 +2,7 @@
 
 import crypto from 'crypto';
 import { revalidatePath } from 'next/cache';
+import { headers, cookies } from 'next/headers';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 
 function hashPin(pin: string) {
@@ -59,6 +60,22 @@ export async function revokePinAction(pinId: string) {
 // ── Validate a PIN and return tournament info ─────────────────────────────────
 export async function validateRefereePinAction(pin: string) {
   const admin = createAdminClient();
+
+  // Read caller IP
+  const headersList = await headers();
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+
+  // Check rate limit
+  const { data: limit } = await (admin
+    .from('pin_rate_limits' as any)
+    .select('attempt_count, blocked_until')
+    .eq('ip_address', ip)
+    .maybeSingle()) as { data: { attempt_count: number; blocked_until: string | null } | null };
+
+  if (limit?.blocked_until && new Date(limit.blocked_until) > new Date()) {
+    return { success: false, error: 'Too many attempts. Please wait 5 minutes before trying again.' };
+  }
+
   const pinHash = hashPin(pin);
 
   const { data } = await admin
@@ -69,13 +86,31 @@ export async function validateRefereePinAction(pin: string) {
     .gt('expires_at', new Date().toISOString())
     .maybeSingle();
 
-  if (!data) return { error: 'Invalid or expired PIN' };
+  if (!data) {
+    // Increment rate limit counter
+    const now = new Date();
+    if (!limit) {
+      await (admin.from('pin_rate_limits' as any).insert({ ip_address: ip, attempt_count: 1 }));
+    } else {
+      const newCount = (limit.attempt_count ?? 0) + 1;
+      const blockedUntil = newCount >= 3
+        ? new Date(now.getTime() + 5 * 60 * 1000).toISOString()
+        : null;
+      await (admin.from('pin_rate_limits' as any)
+        .update({ attempt_count: newCount, blocked_until: blockedUntil, updated_at: now.toISOString() })
+        .eq('ip_address', ip));
+    }
+    return { success: false, error: 'Invalid or expired PIN' };
+  }
 
   const tournament = data.tournaments as { id: string; name: string; slug: string; status: string } | null;
   if (!tournament) return { error: 'Tournament not found' };
   if (!['in_progress', 'draw_generated'].includes(tournament.status)) {
     return { error: 'Tournament is not currently in progress' };
   }
+
+  // Reset rate limit on success
+  await (admin.from('pin_rate_limits' as any).delete().eq('ip_address', ip));
 
   return {
     success: true,
@@ -146,6 +181,9 @@ export async function scoreMatchAsRefereeAction(
   const validated = await validateRefereePinAction(pin);
   if (!validated.success) return { error: validated.error ?? 'Invalid PIN' };
 
+  const cookieStore = await cookies();
+  const refereeName = cookieStore.get('referee_name')?.value ?? null;
+
   const admin = createAdminClient();
 
   // Verify the match belongs to this tournament
@@ -168,10 +206,44 @@ export async function scoreMatchAsRefereeAction(
       sets: sets.map((s, i) => ({ set_number: i + 1, score_a: s.score_a, score_b: s.score_b })),
       winner_entry_id: winnerEntryId,
       completed_at: new Date().toISOString(),
+      submitted_by_name: refereeName,
+      submitted_via: 'guest_pin',
     })
     .eq('id', matchId);
 
   if (matchErr) return { error: 'Failed to save result: ' + matchErr.message };
+
+  return { success: true };
+}
+
+// ── Start a referee session (store name in cookie + DB) ───────────────────────
+export async function startRefereeSessionAction(pin: string, name: string) {
+  'use server';
+  const admin = createAdminClient();
+
+  // Validate pin first
+  const validation = await validateRefereePinAction(pin);
+  if (!validation.success) return { error: validation.error ?? 'Invalid PIN' };
+
+  // Create referee_sessions row
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7);
+  await (admin.from('referee_sessions' as any).insert({
+    tournament_id: validation.tournament?.id,
+    pin_id: (validation as any).pinId,
+    referee_name: name.trim(),
+    expires_at: expiresAt.toISOString(),
+    is_active: true,
+  }));
+
+  // Set cookie
+  const cookieStore = await cookies();
+  cookieStore.set('referee_name', name.trim(), {
+    httpOnly: false,
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 7,
+    path: '/',
+  });
 
   return { success: true };
 }

@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
+import { cookies } from 'next/headers';
 import { getRefereeMatchesAction } from '@/lib/actions/referee';
 import { RefereeScoringView } from '@/components/scoring/RefereeScoringView';
+import { RefereeNameForm } from '@/components/scoring/RefereeNameForm';
 import type { Metadata } from 'next';
 
 interface Props {
@@ -11,6 +13,13 @@ export const metadata: Metadata = { title: 'Referee Scoring · PLAYOFFE' };
 
 export default async function RefereeCourtPage({ params }: Props) {
   const { pin } = await params;
+
+  const cookieStore = await cookies();
+  const refereeName = cookieStore.get('referee_name')?.value;
+
+  if (!refereeName) {
+    return <RefereeNameForm pin={pin} />;
+  }
 
   const result = await getRefereeMatchesAction(pin);
 
