@@ -406,14 +406,26 @@ export async function updateRolePermissionAction(input: {
   const { user, admin } = await assertSuperAdmin();
   const { role, feature, subFeature, isEnabled, canRead, canWrite, scope, clubId } = input;
 
-  // Fetch current value for audit
-  const { data: current } = await admin
+  // Fetch current value for audit — must filter by sub_feature and club_id too,
+  // otherwise maybeSingle() returns an error when multiple sub-feature rows exist.
+  const lookupQuery = admin
     .from('role_permissions' as any)
     .select('id, is_enabled, can_read, can_write')
     .eq('role', role)
     .eq('feature', feature)
-    .eq('scope', scope)
-    .maybeSingle() as { data: { id: string; is_enabled: boolean; can_read: boolean; can_write: boolean } | null };
+    .eq('scope', scope);
+
+  if (subFeature) {
+    (lookupQuery as any).eq('sub_feature', subFeature);
+  } else {
+    (lookupQuery as any).is('sub_feature', null);
+  }
+
+  if (scope === 'club' && clubId) {
+    (lookupQuery as any).eq('club_id', clubId);
+  }
+
+  const { data: current } = await (lookupQuery as any).maybeSingle() as { data: { id: string; is_enabled: boolean; can_read: boolean; can_write: boolean } | null };
 
   const now = new Date().toISOString();
 

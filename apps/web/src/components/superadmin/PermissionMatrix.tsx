@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useOptimistic } from 'react';
+import { Fragment, useState, useTransition, useOptimistic } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateRolePermissionAction, resetClubPermissionsAction } from '@/lib/actions/superadmin';
 
@@ -14,6 +14,7 @@ interface Permission {
   can_write: boolean;
   scope: string;
   club_id: string | null;
+  updated_at?: string;
 }
 
 interface Props {
@@ -117,7 +118,13 @@ const CATEGORIES: Record<string, { label: string; features: Array<{ key: string;
 };
 
 const ROLES = ['admin', 'player', 'referee'] as const;
-const ROLE_LABELS = { admin: 'Admin', player: 'Player', referee: 'Referee' };
+
+// Per-role visual theming for headers and column separators
+const ROLE_THEME = {
+  admin:   { label: 'Admin',   headerBg: 'bg-accent-500/10',  labelColor: 'text-accent-400',  border: '' },
+  player:  { label: 'Player',  headerBg: 'bg-blue-500/10',    labelColor: 'text-blue-400',    border: 'border-l-2 border-surface-border' },
+  referee: { label: 'Referee', headerBg: 'bg-amber-500/10',   labelColor: 'text-amber-400',   border: 'border-l-2 border-surface-border' },
+} as const;
 
 function buildPermMap(permissions: Permission[], clubId?: string) {
   const map = new Map<string, Permission>();
@@ -151,14 +158,13 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
 
   const permMap = buildPermMap(optimisticPerms, selectedClubId);
 
-  function getCell(role: string, feature: string, sub: string): { is_enabled: boolean; can_read: boolean; can_write: boolean; isOverride: boolean } {
-    const clubKey = selectedClubId ? `${role}:${feature}:${sub}` : null;
+  function getCell(role: string, feature: string, sub: string) {
     const p = permMap.get(`${role}:${feature}:${sub}`);
     const isOverride = !!selectedClubId && !!p && p.scope === 'club';
     return {
       is_enabled: p?.is_enabled ?? false,
-      can_read: p?.can_read ?? false,
-      can_write: p?.can_write ?? false,
+      can_read:   p?.can_read   ?? false,
+      can_write:  p?.can_write  ?? false,
       isOverride,
     };
   }
@@ -172,7 +178,6 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
     const current = permMap.get(`${role}:${feature}:${sub}`);
     let { is_enabled, can_read, can_write } = current ?? { is_enabled: false, can_read: false, can_write: false };
 
-    // Apply logic rules
     if (field === 'is_enabled') {
       is_enabled = !is_enabled;
       if (!is_enabled) { can_read = false; can_write = false; }
@@ -190,7 +195,6 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
       is_enabled, can_read, can_write,
       scope: selectedClubId ? 'club' : 'global',
       club_id: selectedClubId ?? null,
-      updated_at: new Date().toISOString(),
     };
 
     startTransition(async () => {
@@ -220,7 +224,9 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
         <button
           onClick={() => router.push('/superadmin/rbac')}
           className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
-            !selectedClubId ? 'bg-brand-600 text-white' : 'border border-surface-border text-slate-400 hover:text-slate-300'
+            !selectedClubId
+              ? 'bg-brand-600 text-white'
+              : 'border border-surface-border text-slate-400 hover:text-slate-300'
           }`}
         >
           Global defaults
@@ -231,7 +237,9 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
             key={club.id}
             onClick={() => router.push(`/superadmin/rbac?club=${club.id}`)}
             className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
-              selectedClubId === club.id ? 'bg-brand-600 text-white' : 'border border-surface-border text-slate-400 hover:text-slate-300'
+              selectedClubId === club.id
+                ? 'bg-brand-600 text-white'
+                : 'border border-surface-border text-slate-400 hover:text-slate-300'
             }`}
           >
             {club.name}
@@ -251,62 +259,90 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
 
       {selectedClubId && (
         <p className="mb-4 text-xs text-slate-500">
-          <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-blue-300 font-semibold text-[10px] uppercase tracking-wide">Override</span>
-          {' '}badges indicate this club has a custom setting that differs from the global default.
+          <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-blue-300 font-semibold text-[10px] uppercase tracking-wide">
+            Override
+          </span>{' '}
+          badges indicate this club has a custom setting that differs from the global default.
         </p>
       )}
 
       {/* Permission matrix table */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto rounded-xl ring-1 ring-surface-border">
         <table className="w-full text-sm">
           <thead>
+            {/* Row 1: Role group headers */}
             <tr className="border-b border-surface-border">
-              <th className="py-3 pr-6 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide w-64">
+              <th className="py-3 pl-4 pr-6 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide w-64">
                 Feature
               </th>
-              {ROLES.map((role) => (
-                <th key={role} colSpan={3} className="py-3 px-2 text-center text-xs font-semibold text-slate-400 uppercase tracking-wide">
-                  {ROLE_LABELS[role]}
-                </th>
-              ))}
+              {ROLES.map((role) => {
+                const theme = ROLE_THEME[role];
+                return (
+                  <th
+                    key={role}
+                    colSpan={3}
+                    className={`py-3 px-4 text-center text-xs font-bold uppercase tracking-wider ${theme.headerBg} ${theme.labelColor} ${theme.border}`}
+                  >
+                    {theme.label}
+                  </th>
+                );
+              })}
             </tr>
-            <tr className="border-b border-surface-border/50">
-              <th />
-              {ROLES.map((role) => (
-                <>
-                  <th key={`${role}-e`} className="pb-2 px-2 text-[10px] text-slate-600 font-medium text-center">On</th>
-                  <th key={`${role}-r`} className="pb-2 px-2 text-[10px] text-slate-600 font-medium text-center">Read</th>
-                  <th key={`${role}-w`} className="pb-2 px-2 text-[10px] text-slate-600 font-medium text-center">Write</th>
-                </>
-              ))}
+
+            {/* Row 2: On / Read / Write sub-headers */}
+            <tr className="border-b-2 border-surface-border">
+              <th className="pl-4" />
+              {ROLES.map((role) => {
+                const theme = ROLE_THEME[role];
+                return (
+                  <Fragment key={role}>
+                    <th className={`pb-2 pt-1 px-3 text-xs font-semibold text-slate-400 text-center ${theme.border}`}>
+                      On
+                    </th>
+                    <th className="pb-2 pt-1 px-3 text-xs font-semibold text-slate-400 text-center">
+                      Read
+                    </th>
+                    <th className="pb-2 pt-1 px-3 text-xs font-semibold text-slate-400 text-center">
+                      Write
+                    </th>
+                  </Fragment>
+                );
+              })}
             </tr>
           </thead>
+
           <tbody>
             {Object.entries(CATEGORIES).map(([catKey, cat]) => (
-              <>
+              <Fragment key={catKey}>
                 {/* Category header row */}
-                <tr key={catKey} className="border-t border-surface-border/30">
+                <tr className="border-t border-surface-border/50 bg-surface/60">
                   <td
                     colSpan={1 + ROLES.length * 3}
-                    className="pt-5 pb-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest"
+                    className="pl-4 pt-4 pb-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest"
                   >
                     {cat.label}
                   </td>
                 </tr>
 
                 {cat.features.map(({ key, sub, label }) => (
-                  <tr key={`${key}:${sub}`} className="border-b border-surface-border/20 hover:bg-white/[0.02] transition-colors">
-                    <td className="py-2.5 pr-6 text-sm text-slate-300">{label}</td>
+                  <tr
+                    key={`${key}:${sub}`}
+                    className="border-b border-surface-border/20 hover:bg-white/[0.025] transition-colors"
+                  >
+                    <td className="py-3 pl-4 pr-6 text-sm text-slate-300">{label}</td>
 
                     {ROLES.map((role) => {
                       const cell = getCell(role, key, sub);
+                      const theme = ROLE_THEME[role];
                       return (
-                        <>
+                        <Fragment key={role}>
                           {/* Enabled toggle */}
-                          <td key={`${role}-e`} className="px-2 text-center">
-                            <div className="flex items-center justify-center gap-1">
+                          <td className={`py-2 px-3 text-center ${theme.border}`}>
+                            <div className="flex items-center justify-center gap-1.5">
                               {cell.isOverride && (
-                                <span className="rounded bg-blue-500/20 px-1 py-0.5 text-[8px] font-bold text-blue-400">OVR</span>
+                                <span className="rounded bg-blue-500/20 px-1 py-0.5 text-[8px] font-bold text-blue-400">
+                                  OVR
+                                </span>
                               )}
                               <Toggle
                                 checked={cell.is_enabled}
@@ -317,7 +353,7 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
                             </div>
                           </td>
                           {/* Read toggle */}
-                          <td key={`${role}-r`} className="px-2 text-center">
+                          <td className="py-2 px-3 text-center">
                             <Toggle
                               checked={cell.can_read}
                               disabled={isPending || !cell.is_enabled}
@@ -326,7 +362,7 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
                             />
                           </td>
                           {/* Write toggle */}
-                          <td key={`${role}-w`} className="px-2 text-center">
+                          <td className="py-2 px-3 text-center">
                             <Toggle
                               checked={cell.can_write}
                               disabled={isPending || !cell.is_enabled || !cell.can_read}
@@ -334,12 +370,12 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
                               onChange={() => handleToggle(role, key, sub, 'can_write')}
                             />
                           </td>
-                        </>
+                        </Fragment>
                       );
                     })}
                   </tr>
                 ))}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -349,28 +385,36 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
 }
 
 function Toggle({
-  checked, disabled, color, onChange,
+  checked,
+  disabled,
+  color,
+  onChange,
 }: {
   checked: boolean;
   disabled: boolean;
   color: 'green' | 'blue' | 'amber';
   onChange: () => void;
 }) {
-  const onColor = { green: 'bg-accent-500', blue: 'bg-blue-500', amber: 'bg-amber-500' }[color];
+  const onColor = {
+    green: 'bg-accent-500',
+    blue:  'bg-blue-500',
+    amber: 'bg-amber-500',
+  }[color];
 
   return (
     <button
+      type="button"
       onClick={onChange}
       disabled={disabled}
       aria-checked={checked}
       role="switch"
-      className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors focus:outline-none disabled:opacity-30 ${
+      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-30 ${
         checked ? onColor : 'bg-slate-700'
       }`}
     >
       <span
-        className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0.5'
+        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-[18px]' : 'translate-x-1'
         }`}
       />
     </button>
