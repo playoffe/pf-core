@@ -135,9 +135,30 @@ export function PlayerProfileView({ player, matchHistory, isOwnProfile }: Props)
           </div>
         </div>
 
+        {/* Tab nav */}
+        <div className="mt-6 flex items-center gap-1 rounded-xl bg-surface p-1 ring-1 ring-surface-border w-fit">
+          {[
+            { label: 'Profile', href: `/p/${player.username}` },
+            { label: 'Matches', href: `/p/${player.username}/matches` },
+            { label: 'Stats', href: `/p/${player.username}/stats` },
+          ].map((tab) => (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
+                tab.label === 'Profile'
+                  ? 'bg-brand-600 text-white'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+
         {/* Match history */}
         {matchHistory.length > 0 && (
-          <section className="mt-8">
+          <section className="mt-6">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-sm font-semibold uppercase tracking-widest text-slate-500">
                 Recent matches

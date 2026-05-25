@@ -147,6 +147,27 @@ export default async function MatchHistoryPage({ params, searchParams }: Props) 
           <span className="text-slate-400">Match history</span>
         </nav>
 
+        {/* Tab nav */}
+        <div className="mb-6 flex items-center gap-1 rounded-xl bg-surface-card p-1 ring-1 ring-surface-border w-fit">
+          {[
+            { label: 'Profile', href: `/p/${username}` },
+            { label: 'Matches', href: `/p/${username}/matches` },
+            { label: 'Stats', href: `/p/${username}/stats` },
+          ].map((tab) => (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
+                tab.label === 'Matches'
+                  ? 'bg-brand-600 text-white'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+
         <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold text-white">Match history</h1>
