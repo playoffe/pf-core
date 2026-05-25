@@ -2,6 +2,7 @@
 
 import { useOptimistic, useTransition } from 'react';
 import { updateFeatureFlagAction } from '@/lib/actions/superadmin';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Flag {
   id: string;
@@ -26,17 +27,23 @@ export function FeatureFlagList({ flags, descriptions }: Props) {
       state.map((f) => f.id === id ? { ...f, is_enabled: isEnabled } : f),
   );
   const [isPending, startTransition] = useTransition();
+  const { confirm } = useConfirm();
 
-  function handleToggle(flag: Flag) {
-    const newState = !flag.is_enabled;
-    const confirmed = window.confirm(
-      `${newState ? 'Enable' : 'Disable'} "${toLabel(flag.feature_module)}" for all users?`,
-    );
-    if (!confirmed) return;
+  async function handleToggle(flag: Flag) {
+    const enabling = !flag.is_enabled;
+    const ok = await confirm({
+      title: `${enabling ? 'Enable' : 'Disable'} ${toLabel(flag.feature_module)}`,
+      message: enabling
+        ? `"${toLabel(flag.feature_module)}" will be turned on for all users platform-wide.`
+        : `"${toLabel(flag.feature_module)}" will be disabled for all users platform-wide. Any dependent UI will be hidden immediately.`,
+      confirmLabel: enabling ? 'Enable' : 'Disable',
+      variant: enabling ? 'default' : 'danger',
+    });
+    if (!ok) return;
 
     startTransition(async () => {
-      updateOptimistic({ id: flag.id, isEnabled: newState });
-      await updateFeatureFlagAction(flag.id, newState);
+      updateOptimistic({ id: flag.id, isEnabled: enabling });
+      await updateFeatureFlagAction(flag.id, enabling);
     });
   }
 

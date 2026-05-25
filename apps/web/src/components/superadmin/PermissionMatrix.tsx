@@ -3,6 +3,7 @@
 import { Fragment, useState, useTransition, useOptimistic, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateRolePermissionAction, resetClubPermissionsAction } from '@/lib/actions/superadmin';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Permission {
   id: string;
@@ -147,6 +148,7 @@ function buildPermMap(permissions: Permission[], clubId?: string) {
 
 export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [optimisticPerms, updateOptimistic] = useOptimistic(
     permissions,
     (state, update: Permission) =>
@@ -220,9 +222,15 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
     });
   }
 
-  function handleResetToGlobal() {
+  async function handleResetToGlobal() {
     if (!selectedClubId) return;
-    if (!window.confirm('Reset all permissions for this club to the global defaults? Club-specific overrides will be deleted.')) return;
+    const ok = await confirm({
+      title: 'Reset to global defaults',
+      message: 'All club-specific permission overrides will be deleted and global defaults will apply. This cannot be undone.',
+      confirmLabel: 'Reset',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setIsResetting(true);
     startTransition(async () => {
       await resetClubPermissionsAction(selectedClubId);

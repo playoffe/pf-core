@@ -2,6 +2,7 @@
 
 import { useTransition } from 'react';
 import { suspendClubAction } from '@/lib/actions/superadmin';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Props {
   clubId: string;
@@ -11,15 +12,25 @@ interface Props {
 
 export function SuspendClubButton({ clubId, clubName, isSuspended }: Props) {
   const [isPending, startTransition] = useTransition();
+  const { confirm } = useConfirm();
 
-  function handleClick() {
-    const action = isSuspended ? 'reactivate' : 'suspend';
-    const confirmed = window.confirm(
-      `Are you sure you want to ${action} "${clubName}"?${
-        !isSuspended ? ' This will prevent the club from being accessed by its managers.' : ''
-      }`,
+  async function handleClick() {
+    const ok = await confirm(
+      isSuspended
+        ? {
+            title: `Reactivate ${clubName}`,
+            message: 'The club and its managers will regain full access to the platform.',
+            confirmLabel: 'Reactivate',
+            variant: 'default',
+          }
+        : {
+            title: `Suspend ${clubName}`,
+            message: 'Club managers will lose access immediately. Players can still view public pages.',
+            confirmLabel: 'Suspend',
+            variant: 'danger',
+          },
     );
-    if (!confirmed) return;
+    if (!ok) return;
 
     startTransition(async () => {
       await suspendClubAction(clubId, !isSuspended);

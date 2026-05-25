@@ -2,6 +2,7 @@
 
 import { useTransition } from 'react';
 import { revokeAdminInviteAction } from '@/lib/actions/superadmin';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Props {
   inviteId: string;
@@ -10,9 +11,16 @@ interface Props {
 
 export function RevokeInviteButton({ inviteId, clubName }: Props) {
   const [isPending, startTransition] = useTransition();
+  const { confirm } = useConfirm();
 
-  function handleClick() {
-    if (!window.confirm(`Revoke the invite for "${clubName}"? This cannot be undone.`)) return;
+  async function handleClick() {
+    const ok = await confirm({
+      title: 'Revoke invite',
+      message: `The pending invite for "${clubName}" will be cancelled. The recipient's link will stop working immediately.`,
+      confirmLabel: 'Revoke',
+      variant: 'danger',
+    });
+    if (!ok) return;
     startTransition(async () => {
       await revokeAdminInviteAction(inviteId);
     });
