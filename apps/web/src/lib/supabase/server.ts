@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import type { Database } from '@pickleball/db';
+import type { User } from '@supabase/supabase-js';
 
 export async function createClient() {
   const cookieStore = await cookies();
@@ -29,4 +30,23 @@ export function createAdminClient() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
+}
+
+/**
+ * Returns true if the given Supabase user holds the super_admin JWT claim.
+ * This claim is set in app_metadata and can only be written by the service role.
+ */
+export function isSuperAdmin(user: User | null): boolean {
+  if (!user) return false;
+  return user.app_metadata?.role === 'super_admin';
+}
+
+/**
+ * Returns the active roles array from the user's JWT.
+ * Falls back to ['player'] if no roles claim is present.
+ */
+export function getUserRoles(user: User | null): string[] {
+  if (!user) return [];
+  const roles = user.app_metadata?.roles as string[] | undefined;
+  return roles ?? [];
 }
