@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { createBrowserClient } from '@supabase/ssr';
 import { createRefereePinAction, revokePinAction } from '@/lib/actions/referee';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 
@@ -15,15 +16,57 @@ interface Pin {
 interface Props {
   tournamentId: string;
   pins: Pin[];
+  initialSessions?: Array<{
+    id: string;
+    referee_name: string;
+    last_active_at: string | null;
+    matches_scored_count: number;
+  }>;
 }
 
-export function RefereePinsPanel({ tournamentId, pins }: Props) {
+export function RefereePinsPanel({ tournamentId, pins, initialSessions }: Props) {
   const router = useRouter();
   const { confirm } = useConfirm();
   const [label, setLabel] = useState('');
   const [creating, setCreating] = useState(false);
   const [newPin, setNewPin] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState(initialSessions ?? []);
+
+  useEffect(() => {
+    if (!tournamentId) return;
+
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    );
+
+    const channel = supabase
+      .channel(`referee-sessions-${tournamentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'referee_sessions',
+          filter: `tournament_id=eq.${tournamentId}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setSessions((prev) => [payload.new as any, ...prev]);
+          } else if (payload.eventType === 'UPDATE') {
+            setSessions((prev) =>
+              prev.map((s) => s.id === (payload.new as any).id ? (payload.new as any) : s),
+            );
+          } else if (payload.eventType === 'DELETE') {
+            setSessions((prev) => prev.filter((s) => s.id !== (payload.old as any).id));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [tournamentId]);
 
   async function handleCreate() {
     setCreating(true);
@@ -126,6 +169,37 @@ export function RefereePinsPanel({ tournamentId, pins }: Props) {
         </button>
       </div>
       {error && <p className="px-5 pb-3 text-xs text-red-400">{error}</p>}
+
+      {/* Active referee sessions */}
+      <div className="mt-8">
+        <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">
+          Active referees
+        </h3>
+        {sessions.length === 0 ? (
+          <p className="text-sm text-slate-600">No active referees.</p>
+        ) : (
+          <div className="space-y-2">
+            {sessions.map((session) => (
+              <div
+                key={session.id}
+                className="flex items-center justify-between rounded-xl bg-surface-card px-4 py-3 ring-1 ring-surface-border"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-white">{session.referee_name}</p>
+                  {session.last_active_at && (
+                    <p className="text-xs text-slate-500">
+                      Last active {new Date(session.last_active_at).toLocaleTimeString()}
+                    </p>
+                  )}
+                </div>
+                <span className="text-xs text-slate-500">
+                  {session.matches_scored_count ?? 0} match{(session.matches_scored_count ?? 0) !== 1 ? 'es' : ''} scored
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
