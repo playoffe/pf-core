@@ -300,19 +300,19 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
             </tr>
 
             {/* Row 2: On / Read / Write sub-headers */}
-            <tr className="border-b-2 border-surface-border">
+            <tr className="border-b-2 border-surface-border bg-white/[0.03]">
               <th className="pl-4" />
               {ROLES.map((role) => {
                 const theme = ROLE_THEME[role];
                 return (
                   <Fragment key={role}>
-                    <th className={`pb-2 pt-1 px-3 text-xs font-semibold text-slate-400 text-center ${theme.border}`}>
+                    <th className={`py-2.5 px-3 text-[11px] font-bold text-accent-400 text-center uppercase tracking-widest ${theme.border}`}>
                       On
                     </th>
-                    <th className="pb-2 pt-1 px-3 text-xs font-semibold text-slate-400 text-center">
+                    <th className="py-2.5 px-3 text-[11px] font-bold text-blue-400 text-center uppercase tracking-widest">
                       Read
                     </th>
-                    <th className="pb-2 pt-1 px-3 text-xs font-semibold text-slate-400 text-center">
+                    <th className="py-2.5 px-3 text-[11px] font-bold text-amber-400 text-center uppercase tracking-widest">
                       Write
                     </th>
                   </Fragment>
