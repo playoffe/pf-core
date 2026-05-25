@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient, isSuperAdmin, getUserRoles } from '@/lib/supabase/server';
 import { NotificationBell } from './NotificationBell';
 import { NavLink } from './NavLink';
 import { MobileNav } from './MobileNav';
+import { RoleToggle } from './RoleToggle';
 import type { Notification } from '@/lib/actions/notifications';
 
 export async function AppNav() {
@@ -14,6 +15,9 @@ export async function AppNav() {
   const { data: player } = user
     ? await supabase.from('players').select('username, full_name').eq('id', user.id).single()
     : { data: null };
+
+  const superAdmin = isSuperAdmin(user);
+  const roles = getUserRoles(user);
 
   // Fetch initial notifications for the bell (last 30, server-side)
   let initialNotifications: Notification[] = [];
@@ -37,6 +41,7 @@ export async function AppNav() {
             isLoggedIn={!!player}
             username={player?.username}
             fullName={player?.full_name ?? undefined}
+            isSuperAdmin={superAdmin}
           />
           <Link href={player ? '/dashboard' : '/'} className="text-lg font-black text-white shrink-0">
             PLAY<span className="text-brand-500">OFFE</span>
@@ -56,10 +61,16 @@ export async function AppNav() {
               <NavLink href="/tournaments/new" exact>New tournament</NavLink>
             </>
           )}
+          {superAdmin && (
+            <Link href="/superadmin" className="text-violet-400 hover:text-violet-300 text-sm font-semibold transition-colors">
+              Super Admin
+            </Link>
+          )}
         </div>
 
         {/* Right side */}
         <div className="flex items-center gap-4">
+          <RoleToggle roles={roles} />
           {player ? (
             <>
               {/* Notification bell */}

@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { AccountSecurityPanel } from '@/components/settings/AccountSecurityPanel';
+import { ActivatePlayerButton } from '@/components/settings/ActivatePlayerButton';
 
 export const metadata: Metadata = { title: 'Account security' };
 
@@ -16,6 +17,9 @@ export default async function AccountSettingsPage() {
     .select('username, full_name')
     .eq('id', user.id)
     .single();
+
+  const roles = (user.app_metadata?.roles as string[] | undefined) ?? [];
+  const isAdminOnly = roles.includes('admin') && !roles.includes('player');
 
   return (
     <>
@@ -42,6 +46,18 @@ export default async function AccountSettingsPage() {
       </div>
 
       <AccountSecurityPanel email={user.email ?? ''} />
+
+      {/* Player profile activation (admin-only accounts) */}
+      {isAdminOnly && (
+        <div className="mt-4 rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
+          <h2 className="text-base font-semibold text-white mb-1">Player profile</h2>
+          <p className="text-sm text-slate-500 mb-4">
+            You&apos;re currently using an admin account. Activate a player profile to compete in
+            tournaments and appear in rankings.
+          </p>
+          <ActivatePlayerButton />
+        </div>
+      )}
 
       {/* Danger zone */}
       <div className="mt-6 rounded-xl ring-1 ring-red-800/30 overflow-hidden">

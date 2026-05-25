@@ -8,6 +8,7 @@ interface MobileNavProps {
   isLoggedIn: boolean;
   username?: string;
   fullName?: string;
+  isSuperAdmin?: boolean;
 }
 
 interface NavEntry {
@@ -31,7 +32,7 @@ const AUTH_LINKS: NavEntry[] = [
   { label: 'New tournament', href: '/tournaments/new', exact: true },
 ];
 
-export function MobileNav({ isLoggedIn, username, fullName }: MobileNavProps) {
+export function MobileNav({ isLoggedIn, username, fullName, isSuperAdmin }: MobileNavProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -112,6 +113,20 @@ export function MobileNav({ isLoggedIn, username, fullName }: MobileNavProps) {
                 </Link>
               </li>
             ))}
+            {isSuperAdmin && (
+              <li>
+                <Link
+                  href="/superadmin"
+                  className={`flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                    isActive('/superadmin', true)
+                      ? 'bg-violet-600/20 text-violet-300'
+                      : 'text-violet-400 hover:bg-surface hover:text-violet-300'
+                  }`}
+                >
+                  Super Admin
+                </Link>
+              </li>
+            )}
           </ul>
         </nav>
 

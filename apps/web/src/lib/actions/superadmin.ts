@@ -1,0 +1,548 @@
+'use server';
+
+/**
+ * Super Admin server actions.
+ *
+ * All write operations require the caller to hold the super_admin JWT claim.
+ * All reads use the admin client (service role) to bypass RLS.
+ */
+
+import { createClient, createAdminClient, isSuperAdmin } from '@/lib/supabase/server';
+import { sendEmail } from '@/lib/email/service';
+import { buildAdminInviteEmail } from '@/lib/email/templates/admin-invite';
+import { revalidatePath } from 'next/cache';
+import crypto from 'crypto';
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+
+// ── Guard ────────────────────────────────────────────────────────────────────
+
+async function assertSuperAdmin() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!isSuperAdmin(user)) throw new Error('Forbidden: Super Admin only');
+  return { user: user!, admin: createAdminClient() };
+}
+
+// ── Audit log helper ─────────────────────────────────────────────────────────
+
+async function writeAuditLog(opts: {
+  admin: ReturnType<typeof createAdminClient>;
+  actorId: string;
+  actionType: string;
+  targetType?: string;
+  targetId?: string;
+  oldValue?: unknown;
+  newValue?: unknown;
+  metadata?: unknown;
+}) {
+  const { admin, actorId, actionType, targetType, targetId, oldValue, newValue, metadata } = opts;
+  await admin.from('audit_log' as any).insert({
+    action_type: actionType,
+    actor_id: actorId,
+    target_type: targetType ?? null,
+    target_id: targetId ?? null,
+    old_value: oldValue ?? null,
+    new_value: newValue ?? null,
+    metadata: metadata ?? null,
+  });
+}
+
+// ── Platform stats ────────────────────────────────────────────────────────────
+
+export async function getPlatformStatsAction() {
+  const { admin } = await assertSuperAdmin();
+
+  const [
+    { count: clubCount },
+    { count: playerCount },
+    { count: tournamentCount },
+    { count: matchCount },
+  ] = await Promise.all([
+    admin.from('clubs').select('*', { count: 'exact', head: true }),
+    admin.from('players').select('*', { count: 'exact', head: true }),
+    admin.from('tournaments')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'in_progress'),
+    admin.from('matches').select('*', { count: 'exact', head: true }),
+  ]);
+
+  return {
+    totalClubs: clubCount ?? 0,
+    totalPlayers: playerCount ?? 0,
+    activeTournaments: tournamentCount ?? 0,
+    totalMatches: matchCount ?? 0,
+  };
+}
+
+// ── Club management ───────────────────────────────────────────────────────────
+
+export async function getAllClubsAction() {
+  const { admin } = await assertSuperAdmin();
+
+  const { data: clubs } = await admin
+    .from('clubs')
+    .select('id, name, slug, subscription_tier, is_suspended, created_at')
+    .order('created_at', { ascending: false });
+
+  return clubs ?? [];
+}
+
+export async function suspendClubAction(clubId: string, suspend: boolean) {
+  const { user, admin } = await assertSuperAdmin();
+
+  const { data: club } = await admin.from('clubs').select('name').eq('id', clubId).single();
+
+  await admin.from('clubs').update({ is_suspended: suspend } as any).eq('id', clubId);
+
+  await writeAuditLog({
+    admin,
+    actorId: user.id,
+    actionType: suspend ? 'club_suspended' : 'club_reactivated',
+    targetType: 'club',
+    targetId: clubId,
+    newValue: { name: club?.name, is_suspended: suspend },
+  });
+
+  revalidatePath('/superadmin/clubs');
+  return { success: true };
+}
+
+// ── Admin invite flow ─────────────────────────────────────────────────────────
+
+export async function createAdminInviteAction(input: {
+  clubName: string;
+  inviteeEmail: string;
+  inviteeName: string;
+  subscriptionTier?: 'free' | 'starter' | 'pro' | 'enterprise';
+  expiryDays?: number;
+}) {
+  const { user, admin } = await assertSuperAdmin();
+
+  const {
+    clubName,
+    inviteeEmail,
+    inviteeName,
+    subscriptionTier = 'free',
+    expiryDays = 7,
+  } = input;
+
+  // Generate a cryptographically random token
+  const token = crypto.randomBytes(32).toString('hex');
+
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + expiryDays);
+
+  const { error } = await admin.from('admin_invites' as any).insert({
+    club_name: clubName,
+    invitee_email: inviteeEmail,
+    invitee_name: inviteeName,
+    subscription_tier: subscriptionTier,
+    token,
+    expires_at: expiresAt.toISOString(),
+    created_by: user.id,
+  });
+
+  if (error) return { error: 'Failed to create invite' };
+
+  // Send invite email
+  const inviteUrl = `${APP_URL}/invite/${token}`;
+  const payload = buildAdminInviteEmail({
+    clubName,
+    inviteeName,
+    inviteUrl,
+    expiresAt: expiresAt.toISOString(),
+    appUrl: APP_URL,
+  });
+  await sendEmail({ to: inviteeEmail, ...payload });
+
+  await writeAuditLog({
+    admin,
+    actorId: user.id,
+    actionType: 'admin_invite_created',
+    targetType: 'admin_invite',
+    newValue: { clubName, inviteeEmail, inviteeName, expiresAt },
+  });
+
+  revalidatePath('/superadmin/invitations');
+  return { success: true, inviteUrl };
+}
+
+export async function revokeAdminInviteAction(inviteId: string) {
+  const { user, admin } = await assertSuperAdmin();
+
+  await admin
+    .from('admin_invites' as any)
+    .update({ revoked_at: new Date().toISOString() })
+    .eq('id', inviteId);
+
+  await writeAuditLog({
+    admin,
+    actorId: user.id,
+    actionType: 'admin_invite_revoked',
+    targetType: 'admin_invite',
+    targetId: inviteId,
+  });
+
+  revalidatePath('/superadmin/invitations');
+  return { success: true };
+}
+
+export async function getAdminInvitesAction() {
+  const { admin } = await assertSuperAdmin();
+
+  const { data } = await admin
+    .from('admin_invites' as any)
+    .select('id, club_name, invitee_email, invitee_name, subscription_tier, expires_at, claimed_at, revoked_at, created_at')
+    .order('created_at', { ascending: false });
+
+  return (data ?? []) as Array<{
+    id: string;
+    club_name: string;
+    invitee_email: string;
+    invitee_name: string | null;
+    subscription_tier: string;
+    expires_at: string;
+    claimed_at: string | null;
+    revoked_at: string | null;
+    created_at: string;
+  }>;
+}
+
+/**
+ * Called from the /invite/[token] claim page (no auth required — caller is the invitee).
+ * Validates the token, creates a Supabase auth user, club, and user_roles row.
+ */
+export async function claimAdminInviteAction(input: {
+  token: string;
+  password: string;
+  fullName: string;
+  username: string;
+}) {
+  const admin = createAdminClient();
+  const { token, password, fullName, username } = input;
+
+  // 1. Validate the invite token
+  const { data: invite } = await admin
+    .from('admin_invites' as any)
+    .select('id, club_name, invitee_email, invitee_name, subscription_tier, expires_at, claimed_at, revoked_at')
+    .eq('token', token)
+    .single() as { data: {
+      id: string; club_name: string; invitee_email: string; invitee_name: string | null;
+      subscription_tier: string; expires_at: string; claimed_at: string | null; revoked_at: string | null;
+    } | null };
+
+  if (!invite) return { error: 'Invalid invite link.' };
+  if (invite.revoked_at) return { error: 'This invite has been revoked. Contact the platform administrator.' };
+  if (invite.claimed_at) return { error: 'This invite has already been used.' };
+  if (new Date(invite.expires_at) < new Date()) return { error: 'This invite link has expired. Contact the platform administrator.' };
+
+  // 2. Check if this email already has a Supabase auth account
+  const { data: existingUsers } = await admin.auth.admin.listUsers();
+  const existingUser = existingUsers?.users.find((u) => u.email === invite.invitee_email);
+
+  let authUserId: string;
+
+  if (existingUser) {
+    // Path A: existing player gets the Admin role added
+    authUserId = existingUser.id;
+  } else {
+    // Path B: create a new Supabase auth account
+    const { data: newUser, error: createError } = await admin.auth.admin.createUser({
+      email: invite.invitee_email,
+      password,
+      email_confirm: true,
+      app_metadata: { roles: ['admin'] },
+    });
+    if (createError || !newUser.user) {
+      return { error: createError?.message ?? 'Failed to create account.' };
+    }
+    authUserId = newUser.user.id;
+
+    // Create the players record
+    const usernameSlug = username.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    await admin.from('players').insert({
+      id: authUserId,
+      email: invite.invitee_email,
+      full_name: fullName,
+      username: usernameSlug,
+      role: 'admin',
+    });
+  }
+
+  // 3. Create the club
+  const clubSlug = invite.club_name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  const { data: club, error: clubError } = await admin.from('clubs').insert({
+    name: invite.club_name,
+    slug: clubSlug,
+    subscription_tier: invite.subscription_tier as 'free' | 'starter' | 'pro' | 'enterprise',
+  }).select('id').single();
+
+  if (clubError || !club) {
+    return { error: 'Failed to create club. The club name may already be taken.' };
+  }
+
+  // 4. Add the user to club_managers as owner (existing system)
+  await admin.from('club_managers').insert({
+    club_id: club.id,
+    player_id: authUserId,
+    role: 'owner',
+  });
+
+  // 5. Insert user_roles row
+  await admin.from('user_roles' as any).insert({
+    user_id: authUserId,
+    role: 'admin',
+    club_id: club.id,
+  });
+
+  // 6. Update JWT app_metadata to include roles[] (for dual-role support)
+  const currentRoles = existingUser?.app_metadata?.roles as string[] ?? [];
+  if (!currentRoles.includes('admin')) {
+    await admin.auth.admin.updateUserById(authUserId, {
+      app_metadata: {
+        ...existingUser?.app_metadata,
+        roles: [...currentRoles, 'admin'],
+      },
+    });
+  }
+
+  // 7. Mark invite as claimed
+  await admin
+    .from('admin_invites' as any)
+    .update({ claimed_at: new Date().toISOString() })
+    .eq('id', invite.id);
+
+  await admin.from('audit_log' as any).insert({
+    action_type: 'admin_invite_claimed',
+    actor_id: authUserId,
+    target_type: 'admin_invite',
+    target_id: invite.id,
+    new_value: { club_id: club.id, club_name: invite.club_name },
+  });
+
+  return { success: true };
+}
+
+// ── Feature flags ─────────────────────────────────────────────────────────────
+
+export async function getFeatureFlagsAction() {
+  const { admin } = await assertSuperAdmin();
+  const { data } = await admin.from('feature_flags' as any).select('id, feature_module, is_enabled, updated_at').order('feature_module');
+  return (data ?? []) as Array<{ id: string; feature_module: string; is_enabled: boolean; updated_at: string }>;
+}
+
+export async function updateFeatureFlagAction(flagId: string, isEnabled: boolean) {
+  const { user, admin } = await assertSuperAdmin();
+
+  const { data: flag } = await admin.from('feature_flags' as any).select('feature_module, is_enabled').eq('id', flagId).single() as { data: { feature_module: string; is_enabled: boolean } | null };
+
+  await admin
+    .from('feature_flags' as any)
+    .update({ is_enabled: isEnabled, updated_by: user.id, updated_at: new Date().toISOString() })
+    .eq('id', flagId);
+
+  await writeAuditLog({
+    admin,
+    actorId: user.id,
+    actionType: 'feature_flag_updated',
+    targetType: 'feature_flag',
+    targetId: flagId,
+    oldValue: { is_enabled: flag?.is_enabled },
+    newValue: { feature_module: flag?.feature_module, is_enabled: isEnabled },
+  });
+
+  revalidatePath('/superadmin/flags');
+  return { success: true };
+}
+
+// ── RBAC permissions ──────────────────────────────────────────────────────────
+
+export async function getRolePermissionsAction(clubId?: string) {
+  const { admin } = await assertSuperAdmin();
+
+  // Fetch global defaults + optional club overrides in one query
+  const query = admin
+    .from('role_permissions' as any)
+    .select('id, role, feature, sub_feature, is_enabled, can_read, can_write, scope, club_id, updated_at')
+    .order('feature')
+    .order('sub_feature');
+
+  if (clubId) {
+    (query as any).or(`scope.eq.global,club_id.eq.${clubId}`);
+  } else {
+    (query as any).eq('scope', 'global');
+  }
+
+  const { data } = await query;
+  return (data ?? []) as Array<{
+    id: string;
+    role: string;
+    feature: string;
+    sub_feature: string | null;
+    is_enabled: boolean;
+    can_read: boolean;
+    can_write: boolean;
+    scope: string;
+    club_id: string | null;
+    updated_at: string;
+  }>;
+}
+
+export async function updateRolePermissionAction(input: {
+  role: string;
+  feature: string;
+  subFeature?: string;
+  isEnabled: boolean;
+  canRead: boolean;
+  canWrite: boolean;
+  scope: 'global' | 'club';
+  clubId?: string;
+}) {
+  const { user, admin } = await assertSuperAdmin();
+  const { role, feature, subFeature, isEnabled, canRead, canWrite, scope, clubId } = input;
+
+  // Fetch current value for audit
+  const { data: current } = await admin
+    .from('role_permissions' as any)
+    .select('id, is_enabled, can_read, can_write')
+    .eq('role', role)
+    .eq('feature', feature)
+    .eq('scope', scope)
+    .maybeSingle() as { data: { id: string; is_enabled: boolean; can_read: boolean; can_write: boolean } | null };
+
+  const now = new Date().toISOString();
+
+  if (current) {
+    // Update existing row
+    await admin
+      .from('role_permissions' as any)
+      .update({ is_enabled: isEnabled, can_read: canRead, can_write: canWrite, updated_by: user.id, updated_at: now })
+      .eq('id', current.id);
+  } else {
+    // Insert new club-level override
+    await admin.from('role_permissions' as any).insert({
+      role,
+      feature,
+      sub_feature: subFeature ?? null,
+      is_enabled: isEnabled,
+      can_read: canRead,
+      can_write: canWrite,
+      scope,
+      club_id: clubId ?? null,
+      updated_by: user.id,
+      updated_at: now,
+    });
+  }
+
+  await writeAuditLog({
+    admin,
+    actorId: user.id,
+    actionType: scope === 'club' ? 'permission_changed_club' : 'permission_changed_global',
+    targetType: 'role_permission',
+    metadata: { role, feature, subFeature, scope, clubId },
+    oldValue: current ? { is_enabled: current.is_enabled, can_read: current.can_read, can_write: current.can_write } : null,
+    newValue: { is_enabled: isEnabled, can_read: canRead, can_write: canWrite },
+  });
+
+  revalidatePath('/superadmin/rbac');
+  return { success: true };
+}
+
+export async function resetClubPermissionsAction(clubId: string) {
+  const { user, admin } = await assertSuperAdmin();
+
+  // Delete all club-specific overrides for this club
+  await admin.from('role_permissions' as any).delete().eq('scope', 'club').eq('club_id', clubId);
+
+  await writeAuditLog({
+    admin,
+    actorId: user.id,
+    actionType: 'permissions_reset_to_global',
+    targetType: 'club',
+    targetId: clubId,
+  });
+
+  revalidatePath('/superadmin/rbac');
+  return { success: true };
+}
+
+// ── Dual-role: Admin → activate player profile ────────────────────────────────
+
+export async function activatePlayerProfileAction() {
+  'use server';
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const roles = (user.app_metadata?.roles as string[] | undefined) ?? [];
+  if (roles.includes('player')) return { error: 'Player profile already active' };
+  if (!roles.includes('admin')) return { error: 'Only admin accounts can activate a player profile' };
+
+  const admin = createAdminClient();
+
+  // Insert player role
+  await (admin.from('user_roles' as any).insert({ user_id: user.id, role: 'player', club_id: null }));
+
+  // Create global_stats row if missing
+  const { data: existing } = await admin
+    .from('global_stats')
+    .select('player_id')
+    .eq('player_id', user.id)
+    .maybeSingle();
+  if (!existing) {
+    await admin.from('global_stats').insert({ player_id: user.id });
+  }
+
+  // Update JWT app_metadata to add 'player' to roles[]
+  await admin.auth.admin.updateUserById(user.id, {
+    app_metadata: { ...user.app_metadata, roles: [...roles, 'player'] },
+  });
+
+  revalidatePath('/settings/account');
+  return { success: true };
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+
+export async function getAuditLogAction(opts: {
+  page?: number;
+  actionType?: string;
+  fromDate?: string;
+  toDate?: string;
+}) {
+  const { admin } = await assertSuperAdmin();
+  const { page = 1, actionType, fromDate, toDate } = opts;
+  const pageSize = 50;
+
+  let query = (admin.from('audit_log' as any) as any)
+    .select('id, action_type, actor_id, target_type, target_id, old_value, new_value, metadata, created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range((page - 1) * pageSize, page * pageSize - 1);
+
+  if (actionType) query = query.eq('action_type', actionType);
+  if (fromDate) query = query.gte('created_at', fromDate);
+  if (toDate) query = query.lte('created_at', toDate);
+
+  const { data, count } = await query;
+
+  return {
+    entries: (data ?? []) as Array<{
+      id: string;
+      action_type: string;
+      actor_id: string | null;
+      target_type: string | null;
+      target_id: string | null;
+      old_value: unknown;
+      new_value: unknown;
+      metadata: unknown;
+      created_at: string;
+    }>,
+    total: count ?? 0,
+    pageSize,
+  };
+}
