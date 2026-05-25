@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { removeEntryAction, updateSeedAction } from '@/lib/actions/categories';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Player {
   id: string;
@@ -27,12 +28,13 @@ interface Props {
 
 export function EntryList({ entries, tournamentId }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [removing, setRemoving] = useState<string | null>(null);
   const [seedEditing, setSeedEditing] = useState<string | null>(null);
   const [seedValues, setSeedValues] = useState<Record<string, string>>({});
 
   async function handleRemove(entryId: string) {
-    if (!confirm('Remove this player from the category?')) return;
+    if (!await confirm({ title: 'Remove player', message: 'Remove this player from the category? They can re-register if spots are available.', confirmLabel: 'Remove', variant: 'danger' })) return;
     setRemoving(entryId);
     await removeEntryAction(entryId, tournamentId);
     router.refresh();

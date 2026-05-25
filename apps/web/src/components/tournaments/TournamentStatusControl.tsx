@@ -6,6 +6,7 @@ import {
   updateTournamentStatusAction,
   type TournamentStatus,
 } from '@/lib/actions/tournaments';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Transition {
   label: string;
@@ -40,6 +41,7 @@ interface Props {
 
 export function TournamentStatusControl({ tournamentId, currentStatus }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,7 +62,7 @@ export function TournamentStatusControl({ tournamentId, currentStatus }: Props) 
   }
 
   async function handleCancel() {
-    if (!confirm('Cancel this tournament? This cannot be undone.')) return;
+    if (!await confirm({ title: 'Cancel tournament?', message: 'This will permanently cancel the tournament. All participants will be notified. This cannot be undone.', confirmLabel: 'Cancel tournament', variant: 'danger' })) return;
     setLoading(true);
     const result = await updateTournamentStatusAction(tournamentId, 'cancelled');
     if (result?.error) {

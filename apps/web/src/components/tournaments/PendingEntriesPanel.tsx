@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 import Link from 'next/link';
 import {
   approveEntryAction,
@@ -62,6 +63,7 @@ const PLAY_FORMAT: Record<string, string> = {
 
 export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, entries }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [acting, setActing] = useState<string | null>(null);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -82,7 +84,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
   }
 
   async function handleReject(entryId: string) {
-    if (!confirm('Reject this registration?')) return;
+    if (!await confirm({ title: 'Reject registration', message: 'Remove this registration? The player will need to re-register.', confirmLabel: 'Reject', variant: 'danger' })) return;
     setActing(entryId);
     const result = await rejectEntryAction(entryId);
     if (result.error) setMsg(`Error: ${result.error}`);
@@ -91,7 +93,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
   }
 
   async function handleRemove(entryId: string, playerName: string) {
-    if (!confirm(`Remove ${playerName} from this category? This will promote the next waitlisted player.`)) return;
+    if (!await confirm({ title: 'Remove entry', message: `Remove ${playerName} from this category? The next waitlisted player will be promoted.`, confirmLabel: 'Remove', variant: 'danger' })) return;
     setActing(entryId);
     const result = await removeEntryAction(entryId);
     if (result.error) setMsg(`Error: ${result.error}`);
@@ -100,7 +102,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
   }
 
   async function handleWithdraw(entryId: string, playerName: string) {
-    if (!confirm(`Withdraw ${playerName} mid-tournament? Their remaining matches will be awarded as walkovers to opponents.`)) return;
+    if (!await confirm({ title: `Withdraw ${playerName}?`, message: 'Their remaining scheduled matches will be awarded as walkovers to opponents. This cannot be undone.', confirmLabel: 'Withdraw', variant: 'danger' })) return;
     setActing(entryId);
     const result = await withdrawAndWalkoverAction(entryId, tournamentId);
     if ('error' in result && result.error) setMsg(`Error: ${result.error}`);
@@ -113,7 +115,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
   }
 
   async function handlePromote(entryId: string, playerName: string) {
-    if (!confirm(`Promote ${playerName} from waitlist to active?`)) return;
+    if (!await confirm({ title: 'Promote from waitlist', message: `Move ${playerName} to active status?`, confirmLabel: 'Promote' })) return;
     setActing(entryId);
     const result = await promoteWaitlistedEntryAction(entryId);
     if (result.error) setMsg(`Error: ${result.error}`);
@@ -122,7 +124,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
   }
 
   async function handleBulkApprove() {
-    if (!confirm(`Approve all ${pending.length} pending entries for ${category.name}?`)) return;
+    if (!await confirm({ title: 'Approve all entries', message: `Approve all ${pending.length} pending registrations for ${category.name}?`, confirmLabel: 'Approve all' })) return;
     setBulkLoading(true);
     const result = await bulkApproveEntriesAction(category.id);
     if (result.error) {

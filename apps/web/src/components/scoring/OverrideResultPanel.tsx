@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { overrideMatchResultAction } from '@/lib/actions/scoring';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface SetScore {
   score_a: number;
@@ -29,6 +30,7 @@ export function OverrideResultPanel({
   currentSets,
 }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [open, setOpen] = useState(false);
   const [winnerId, setWinnerId] = useState(currentWinnerId ?? entryAId);
   const [sets, setSets] = useState<SetScore[]>(
@@ -56,7 +58,8 @@ export function OverrideResultPanel({
   }
 
   async function handleSave() {
-    if (!confirm(`Override result to: ${winnerId === entryAId ? entryAName : entryBName} wins? This rewrites the bracket.`)) return;
+    const winnerName = winnerId === entryAId ? entryAName : entryBName;
+    if (!await confirm({ title: 'Override result?', message: `Mark ${winnerName} as the winner. The previous bracket advancement will be undone and re-applied. Downstream completed matches cannot be overridden.`, confirmLabel: 'Override', variant: 'danger' })) return;
     setSaving(true);
     setError(null);
     const payload = sets.map((s, i) => ({

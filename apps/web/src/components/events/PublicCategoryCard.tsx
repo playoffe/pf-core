@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { registerForCategoryAction, registerDoublesAction, withdrawEntryAction } from '@/lib/actions/registration';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Category {
   id: string;
@@ -56,6 +57,7 @@ export function PublicCategoryCard({
   matchProgress,
 }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localStatus, setLocalStatus] = useState(myStatus);
@@ -104,7 +106,7 @@ export function PublicCategoryCard({
   }
 
   async function handleWithdraw() {
-    if (!confirm('Withdraw from this category? You can re-register if spots are still available.')) return;
+    if (!await confirm({ title: 'Withdraw from category?', message: 'You can re-register if spots are still available.', confirmLabel: 'Withdraw', variant: 'danger' })) return;
     router.push(`/events/${tournamentSlug}/withdraw/${category.slug}`);
   }
 

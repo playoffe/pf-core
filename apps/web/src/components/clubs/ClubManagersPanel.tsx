@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { addClubManagerAction, removeClubManagerAction } from '@/lib/actions/clubs';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Manager {
   role: string;
@@ -19,6 +20,7 @@ interface Props {
 
 export function ClubManagersPanel({ clubId, managers, isOwner, currentUserId }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -41,7 +43,7 @@ export function ClubManagersPanel({ clubId, managers, isOwner, currentUserId }: 
   }
 
   async function handleRemove(playerId: string, name: string) {
-    if (!confirm(`Remove ${name} as a club manager?`)) return;
+    if (!await confirm({ title: 'Remove manager', message: `Remove ${name} as a club manager? They will lose access to manage this club.`, confirmLabel: 'Remove', variant: 'danger' })) return;
     setRemoving(playerId);
     const result = await removeClubManagerAction(clubId, playerId);
     if (result.error) setMsg({ type: 'error', text: result.error });

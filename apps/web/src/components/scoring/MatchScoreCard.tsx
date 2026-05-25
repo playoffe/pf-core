@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { startMatchAction, submitResultAction, walkoverAction, overrideMatchResultAction, approvePlayerReportAction } from '@/lib/actions/scoring';
 import { useRealtimeMatch } from '@/hooks/useRealtimeMatch';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface SetScore {
   set_number: number;
@@ -59,6 +60,7 @@ export function MatchScoreCard({
   playerReportedSets,
 }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [status, setStatus] = useState(initialStatus);
   const [court, setCourt] = useState<number>(initialCourt ?? 1);
   const [sets, setSets] = useState<SetScore[]>(
@@ -163,7 +165,8 @@ export function MatchScoreCard({
   }
 
   async function handleWalkover(winnerId: string) {
-    if (!confirm(`Record walkover — ${winnerId === entryA?.id ? entryA?.player_name : entryB?.player_name} wins?`)) return;
+    const winnerName = winnerId === entryA?.id ? entryA?.player_name : entryB?.player_name;
+    if (!await confirm({ title: 'Record walkover?', message: `${winnerName} wins by walkover. The opponent will be marked as a no-show.`, confirmLabel: 'Record walkover' })) return;
     setLoading(true);
     setError(null);
     const result = await walkoverAction(matchId, winnerId);

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createRefereePinAction, revokePinAction } from '@/lib/actions/referee';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Pin {
   id: string;
@@ -18,6 +19,7 @@ interface Props {
 
 export function RefereePinsPanel({ tournamentId, pins }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [label, setLabel] = useState('');
   const [creating, setCreating] = useState(false);
   const [newPin, setNewPin] = useState<string | null>(null);
@@ -39,7 +41,7 @@ export function RefereePinsPanel({ tournamentId, pins }: Props) {
   }
 
   async function handleRevoke(pinId: string) {
-    if (!confirm('Revoke this PIN? It will stop working immediately.')) return;
+    if (!await confirm({ title: 'Revoke PIN?', message: 'This PIN will stop working immediately. Any referee currently using it will lose access.', confirmLabel: 'Revoke', variant: 'danger' })) return;
     await revokePinAction(pinId);
     router.refresh();
   }

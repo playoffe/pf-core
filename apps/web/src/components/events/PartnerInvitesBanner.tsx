@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { confirmPartnerInviteAction, declinePartnerInviteAction } from '@/lib/actions/registration';
+import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Invite {
   id: string;
@@ -24,6 +25,7 @@ const PLAY_FORMAT: Record<string, string> = {
 
 export function PartnerInvitesBanner({ invites: initialInvites }: Props) {
   const router = useRouter();
+  const { confirm } = useConfirm();
   const [invites, setInvites] = useState(initialInvites);
   const [acting, setActing] = useState<string | null>(null);
   const [messages, setMessages] = useState<Record<string, string>>({});
@@ -48,7 +50,7 @@ export function PartnerInvitesBanner({ invites: initialInvites }: Props) {
   }
 
   async function handleDecline(invite: Invite) {
-    if (!confirm(`Decline the partner invite from ${invite.initiator?.full_name}?`)) return;
+    if (!await confirm({ title: 'Decline partner invite?', message: `Decline the doubles invite from ${invite.initiator?.full_name}? They will need to find another partner.`, confirmLabel: 'Decline', variant: 'danger' })) return;
     setActing(invite.id);
     const result = await declinePartnerInviteAction(invite.id);
     if (result.error) {
