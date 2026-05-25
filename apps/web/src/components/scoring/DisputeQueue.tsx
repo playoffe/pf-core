@@ -1,6 +1,6 @@
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { approvePlayerReportAction } from '@/lib/actions/scoring';
 
@@ -15,6 +15,49 @@ interface DisputeMatch {
   reportedSets: string; // "11-7, 11-9"
 }
 
+function DisputeRow({ m, tournamentSlug }: { m: DisputeMatch; tournamentSlug: string }) {
+  const [isPending, startTransition] = useTransition();
+  const [approved, setApproved] = useState(false);
+
+  if (approved) return null;
+
+  return (
+    <div className="flex items-center gap-4 px-5 py-4 flex-wrap">
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-amber-400/70 mb-0.5">{m.categoryName} · {m.roundLabel}</p>
+        <p className="text-sm font-medium text-white truncate">
+          {m.playerA} <span className="text-slate-500">vs</span> {m.playerB}
+        </p>
+        <p className="text-xs text-slate-400 mt-0.5">
+          Reported: <span className="text-white font-medium">{m.reportedWinnerName}</span> won
+          {m.reportedSets ? <span className="text-slate-500"> · {m.reportedSets}</span> : ''}
+        </p>
+      </div>
+
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          disabled={isPending}
+          onClick={() =>
+            startTransition(async () => {
+              await approvePlayerReportAction(m.id);
+              setApproved(true);
+            })
+          }
+          className="rounded-lg bg-accent-600/20 px-3 py-1.5 text-xs font-semibold text-accent-400 hover:bg-accent-600/30 transition-colors disabled:opacity-50"
+        >
+          {isPending ? '…' : '✓ Approve'}
+        </button>
+        <Link
+          href={`/tournaments/${tournamentSlug}/scoring/${m.id}`}
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:text-white hover:border-slate-500 transition-colors"
+        >
+          Review
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export function DisputeQueue({
   matches,
   tournamentSlug,
@@ -22,8 +65,6 @@ export function DisputeQueue({
   matches: DisputeMatch[];
   tournamentSlug: string;
 }) {
-  const [isPending, startTransition] = useTransition();
-
   if (matches.length === 0) return null;
 
   return (
@@ -37,34 +78,7 @@ export function DisputeQueue({
 
       <div className="divide-y divide-amber-700/10">
         {matches.map((m) => (
-          <div key={m.id} className="flex items-center gap-4 px-5 py-4 flex-wrap">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-amber-400/70 mb-0.5">{m.categoryName} · {m.roundLabel}</p>
-              <p className="text-sm font-medium text-white truncate">
-                {m.playerA} <span className="text-slate-500">vs</span> {m.playerB}
-              </p>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Reported: <span className="text-white font-medium">{m.reportedWinnerName}</span> won
-                {m.reportedSets ? <span className="text-slate-500"> · {m.reportedSets}</span> : ''}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                disabled={isPending}
-                onClick={() => startTransition(async () => { await approvePlayerReportAction(m.id); })}
-                className="rounded-lg bg-accent-600/20 px-3 py-1.5 text-xs font-semibold text-accent-400 hover:bg-accent-600/30 transition-colors disabled:opacity-50"
-              >
-                {isPending ? '…' : '✓ Approve'}
-              </button>
-              <Link
-                href={`/tournaments/${tournamentSlug}/scoring/${m.id}`}
-                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:text-white hover:border-slate-500 transition-colors"
-              >
-                Review
-              </Link>
-            </div>
-          </div>
+          <DisputeRow key={m.id} m={m} tournamentSlug={tournamentSlug} />
         ))}
       </div>
     </div>

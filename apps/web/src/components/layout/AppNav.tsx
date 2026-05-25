@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { NotificationBell } from './NotificationBell';
+import { NavLink } from './NavLink';
 import type { Notification } from '@/lib/actions/notifications';
 
 export async function AppNav() {
@@ -40,11 +41,11 @@ export async function AppNav() {
           <NavLink href="/rankings">Rankings</NavLink>
           {player && (
             <>
-              <NavLink href="/dashboard">Dashboard</NavLink>
-              <NavLink href="/feed">Feed</NavLink>
-              <NavLink href="/practice">Practice</NavLink>
-              <NavLink href="/partners">Partners</NavLink>
-              <NavLink href="/tournaments/new">New tournament</NavLink>
+              <NavLink href="/dashboard" exact>Dashboard</NavLink>
+              <NavLink href="/feed" exact>Feed</NavLink>
+              <NavLink href="/practice" exact>Practice</NavLink>
+              <NavLink href="/partners" exact>Partners</NavLink>
+              <NavLink href="/tournaments/new" exact>New tournament</NavLink>
             </>
           )}
         </div>
@@ -99,10 +100,3 @@ export async function AppNav() {
   );
 }
 
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link href={href} className="text-sm text-slate-400 hover:text-white transition-colors">
-      {children}
-    </Link>
-  );
-}

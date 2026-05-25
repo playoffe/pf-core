@@ -246,12 +246,17 @@ export async function cloneTournamentAction(tournamentId: string) {
   }
 
   if (categories.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin.from('tournament_categories') as any).insert(
-      categories.map((c) => ({
+    // Deduplicate slugs: if two categories share a name, append -2, -3, …
+    const slugCounts = new Map<string, number>();
+    const rows = categories.map((c) => {
+      const base = toSlug(c.name);
+      const count = (slugCounts.get(base) ?? 0) + 1;
+      slugCounts.set(base, count);
+      const slug = count === 1 ? base : `${base}-${count}`;
+      return {
         tournament_id: newT.id,
         name: c.name,
-        slug: toSlug(c.name),
+        slug,
         type: c.type,
         play_format: c.play_format,
         draw_format: c.draw_format,
@@ -260,8 +265,11 @@ export async function cloneTournamentAction(tournamentId: string) {
         min_age: c.min_age,
         max_age: c.max_age,
         skill_levels: c.skill_levels,
-      }))
-    );
+      };
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin.from('tournament_categories') as any).insert(rows);
   }
 
   revalidatePath('/dashboard');
