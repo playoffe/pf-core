@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { getPlayerByUsername } from '@pickleball/db';
 import { PlayerProfileView } from '@/components/player/PlayerProfileView';
+import { getPlayerBadges } from '@/lib/actions/badges';
+import { getIsFollowing } from '@/lib/actions/follows';
 
 interface Props {
   params: Promise<{ username: string }>;
@@ -18,7 +20,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description: player.player_profiles?.bio ?? `Pickleball player profile for ${player.full_name}`,
       openGraph: {
         title: player.full_name,
-        images: player.photo_url ? [player.photo_url] : [],
+        images: [`/api/players/${username}/card.png`],
+      },
+      twitter: {
+        card: 'summary_large_image',
+        images: [`/api/players/${username}/card.png`],
       },
     };
   } catch {
@@ -55,6 +61,17 @@ export default async function PlayerProfilePage({ params }: Props) {
   }
 
   const isOwnProfile = user?.id === player.id;
+
+  // Fetch badges, follower count, and following state in parallel
+  const [badges, isFollowing, followerCountResult] = await Promise.all([
+    getPlayerBadges(player.id),
+    user && !isOwnProfile ? getIsFollowing(player.id) : Promise.resolve(false),
+    createAdminClient()
+      .from('player_follows')
+      .select('*', { count: 'exact', head: true })
+      .eq('following_id', player.id),
+  ]);
+  const followerCount = followerCountResult.count ?? 0;
 
   // Fetch recent match history (admin bypasses RLS so public profiles show history)
   const { data: rawHistory } = await admin
@@ -110,6 +127,10 @@ export default async function PlayerProfilePage({ params }: Props) {
       player={player}
       matchHistory={matchHistory}
       isOwnProfile={isOwnProfile}
+      badges={badges}
+      isFollowing={isFollowing}
+      followerCount={followerCount}
+      isLoggedIn={!!user}
     />
   );
 }

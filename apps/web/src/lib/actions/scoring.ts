@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { calculateRatingChange } from '@pickleball/rating';
 import { createNotificationsForPlayers } from './notifications';
+import { awardBadgesForPlayer } from './badges';
 
 interface SetScore {
   set_number: number;
@@ -257,6 +258,10 @@ export async function submitResultAction(
     `${catSlugRow?.name ?? 'Match'}: ${scoreStr}`,
     drawLink ?? undefined,
   );
+
+  // Award any newly-earned badges to both players (fire-and-forget)
+  void awardBadgesForPlayer(entryA.player_id);
+  void awardBadgesForPlayer(entryB.player_id);
 
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring/${matchId}`);
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/categories/${catSlugRow?.slug ?? match.category_id}`);

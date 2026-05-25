@@ -2,6 +2,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import type { Database } from '@pickleball/db';
 import { AppNav } from '@/components/layout/AppNav';
+import { BadgeList } from '@/components/player/BadgeList';
+import { FollowButton } from '@/components/player/FollowButton';
 import type { MatchHistoryRow } from '@/app/p/[username]/page';
 
 type PlayerRow = Database['public']['Tables']['players']['Row'];
@@ -15,6 +17,10 @@ interface Props {
   };
   matchHistory: MatchHistoryRow[];
   isOwnProfile: boolean;
+  badges: string[];
+  isFollowing: boolean;
+  followerCount: number;
+  isLoggedIn: boolean;
 }
 
 const RESULT_STYLE: Record<string, { label: string; color: string }> = {
@@ -24,7 +30,7 @@ const RESULT_STYLE: Record<string, { label: string; color: string }> = {
   walkover_loss: { label: 'W/O', color: 'text-slate-500 bg-slate-700/30' },
 };
 
-export function PlayerProfileView({ player, matchHistory, isOwnProfile }: Props) {
+export function PlayerProfileView({ player, matchHistory, isOwnProfile, badges, isFollowing, followerCount, isLoggedIn }: Props) {
   const stats = player.global_stats;
   const profile = player.player_profiles;
 
@@ -52,7 +58,7 @@ export function PlayerProfileView({ player, matchHistory, isOwnProfile }: Props)
               </div>
 
               <div className="mb-1 flex items-center gap-2 flex-wrap">
-                {isOwnProfile && (
+                {isOwnProfile ? (
                   <>
                     <Link
                       href="/settings/profile"
@@ -75,13 +81,24 @@ export function PlayerProfileView({ player, matchHistory, isOwnProfile }: Props)
                       🗓 My schedule
                     </a>
                   </>
-                )}
+                ) : isLoggedIn ? (
+                  <FollowButton
+                    targetId={player.id}
+                    initialIsFollowing={isFollowing}
+                    initialCount={followerCount}
+                  />
+                ) : null}
               </div>
             </div>
 
             {/* Name + meta */}
             <div className="mt-4">
-              <h1 className="text-2xl font-bold text-white">{player.full_name}</h1>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <h1 className="text-2xl font-bold text-white">{player.full_name}</h1>
+                <span className="text-xs text-slate-600">
+                  {followerCount} {followerCount === 1 ? 'follower' : 'followers'}
+                </span>
+              </div>
               <p className="text-sm text-slate-500">@{player.username}</p>
               {profile?.headline && (
                 <p className="mt-1 text-sm text-slate-400">{profile.headline}</p>
@@ -142,6 +159,8 @@ export function PlayerProfileView({ player, matchHistory, isOwnProfile }: Props)
                 </div>
               </div>
             )}
+            {/* Badges */}
+            <BadgeList slugs={badges} />
           </div>
         </div>
 

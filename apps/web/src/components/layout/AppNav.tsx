@@ -41,6 +41,7 @@ export async function AppNav() {
           {player && (
             <>
               <NavLink href="/dashboard">Dashboard</NavLink>
+              <NavLink href="/feed">Feed</NavLink>
               <NavLink href="/tournaments/new">New tournament</NavLink>
             </>
           )}
