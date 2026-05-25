@@ -325,12 +325,17 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
             {Object.entries(CATEGORIES).map(([catKey, cat]) => (
               <Fragment key={catKey}>
                 {/* Category header row */}
-                <tr className="border-t border-surface-border/50 bg-surface/60">
+                <tr className="border-t-2 border-surface-border bg-white/[0.04]">
                   <td
                     colSpan={1 + ROLES.length * 3}
-                    className="pl-4 pt-4 pb-2 text-[11px] font-bold text-slate-400 uppercase tracking-widest"
+                    className="py-3 pl-4 pr-6"
                   >
-                    {cat.label}
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-3.5 w-1 rounded-full bg-brand-500 shrink-0" />
+                      <span className="text-xs font-bold text-slate-200 uppercase tracking-widest">
+                        {cat.label}
+                      </span>
+                    </span>
                   </td>
                 </tr>
 
