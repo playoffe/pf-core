@@ -285,7 +285,7 @@ export default async function DashboardPage() {
                 {clubs.map((c) => (
                   <li key={c.id}>
                     <Link
-                      href={`/clubs/${c.id}`}
+                      href={`/clubs/${c.slug}`}
                       className="flex items-center gap-3 rounded-lg p-2 hover:bg-surface transition-colors"
                     >
                       <span

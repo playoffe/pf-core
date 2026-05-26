@@ -4,17 +4,18 @@ import Link from 'next/link';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { ClubManagersPanel } from '@/components/clubs/ClubManagersPanel';
+import { ClubAdminNav } from '@/components/clubs/ClubAdminNav';
 import { DigestButton } from '@/components/clubs/DigestButton';
 import { getClubManagers } from '@/lib/actions/clubs';
 
 export const metadata: Metadata = { title: 'Club' };
 
 interface Props {
-  params: Promise<{ id: string }>;
+  params: Promise<{ slug: string }>;
 }
 
 export default async function ClubPage({ params }: Props) {
-  const { id } = await params;
+  const { slug } = await params;
 
   const supabase = await createClient();
   const {
@@ -24,11 +25,11 @@ export default async function ClubPage({ params }: Props) {
 
   const admin = createAdminClient();
 
-  // Fetch club + verify caller is a manager
+  // Fetch club by slug + verify caller is a manager
   const { data: club } = await admin
     .from('clubs')
-    .select('*, slug, club_managers!inner(role, player_id)')
-    .eq('id', id)
+    .select('*, club_managers!inner(role, player_id)')
+    .eq('slug', slug)
     .eq('club_managers.player_id', user.id)
     .single();
 
@@ -38,14 +39,32 @@ export default async function ClubPage({ params }: Props) {
   const { data: tournaments } = await admin
     .from('tournaments')
     .select('id, name, slug, status, start_date, end_date, display_code')
-    .eq('club_id', id)
+    .eq('club_id', club.id)
     .order('start_date', { ascending: false });
 
   const role = (club.club_managers as { role: string }[])[0]?.role ?? 'manager';
   const isOwner = role === 'owner';
 
   // Fetch club managers for the team panel
-  const managers = await getClubManagers(id);
+  const managers = await getClubManagers(club.id);
+
+  // Quick stats
+  const { count: totalMembers } = await admin
+    .from('club_affiliations')
+    .select('player_id', { count: 'exact', head: true })
+    .eq('club_id', club.id)
+    .eq('is_current', true);
+
+  const { count: activeTournamentsCount } = await admin
+    .from('tournaments')
+    .select('id', { count: 'exact', head: true })
+    .eq('club_id', club.id)
+    .in('status', ['registration_open', 'in_progress']);
+
+  const { count: allTournamentsCount } = await admin
+    .from('tournaments')
+    .select('id', { count: 'exact', head: true })
+    .eq('club_id', club.id);
 
   return (
     <div className="min-h-screen bg-surface">
@@ -82,9 +101,9 @@ export default async function ClubPage({ params }: Props) {
             >
               Public page ↗
             </Link>
-            <DigestButton clubId={id} />
+            <DigestButton clubId={club.id} />
             <Link
-              href={`/tournaments/new?club=${id}`}
+              href={`/tournaments/new?club=${club.id}`}
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
             >
               + New tournament
@@ -93,8 +112,25 @@ export default async function ClubPage({ params }: Props) {
         </div>
 
         {club.description && (
-          <p className="mb-8 text-sm text-slate-400">{club.description}</p>
+          <p className="mb-6 text-sm text-slate-400">{club.description}</p>
         )}
+
+        {/* Tab nav */}
+        <ClubAdminNav clubSlug={slug} activeTab="overview" isOwner={isOwner} />
+
+        {/* Quick stats */}
+        <div className="mb-8 grid gap-4 sm:grid-cols-3">
+          {[
+            { label: 'Total members', value: (totalMembers ?? 0).toString() },
+            { label: 'Active tournaments', value: (activeTournamentsCount ?? 0).toString() },
+            { label: 'All-time tournaments', value: (allTournamentsCount ?? 0).toString() },
+          ].map((s) => (
+            <div key={s.label} className="rounded-xl bg-surface-card p-5 ring-1 ring-surface-border">
+              <p className="text-2xl font-bold text-white">{s.value}</p>
+              <p className="mt-1 text-xs text-slate-500">{s.label}</p>
+            </div>
+          ))}
+        </div>
 
         {/* Tournaments */}
         <div>
@@ -105,7 +141,7 @@ export default async function ClubPage({ params }: Props) {
               <p className="text-sm text-slate-500">
                 No tournaments yet.{' '}
                 <Link
-                  href={`/tournaments/new?club=${id}`}
+                  href={`/tournaments/new?club=${club.id}`}
                   className="text-brand-400 hover:text-brand-300"
                 >
                   Create your first one →
@@ -141,7 +177,7 @@ export default async function ClubPage({ params }: Props) {
 
         {/* Club managers */}
         <ClubManagersPanel
-          clubId={id}
+          clubId={club.id}
           managers={managers}
           isOwner={isOwner}
           currentUserId={user.id}

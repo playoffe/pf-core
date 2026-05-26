@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 
 function slugify(name: string): string {
@@ -76,7 +77,7 @@ export async function createClubAction(input: CreateClubInput) {
     role: 'owner',
   });
 
-  redirect(`/clubs/${club.id}`);
+  redirect(`/clubs/${slug}`);
 }
 
 // ── Club manager management ───────────────────────────────────────────────────
@@ -177,4 +178,238 @@ export async function getMyClubs() {
     .order('added_at', { ascending: false });
 
   return (data ?? []).flatMap((m) => (m.clubs ? [m.clubs] : []));
+}
+
+// ── Club Members ──────────────────────────────────────────────────────────────
+
+export interface ClubMember {
+  player_id: string;
+  is_current: boolean;
+  joined_at: string;
+  full_name: string;
+  username: string;
+  photo_url: string | null;
+  location: string | null;
+  current_rating: number | null;
+}
+
+export async function getClubMembersAction(clubId: string): Promise<ClubMember[]> {
+  const admin = createAdminClient();
+
+  const { data } = await admin
+    .from('club_affiliations')
+    .select('player_id, is_current, joined_at, players!player_id(full_name, username, photo_url, location)')
+    .eq('club_id', clubId)
+    .order('is_current', { ascending: false })
+    .order('joined_at', { ascending: true });
+
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+
+  // Batch-fetch ratings
+  const playerIds = rows.map((r) => r.player_id as string);
+  const { data: statsRows } = await admin
+    .from('global_stats')
+    .select('player_id, current_rating')
+    .in('player_id', playerIds);
+  const statsMap = new Map<string, number>(
+    (statsRows ?? []).map((s) => [s.player_id as string, s.current_rating as number]),
+  );
+
+  return rows.map((row) => {
+    const player = row.players as { full_name: string; username: string; photo_url: string | null; location: string | null } | null;
+    return {
+      player_id: row.player_id as string,
+      is_current: row.is_current as boolean,
+      joined_at: row.joined_at as string,
+      full_name: player?.full_name ?? 'Unknown',
+      username: player?.username ?? 'unknown',
+      photo_url: player?.photo_url ?? null,
+      location: player?.location ?? null,
+      current_rating: statsMap.get(row.player_id as string) ?? null,
+    };
+  });
+}
+
+// ── Club Analytics ────────────────────────────────────────────────────────────
+
+export interface ClubTopMember {
+  player_id: string;
+  full_name: string;
+  username: string;
+  current_rating: number;
+  wins: number;
+  losses: number;
+}
+
+export interface ClubAnalytics {
+  totalMembers: number;
+  totalTournaments: number;
+  activeTournaments: number;
+  completedTournaments: number;
+  avgRating: number;
+  topMembers: ClubTopMember[];
+  recentTournaments: Array<{ id: string; name: string; start_date: string; status: string }>;
+}
+
+export async function getClubAnalyticsAction(clubId: string): Promise<ClubAnalytics> {
+  const admin = createAdminClient();
+
+  // All tournaments for this club
+  const { data: tournaments } = await admin
+    .from('tournaments')
+    .select('id, name, start_date, status')
+    .eq('club_id', clubId)
+    .order('start_date', { ascending: false });
+
+  const tournamentRows = (tournaments ?? []) as Array<{ id: string; name: string; start_date: string; status: string }>;
+  const activeTournaments = tournamentRows.filter((t) =>
+    ['registration_open', 'in_progress'].includes(t.status),
+  ).length;
+  const completedTournaments = tournamentRows.filter((t) => t.status === 'completed').length;
+
+  // Current member count
+  const { count: totalMembers } = await admin
+    .from('club_affiliations')
+    .select('player_id', { count: 'exact', head: true })
+    .eq('club_id', clubId)
+    .eq('is_current', true);
+
+  // Top members by rating (current only)
+  const { data: affiliations } = await admin
+    .from('club_affiliations')
+    .select('player_id, players!player_id(full_name, username)')
+    .eq('club_id', clubId)
+    .eq('is_current', true);
+
+  const affiliationRows = affiliations ?? [];
+  const memberPlayerIds = affiliationRows.map((a) => a.player_id as string);
+
+  // Batch-fetch global stats
+  const { data: memberStats } = memberPlayerIds.length > 0
+    ? await admin
+        .from('global_stats')
+        .select('player_id, current_rating, wins, losses')
+        .in('player_id', memberPlayerIds)
+    : { data: [] };
+  const memberStatsMap = new Map<string, { current_rating: number; wins: number; losses: number }>(
+    (memberStats ?? []).map((s) => [
+      s.player_id as string,
+      { current_rating: s.current_rating as number, wins: s.wins as number, losses: s.losses as number },
+    ]),
+  );
+
+  const members: ClubTopMember[] = affiliationRows.map((a) => {
+    const player = a.players as { full_name: string; username: string } | null;
+    const stats = memberStatsMap.get(a.player_id as string);
+    return {
+      player_id: a.player_id as string,
+      full_name: player?.full_name ?? 'Unknown',
+      username: player?.username ?? 'unknown',
+      current_rating: stats?.current_rating ?? 0,
+      wins: stats?.wins ?? 0,
+      losses: stats?.losses ?? 0,
+    };
+  }).sort((a, b) => b.current_rating - a.current_rating).slice(0, 5);
+
+  const avgRating =
+    members.length > 0
+      ? Math.round((members.reduce((s, m) => s + m.current_rating, 0) / members.length) * 100) / 100
+      : 0;
+
+  return {
+    totalMembers: totalMembers ?? 0,
+    totalTournaments: tournamentRows.length,
+    activeTournaments,
+    completedTournaments,
+    avgRating,
+    topMembers: members,
+    recentTournaments: tournamentRows.slice(0, 10),
+  };
+}
+
+// ── Club Settings Update ──────────────────────────────────────────────────────
+
+export interface UpdateClubInput {
+  name: string;
+  description: string | null;
+  city: string | null;
+  location: string | null;
+  website: string | null;
+  founding_year: number | null;
+  is_open_to_join: boolean;
+  brand_primary_color: string;
+  brand_secondary_color: string;
+}
+
+export async function updateClubAction(clubId: string, clubSlug: string, input: UpdateClubInput) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  // Verify caller is owner
+  const { data: myRole } = await admin
+    .from('club_managers')
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('player_id', user.id)
+    .maybeSingle();
+  if (!myRole || myRole.role !== 'owner') return { error: 'Only club owners can edit settings.' };
+
+  const { error } = await admin
+    .from('clubs')
+    .update({ ...input, updated_at: new Date().toISOString() })
+    .eq('id', clubId);
+
+  if (error) return { error: error.message };
+  revalidatePath(`/clubs/${clubSlug}`);
+  revalidatePath(`/clubs/${clubSlug}/settings`);
+  return { success: true };
+}
+
+// ── Club Logo Upload ──────────────────────────────────────────────────────────
+
+export async function uploadClubLogoAction(clubId: string, clubSlug: string, formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  // Verify owner
+  const { data: myRole } = await admin
+    .from('club_managers')
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('player_id', user.id)
+    .maybeSingle();
+  if (!myRole || myRole.role !== 'owner') return { error: 'Only club owners can upload a logo.' };
+
+  const file = formData.get('logo') as File | null;
+  if (!file || file.size === 0) return { error: 'No file provided' };
+  if (file.size > 2 * 1024 * 1024) return { error: 'Logo must be under 2 MB' };
+  if (!['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'].includes(file.type)) {
+    return { error: 'Only JPEG, PNG, WebP or SVG are accepted' };
+  }
+
+  const ext = file.name.split('.').pop() ?? 'png';
+  const path = `${clubId}/logo.${ext}`;
+  const { error: uploadErr } = await supabase.storage
+    .from('club-logos')
+    .upload(path, file, { upsert: true, contentType: file.type });
+  if (uploadErr) return { error: 'Upload failed: ' + uploadErr.message };
+
+  const { data: urlData } = supabase.storage.from('club-logos').getPublicUrl(path);
+
+  const { error: updateErr } = await admin
+    .from('clubs')
+    .update({ logo_url: urlData.publicUrl })
+    .eq('id', clubId);
+  if (updateErr) return { error: updateErr.message };
+
+  revalidatePath(`/clubs/${clubSlug}`);
+  revalidatePath(`/clubs/${clubSlug}/settings`);
+  return { success: true, logo_url: urlData.publicUrl };
 }

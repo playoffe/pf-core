@@ -57,13 +57,13 @@ export default async function TournamentPage({ params }: Props) {
   // Look up by slug
   const { data: t } = await admin
     .from('tournaments')
-    .select('*, clubs!inner(id, name, brand_primary_color), tournament_categories(*, slug)')
+    .select('*, clubs!inner(id, name, slug, brand_primary_color), tournament_categories(*, slug)')
     .eq('slug', slug)
     .single();
 
   if (!t) notFound();
 
-  const club = t.clubs as { id: string; name: string; brand_primary_color: string };
+  const club = t.clubs as { id: string; name: string; slug: string; brand_primary_color: string };
 
   // Verify user manages this club
   const { data: mgr } = await admin
@@ -130,7 +130,7 @@ export default async function TournamentPage({ params }: Props) {
       <main className="mx-auto max-w-6xl px-6 py-10">
         {/* Breadcrumb */}
         <nav className="mb-6 flex items-center gap-2 text-sm text-slate-500">
-          <Link href={`/clubs/${club.id}`} className="hover:text-slate-300 transition-colors">
+          <Link href={`/clubs/${club.slug}`} className="hover:text-slate-300 transition-colors">
             {club.name}
           </Link>
           <span>/</span>
