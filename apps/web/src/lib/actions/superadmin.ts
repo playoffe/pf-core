@@ -542,18 +542,42 @@ export async function getAuditLogAction(opts: {
 
   const { data, count } = await query;
 
+  // Resolve actor UUIDs → player display names via secondary query
+  const rawEntries = (data ?? []) as Array<{
+    id: string;
+    action_type: string;
+    actor_id: string | null;
+    target_type: string | null;
+    target_id: string | null;
+    old_value: unknown;
+    new_value: unknown;
+    metadata: unknown;
+    created_at: string;
+  }>;
+
+  const actorIds = [
+    ...new Set(
+      rawEntries.map((e) => e.actor_id).filter((id): id is string => id != null),
+    ),
+  ];
+  const actorMap = new Map<string, string>();
+  if (actorIds.length > 0) {
+    const { data: players } = await admin
+      .from('players')
+      .select('id, full_name, username')
+      .in('id', actorIds) as {
+        data: Array<{ id: string; full_name: string | null; username: string | null }> | null;
+      };
+    (players ?? []).forEach((p) => {
+      actorMap.set(p.id, p.full_name ?? p.username ?? 'Unknown');
+    });
+  }
+
   return {
-    entries: (data ?? []) as Array<{
-      id: string;
-      action_type: string;
-      actor_id: string | null;
-      target_type: string | null;
-      target_id: string | null;
-      old_value: unknown;
-      new_value: unknown;
-      metadata: unknown;
-      created_at: string;
-    }>,
+    entries: rawEntries.map((e) => ({
+      ...e,
+      actor_name: e.actor_id ? (actorMap.get(e.actor_id) ?? null) : null,
+    })),
     total: count ?? 0,
     pageSize,
   };

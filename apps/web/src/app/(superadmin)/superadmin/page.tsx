@@ -49,9 +49,16 @@ export default async function SuperAdminOverviewPage() {
                 <p className="text-sm font-medium text-white">
                   {entry.action_type.replace(/_/g, ' ')}
                 </p>
+                {entry.actor_name && (
+                  <p className="text-xs text-slate-600 mt-0.5">by {entry.actor_name}</p>
+                )}
                 {entry.target_type && (
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {entry.target_type}{entry.target_id ? ` · ${entry.target_id.slice(0, 8)}…` : ''}
+                    {entry.target_type === 'feature_flag'
+                      ? ((entry.new_value as Record<string, unknown>)?.feature_module as string) ??
+                        entry.target_id?.slice(0, 8) ??
+                        ''
+                      : `${entry.target_type}${entry.target_id ? ` · ${entry.target_id.slice(0, 8)}…` : ''}`}
                   </p>
                 )}
               </div>
