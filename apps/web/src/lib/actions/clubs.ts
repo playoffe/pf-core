@@ -231,6 +231,89 @@ export async function getClubMembersAction(clubId: string): Promise<ClubMember[]
   });
 }
 
+export async function addClubMemberAction(clubId: string, clubSlug: string, username: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  // Verify caller is a manager or owner of this club
+  const { data: myRole } = await admin
+    .from('club_managers')
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('player_id', user.id)
+    .maybeSingle();
+  if (!myRole) return { error: 'Not authorized.' };
+
+  // Look up target player by username
+  const { data: target } = await admin
+    .from('players')
+    .select('id, full_name')
+    .eq('username', username.trim().toLowerCase())
+    .maybeSingle();
+  if (!target) return { error: `No player found with username @${username}.` };
+
+  // Check for an existing affiliation row
+  const { data: existing } = await admin
+    .from('club_affiliations')
+    .select('player_id, is_current')
+    .eq('club_id', clubId)
+    .eq('player_id', target.id)
+    .maybeSingle();
+
+  if (existing) {
+    if (existing.is_current) {
+      return { error: `${target.full_name} is already an active member of this club.` };
+    }
+    // Re-activate a past member
+    await admin
+      .from('club_affiliations')
+      .update({ is_current: true })
+      .eq('club_id', clubId)
+      .eq('player_id', target.id);
+  } else {
+    const { error } = await admin.from('club_affiliations').insert({
+      club_id: clubId,
+      player_id: target.id,
+      is_current: true,
+    });
+    if (error) return { error: 'Failed to add member. Please try again.' };
+  }
+
+  revalidatePath(`/clubs/${clubSlug}/members`);
+  return { success: true, playerName: target.full_name };
+}
+
+export async function removeClubMemberAction(clubId: string, clubSlug: string, playerId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  // Only owners can remove members
+  const { data: myRole } = await admin
+    .from('club_managers')
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('player_id', user.id)
+    .maybeSingle();
+  if (!myRole || myRole.role !== 'owner') return { error: 'Only club owners can remove members.' };
+
+  const { error } = await admin
+    .from('club_affiliations')
+    .update({ is_current: false })
+    .eq('club_id', clubId)
+    .eq('player_id', playerId);
+
+  if (error) return { error: 'Failed to remove member. Please try again.' };
+
+  revalidatePath(`/clubs/${clubSlug}/members`);
+  return { success: true };
+}
+
 // ── Club Analytics ────────────────────────────────────────────────────────────
 
 export interface ClubTopMember {
