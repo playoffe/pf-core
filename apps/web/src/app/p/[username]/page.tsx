@@ -44,6 +44,8 @@ export type MatchHistoryRow = {
   opponent_name: string | null;
 };
 
+export type RatingHistoryPoint = { played_at: string; rating_after: number };
+
 export default async function PlayerProfilePage({ params }: Props) {
   const { username } = await params;
 
@@ -83,6 +85,20 @@ export default async function PlayerProfilePage({ params }: Props) {
       .eq('following_id', player.id),
   ]);
   const followerCount = followerCountResult.count ?? 0;
+
+  // Fetch rating history for sparkline (last 30 matches, chronological)
+  const { data: ratingHistoryRaw } = await admin
+    .from('match_history')
+    .select('played_at, rating_after')
+    .eq('player_id', player.id)
+    .in('result', ['win', 'loss'])
+    .order('played_at', { ascending: true })
+    .limit(30);
+
+  const ratingHistory: RatingHistoryPoint[] = (ratingHistoryRaw ?? []).map((r) => ({
+    played_at: r.played_at,
+    rating_after: r.rating_after as unknown as number,
+  }));
 
   // Fetch recent match history (admin bypasses RLS so public profiles show history)
   const { data: rawHistory } = await admin
@@ -137,6 +153,7 @@ export default async function PlayerProfilePage({ params }: Props) {
     <PlayerProfileView
       player={player}
       matchHistory={matchHistory}
+      ratingHistory={ratingHistory}
       isOwnProfile={isOwnProfile}
       badges={badges}
       isFollowing={isFollowing}

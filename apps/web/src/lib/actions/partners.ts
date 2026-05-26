@@ -60,14 +60,21 @@ export async function cancelPartnerRequestAction(requestId: string) {
   return { success: true };
 }
 
+export interface PartnerFilters {
+  gender?: 'male' | 'female' | 'other';
+  location?: string;
+  format?: 'singles' | 'doubles';
+}
+
 /**
  * Fetch players suitable for doubles partner matching:
  * - Has global stats (has played matches)
  * - Rating within ±0.75 of the viewer's rating
  * - Excludes self and existing request targets
+ * - Optional filters: gender, location (partial match), format preference
  * Returns up to 30 suggestions sorted by rating proximity.
  */
-export async function getPartnerSuggestionsAction() {
+export async function getPartnerSuggestionsAction(filters?: PartnerFilters) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { players: [], myRating: null, sentIds: new Set<string>() };
@@ -92,14 +99,22 @@ export async function getPartnerSuggestionsAction() {
   const sentIds = new Set((sentRequests ?? []).map((r) => r.to_player_id));
 
   // Fetch candidate players (admin to bypass RLS on global_stats)
-  const { data: candidates } = await admin
+  let statsQ = admin
     .from('global_stats')
-    .select('player_id, current_rating, wins, total_matches, win_rate, doubles_matches, doubles_wins')
+    .select('player_id, current_rating, wins, total_matches, win_rate, doubles_matches, doubles_wins, singles_matches')
     .gte('current_rating', myRating - 0.75)
     .lte('current_rating', myRating + 0.75)
     .gte('total_matches', 1)
-    .neq('player_id', user.id)
-    .limit(60);
+    .neq('player_id', user.id);
+
+  // Format filter on stats
+  if (filters?.format === 'doubles') {
+    statsQ = statsQ.gte('doubles_matches', 1);
+  } else if (filters?.format === 'singles') {
+    statsQ = statsQ.gte('singles_matches', 1);
+  }
+
+  const { data: candidates } = await statsQ.limit(120);
 
   const candidateIds = (candidates ?? [])
     .filter((c) => !sentIds.has(c.player_id))
@@ -109,10 +124,20 @@ export async function getPartnerSuggestionsAction() {
     return { players: [], myRating, sentIds };
   }
 
-  const { data: players } = await admin
+  // Fetch player details with optional gender/location filters
+  let playersQ = admin
     .from('players')
-    .select('id, full_name, username, location, photo_url')
+    .select('id, full_name, username, location, photo_url, gender')
     .in('id', candidateIds);
+
+  if (filters?.gender) {
+    playersQ = playersQ.eq('gender', filters.gender);
+  }
+  if (filters?.location?.trim()) {
+    playersQ = playersQ.ilike('location', `%${filters.location.trim()}%`);
+  }
+
+  const { data: players } = await playersQ;
 
   const statsMap = new Map(
     (candidates ?? []).map((c) => [c.player_id, c]),

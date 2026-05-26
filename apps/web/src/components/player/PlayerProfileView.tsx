@@ -4,11 +4,15 @@ import type { Database } from '@pickleball/db';
 import { AppNav } from '@/components/layout/AppNav';
 import { BadgeList } from '@/components/player/BadgeList';
 import { FollowButton } from '@/components/player/FollowButton';
-import type { MatchHistoryRow } from '@/app/p/[username]/page';
+import { RatingHistoryChart } from '@/components/player/RatingHistoryChart';
+import type { MatchHistoryRow, RatingHistoryPoint } from '@/app/p/[username]/page';
 
 type PlayerRow = Database['public']['Tables']['players']['Row'];
 type ProfileRow = Database['public']['Tables']['player_profiles']['Row'];
 type StatsRow = Database['public']['Tables']['global_stats']['Row'];
+
+interface CareerEntry { role: string; club: string; years: string }
+interface Certification { name: string; issuer: string; year: number }
 
 interface Props {
   player: PlayerRow & {
@@ -16,6 +20,7 @@ interface Props {
     global_stats: StatsRow | null;
   };
   matchHistory: MatchHistoryRow[];
+  ratingHistory: RatingHistoryPoint[];
   isOwnProfile: boolean;
   badges: string[];
   isFollowing: boolean;
@@ -31,9 +36,13 @@ const RESULT_STYLE: Record<string, { label: string; color: string }> = {
   walkover_loss: { label: 'W/O', color: 'text-slate-500 bg-slate-700/30' },
 };
 
-export function PlayerProfileView({ player, matchHistory, isOwnProfile, badges, isFollowing, followerCount, isLoggedIn, viewerUsername }: Props) {
+export function PlayerProfileView({ player, matchHistory, ratingHistory, isOwnProfile, badges, isFollowing, followerCount, isLoggedIn, viewerUsername }: Props) {
   const stats = player.global_stats;
   const profile = player.player_profiles;
+
+  const careerHistory = (profile?.career_history as CareerEntry[] | null) ?? [];
+  const certifications = (profile?.certifications as Certification[] | null) ?? [];
+  const preferredStyle = (profile as { preferred_style?: string | null } | null)?.preferred_style ?? null;
 
   return (
     <div className="min-h-screen bg-surface">
@@ -171,6 +180,58 @@ export function PlayerProfileView({ player, matchHistory, isOwnProfile, badges, 
                 </div>
               </div>
             )}
+            {/* Rating history sparkline */}
+            {ratingHistory.length >= 2 && stats && (
+              <div className="mt-5">
+                <RatingHistoryChart
+                  data={ratingHistory}
+                  currentRating={stats.current_rating}
+                  peakRating={stats.peak_rating}
+                />
+              </div>
+            )}
+
+            {/* Preferred style */}
+            {preferredStyle && (
+              <div className="mt-5">
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-slate-500">Playing style</p>
+                <span className="inline-block rounded-full bg-brand-600/15 px-3 py-1 text-xs font-medium text-brand-300">
+                  {preferredStyle}
+                </span>
+              </div>
+            )}
+
+            {/* Career history */}
+            {careerHistory.length > 0 && (
+              <div className="mt-5">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">Career</p>
+                <div className="space-y-1">
+                  {careerHistory.map((entry, i) => (
+                    <div key={i} className="flex items-baseline gap-2 text-sm">
+                      <span className="text-slate-600 text-xs tabular-nums shrink-0">{entry.years}</span>
+                      <span className="text-slate-300">{entry.role}</span>
+                      {entry.club && <span className="text-slate-500 text-xs">· {entry.club}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Certifications */}
+            {certifications.length > 0 && (
+              <div className="mt-5">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">Certifications</p>
+                <div className="flex flex-wrap gap-2">
+                  {certifications.map((cert, i) => (
+                    <div key={i} className="rounded-lg bg-surface px-3 py-2 ring-1 ring-surface-border text-xs">
+                      <p className="font-semibold text-slate-200">{cert.name}</p>
+                      <p className="text-slate-500">{cert.issuer}{cert.year ? ` · ${cert.year}` : ''}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Badges */}
             <BadgeList slugs={badges} />
           </div>

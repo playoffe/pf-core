@@ -4,12 +4,18 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 
+export interface CareerEntry { role: string; club: string; years: string }
+export interface Certification { name: string; issuer: string; year: number }
+
 export interface ProfileFormValues {
   full_name: string;
   location: string;
   headline: string;
   bio: string;
   playing_since: string; // string from form input, coerce to int
+  preferred_style: string;
+  career_history: CareerEntry[];
+  certifications: Certification[];
 }
 
 export async function updateProfileAction(values: ProfileFormValues) {
@@ -27,6 +33,13 @@ export async function updateProfileAction(values: ProfileFormValues) {
   const bio = values.bio.trim().slice(0, 600) || null;
   const location = values.location.trim() || null;
   const playingSince = values.playing_since ? parseInt(values.playing_since, 10) || null : null;
+  const preferredStyle = values.preferred_style?.trim().slice(0, 100) || null;
+  const careerHistory = (values.career_history ?? [])
+    .filter((e) => e.role?.trim() || e.club?.trim())
+    .slice(0, 5);
+  const certifications = (values.certifications ?? [])
+    .filter((c) => c.name?.trim())
+    .slice(0, 5);
 
   // Update core player fields
   const { error: playerErr } = await supabase
@@ -37,8 +50,18 @@ export async function updateProfileAction(values: ProfileFormValues) {
   if (playerErr) return { error: 'Failed to update profile: ' + playerErr.message };
 
   // Upsert player_profiles (row may not exist yet)
+  // career_history / certifications are Json columns; cast via unknown to satisfy the type
+  type JsonVal = string | number | boolean | null | JsonVal[] | { [k: string]: JsonVal };
   const { error: profileErr } = await supabase.from('player_profiles').upsert(
-    { player_id: user.id, headline, bio, playing_since: playingSince },
+    {
+      player_id: user.id,
+      headline,
+      bio,
+      playing_since: playingSince,
+      preferred_style: preferredStyle,
+      career_history: (careerHistory.length > 0 ? careerHistory : []) as unknown as JsonVal,
+      certifications: (certifications.length > 0 ? certifications : []) as unknown as JsonVal,
+    },
     { onConflict: 'player_id' },
   );
 

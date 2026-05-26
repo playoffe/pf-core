@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateProfileAction } from '@/lib/actions/profile';
+import type { CareerEntry, Certification } from '@/lib/actions/profile';
 
 interface Props {
   initial: {
@@ -12,9 +13,15 @@ interface Props {
     headline: string | null;
     bio: string | null;
     playing_since: number | null;
+    preferred_style: string | null;
+    career_history: CareerEntry[];
+    certifications: Certification[];
   };
   username: string;
 }
+
+const emptyCareer = (): CareerEntry => ({ role: '', club: '', years: '' });
+const emptyCert = (): Certification => ({ name: '', issuer: '', year: new Date().getFullYear() });
 
 export function EditProfileForm({ initial, username }: Props) {
   const router = useRouter();
@@ -28,11 +35,47 @@ export function EditProfileForm({ initial, username }: Props) {
     headline: initial.headline ?? '',
     bio: initial.bio ?? '',
     playing_since: initial.playing_since?.toString() ?? '',
+    preferred_style: initial.preferred_style ?? '',
   });
+
+  const [careerHistory, setCareerHistory] = useState<CareerEntry[]>(
+    initial.career_history.length > 0 ? initial.career_history : [],
+  );
+  const [certifications, setCertifications] = useState<Certification[]>(
+    initial.certifications.length > 0 ? initial.certifications : [],
+  );
 
   function set(field: keyof typeof values, value: string) {
     setValues((v) => ({ ...v, [field]: value }));
     setSuccess(false);
+  }
+
+  function setCareer(index: number, field: keyof CareerEntry, value: string) {
+    setCareerHistory((prev) =>
+      prev.map((entry, i) => (i === index ? { ...entry, [field]: value } : entry)),
+    );
+  }
+
+  function addCareer() {
+    if (careerHistory.length < 5) setCareerHistory((prev) => [...prev, emptyCareer()]);
+  }
+
+  function removeCareer(index: number) {
+    setCareerHistory((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function setCert(index: number, field: keyof Certification, value: string | number) {
+    setCertifications((prev) =>
+      prev.map((cert, i) => (i === index ? { ...cert, [field]: value } : cert)),
+    );
+  }
+
+  function addCert() {
+    if (certifications.length < 5) setCertifications((prev) => [...prev, emptyCert()]);
+  }
+
+  function removeCert(index: number) {
+    setCertifications((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -41,12 +84,16 @@ export function EditProfileForm({ initial, username }: Props) {
     setError(null);
     setSuccess(false);
 
-    const result = await updateProfileAction(values);
+    const result = await updateProfileAction({
+      ...values,
+      career_history: careerHistory,
+      certifications,
+    });
+
     if (result.error) {
       setError(result.error);
     } else {
       setSuccess(true);
-      // Brief pause, then navigate to updated profile
       setTimeout(() => router.push(`/p/${username}`), 800);
     }
     setSaving(false);
@@ -83,10 +130,7 @@ export function EditProfileForm({ initial, username }: Props) {
       </Field>
 
       {/* Headline */}
-      <Field
-        label="Headline"
-        hint={`${headlineLen}/120`}
-      >
+      <Field label="Headline" hint={`${headlineLen}/120`}>
         <input
           type="text"
           value={values.headline}
@@ -98,10 +142,7 @@ export function EditProfileForm({ initial, username }: Props) {
       </Field>
 
       {/* Bio */}
-      <Field
-        label="Bio"
-        hint={`${bioLen}/600`}
-      >
+      <Field label="Bio" hint={`${bioLen}/600`}>
         <textarea
           value={values.bio}
           onChange={(e) => set('bio', e.target.value.slice(0, 600))}
@@ -124,6 +165,147 @@ export function EditProfileForm({ initial, username }: Props) {
           className={`${inputCls} w-32`}
         />
       </Field>
+
+      {/* Preferred style */}
+      <Field label="Playing style" hint="Brief description of how you play">
+        <input
+          type="text"
+          value={values.preferred_style}
+          onChange={(e) => set('preferred_style', e.target.value.slice(0, 100))}
+          placeholder="e.g. Aggressive baseliner, dink-heavy, serve and volley"
+          maxLength={100}
+          className={inputCls}
+        />
+      </Field>
+
+      {/* Career history */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-slate-300">Career history</label>
+          {careerHistory.length < 5 && (
+            <button
+              type="button"
+              onClick={addCareer}
+              className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+            >
+              + Add entry
+            </button>
+          )}
+        </div>
+        {careerHistory.length === 0 && (
+          <p className="text-xs text-slate-600">
+            No career entries yet.{' '}
+            <button type="button" onClick={addCareer} className="text-brand-400 hover:text-brand-300">
+              Add one
+            </button>
+          </p>
+        )}
+        {careerHistory.map((entry, i) => (
+          <div key={i} className="rounded-lg border border-slate-700 bg-surface p-3 space-y-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-slate-500 font-medium">Entry {i + 1}</span>
+              <button
+                type="button"
+                onClick={() => removeCareer(i)}
+                className="text-xs text-slate-600 hover:text-red-400 transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={entry.role}
+                onChange={(e) => setCareer(i, 'role', e.target.value)}
+                placeholder="Role (e.g. Club captain)"
+                maxLength={80}
+                className={inputCls}
+              />
+              <input
+                type="text"
+                value={entry.club}
+                onChange={(e) => setCareer(i, 'club', e.target.value)}
+                placeholder="Club / organisation"
+                maxLength={80}
+                className={inputCls}
+              />
+            </div>
+            <input
+              type="text"
+              value={entry.years}
+              onChange={(e) => setCareer(i, 'years', e.target.value)}
+              placeholder="Years (e.g. 2020–present)"
+              maxLength={30}
+              className={`${inputCls} w-48`}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* Certifications */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-slate-300">Certifications</label>
+          {certifications.length < 5 && (
+            <button
+              type="button"
+              onClick={addCert}
+              className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+            >
+              + Add certification
+            </button>
+          )}
+        </div>
+        {certifications.length === 0 && (
+          <p className="text-xs text-slate-600">
+            No certifications yet.{' '}
+            <button type="button" onClick={addCert} className="text-brand-400 hover:text-brand-300">
+              Add one
+            </button>
+          </p>
+        )}
+        {certifications.map((cert, i) => (
+          <div key={i} className="rounded-lg border border-slate-700 bg-surface p-3 space-y-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-slate-500 font-medium">Certification {i + 1}</span>
+              <button
+                type="button"
+                onClick={() => removeCert(i)}
+                className="text-xs text-slate-600 hover:text-red-400 transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={cert.name}
+                onChange={(e) => setCert(i, 'name', e.target.value)}
+                placeholder="Certification name"
+                maxLength={80}
+                className={inputCls}
+              />
+              <input
+                type="text"
+                value={cert.issuer}
+                onChange={(e) => setCert(i, 'issuer', e.target.value)}
+                placeholder="Issuing body"
+                maxLength={80}
+                className={inputCls}
+              />
+            </div>
+            <input
+              type="number"
+              value={cert.year}
+              onChange={(e) => setCert(i, 'year', parseInt(e.target.value, 10) || new Date().getFullYear())}
+              placeholder="Year"
+              min={1990}
+              max={new Date().getFullYear() + 1}
+              className={`${inputCls} w-28`}
+            />
+          </div>
+        ))}
+      </div>
 
       {error && (
         <div className="rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-400">

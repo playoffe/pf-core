@@ -9,12 +9,13 @@ export const metadata: Metadata = { title: 'Global Rankings' };
 export default async function RankingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ format?: string; page?: string; q?: string }>;
+  searchParams: Promise<{ format?: string; page?: string; q?: string; scope?: string }>;
 }) {
   const sp = await searchParams;
   const format = sp.format ?? 'all';
   const page = Math.max(1, parseInt(sp.page ?? '1', 10));
   const searchQuery = (sp.q ?? '').trim();
+  const scope = sp.scope ?? 'global'; // 'global' | 'club'
   const perPage = 50;
   const offset = (page - 1) * perPage;
 
@@ -41,6 +42,55 @@ export default async function RankingsPage({
         .gt('current_rating', myStats.current_rating);
 
       myRank = { rank: (count ?? 0) + 1, rating: myStats.current_rating };
+    }
+  }
+
+  // ── Club scope: resolve the viewer's club and its member IDs ─────────────
+  let clubName: string | null = null;
+  let clubPlayerIds: string[] | null = null;
+  let noClub = false;
+
+  if (scope === 'club' && user) {
+    // Find the viewer's current club affiliation
+    const { data: affil } = await admin
+      .from('club_affiliations')
+      .select('club_id, clubs!inner(name)')
+      .eq('player_id', user.id)
+      .eq('is_current', true)
+      .maybeSingle();
+
+    if (affil) {
+      const clubId = affil.club_id;
+      clubName = (affil.clubs as { name: string } | null)?.name ?? null;
+
+      // Get all current members of that club
+      const { data: members } = await admin
+        .from('club_affiliations')
+        .select('player_id')
+        .eq('club_id', clubId)
+        .eq('is_current', true);
+
+      clubPlayerIds = (members ?? []).map((m) => m.player_id);
+    } else {
+      // Try club_managers as fallback
+      const { data: mgr } = await admin
+        .from('club_managers')
+        .select('club_id, clubs!inner(name)')
+        .eq('player_id', user.id)
+        .maybeSingle();
+
+      if (mgr) {
+        const clubId = mgr.club_id;
+        clubName = (mgr.clubs as { name: string } | null)?.name ?? null;
+
+        const { data: mgrMembers } = await admin
+          .from('club_managers')
+          .select('player_id')
+          .eq('club_id', clubId);
+        clubPlayerIds = (mgrMembers ?? []).map((m) => m.player_id);
+      } else {
+        noClub = true;
+      }
     }
   }
 
@@ -80,6 +130,12 @@ export default async function RankingsPage({
     q = q.gt('doubles_matches', 0);
   } else if (format === 'mixed') {
     q = q.gt('mixed_doubles_matches', 0);
+  }
+
+  // Filter by club scope
+  if (scope === 'club' && clubPlayerIds !== null) {
+    const ids = clubPlayerIds.length > 0 ? clubPlayerIds : ['00000000-0000-0000-0000-000000000000'];
+    q = q.in('player_id', ids);
   }
 
   // Filter by search
@@ -167,10 +223,53 @@ export default async function RankingsPage({
           <PlayerSearchInput defaultValue={searchQuery} />
         </div>
 
+        {/* Scope tabs — global vs my club */}
+        {user && (
+          <div className="mb-4 flex items-center gap-1 rounded-full bg-surface-card p-1 ring-1 ring-surface-border text-xs w-fit">
+            <Link
+              href={`/rankings?format=${format}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`}
+              className={`rounded-full px-3 py-1 font-medium transition-colors ${
+                scope === 'global' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Global
+            </Link>
+            <Link
+              href={`/rankings?scope=club&format=${format}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`}
+              className={`rounded-full px-3 py-1 font-medium transition-colors ${
+                scope === 'club' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              My club
+            </Link>
+          </div>
+        )}
+
+        {/* Club scope heading */}
+        {scope === 'club' && !noClub && clubName && (
+          <div className="mb-4 rounded-xl bg-violet-900/20 ring-1 ring-violet-700/30 px-5 py-3">
+            <p className="text-sm font-semibold text-violet-200">
+              🏢 {clubName} leaderboard
+            </p>
+            <p className="text-xs text-violet-400 mt-0.5">Rankings among your club members</p>
+          </div>
+        )}
+
+        {/* Club not found message */}
+        {scope === 'club' && noClub && (
+          <div className="mb-6 rounded-xl bg-surface-card p-8 text-center ring-1 ring-surface-border">
+            <p className="text-2xl mb-2">🏢</p>
+            <p className="text-sm font-medium text-white mb-1">Not a member of any club</p>
+            <p className="text-xs text-slate-500">
+              You need to be affiliated with a club to see its leaderboard.
+            </p>
+          </div>
+        )}
+
         {/* Format filter */}
         <div className="mb-6 flex flex-wrap gap-2">
           {formats.map((f) => {
-            const href = `/rankings?format=${f.id}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`;
+            const href = `/rankings?format=${f.id}${scope === 'club' ? '&scope=club' : ''}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`;
             return (
               <Link
                 key={f.id}
@@ -287,7 +386,7 @@ export default async function RankingsPage({
                 <div className="flex items-center gap-2">
                   {page > 1 && (
                     <Link
-                      href={`/rankings?format=${format}&page=${page - 1}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`}
+                      href={`/rankings?format=${format}&page=${page - 1}${scope === 'club' ? '&scope=club' : ''}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`}
                       className="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-300 transition-colors"
                     >
                       ← Prev
@@ -296,7 +395,7 @@ export default async function RankingsPage({
                   <span className="text-xs text-slate-600">Page {page} of {totalPages}</span>
                   {page < totalPages && (
                     <Link
-                      href={`/rankings?format=${format}&page=${page + 1}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`}
+                      href={`/rankings?format=${format}&page=${page + 1}${scope === 'club' ? '&scope=club' : ''}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ''}`}
                       className="rounded-lg border border-surface-border px-3 py-1.5 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-300 transition-colors"
                     >
                       Next →

@@ -16,7 +16,7 @@ export default async function EditProfilePage() {
 
   const { data: player } = await supabase
     .from('players')
-    .select('full_name, username, location, photo_url, player_profiles(bio, headline, playing_since)')
+    .select('full_name, username, location, photo_url, player_profiles(bio, headline, playing_since, preferred_style, career_history, certifications)')
     .eq('id', user.id)
     .single();
 
@@ -26,6 +26,9 @@ export default async function EditProfilePage() {
     bio: string | null;
     headline: string | null;
     playing_since: number | null;
+    preferred_style?: string | null;
+    career_history?: unknown[] | null;
+    certifications?: unknown[] | null;
   } | null;
 
   return (
@@ -54,6 +57,9 @@ export default async function EditProfilePage() {
             headline: profile?.headline ?? null,
             bio: profile?.bio ?? null,
             playing_since: profile?.playing_since ?? null,
+            preferred_style: profile?.preferred_style ?? null,
+            career_history: (profile?.career_history ?? []) as { role: string; club: string; years: string }[],
+            certifications: (profile?.certifications ?? []) as { name: string; issuer: string; year: number }[],
           }}
         />
       </div>

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { sendPushToPlayer } from '@/lib/actions/push';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -141,6 +142,9 @@ export async function createNotificationForPlayer(
       body: body ?? null,
       link: link ?? null,
     });
+
+    // Fire-and-forget web push (no-ops if VAPID not configured)
+    sendPushToPlayer(playerId, title, body ?? '', link ?? '/').catch(() => {});
   } catch {
     // Fire-and-forget — never block the calling action
   }

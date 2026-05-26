@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getNotificationPrefsAction } from '@/lib/actions/notifications';
 import { NotificationPrefsForm } from '@/components/settings/NotificationPrefsForm';
+import { PushSubscribeButton } from '@/components/settings/PushSubscribeButton';
 
 export const metadata: Metadata = { title: 'Notification preferences' };
 
@@ -23,6 +24,15 @@ export default async function NotificationsSettingsPage() {
       </nav>
 
       <h1 className="mb-6 text-2xl font-bold text-white">Notification preferences</h1>
+
+      {/* Push notifications */}
+      <div className="mb-8 rounded-xl bg-surface-card ring-1 ring-surface-border px-5 py-5">
+        <h2 className="mb-1 text-sm font-semibold text-white">Browser push notifications</h2>
+        <p className="mb-4 text-xs text-slate-500">
+          Receive real-time notifications even when the app is not open.
+        </p>
+        <PushSubscribeButton />
+      </div>
 
       <NotificationPrefsForm initialPrefs={prefs} />
     </>

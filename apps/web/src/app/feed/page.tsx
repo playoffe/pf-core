@@ -4,6 +4,10 @@ import Link from 'next/link';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { BADGE_MAP } from '@/lib/badges';
+import { CreatePostCard } from '@/components/feed/CreatePostCard';
+import { FeedPostCard } from '@/components/feed/FeedPost';
+import { getFeedPostsAction } from '@/lib/actions/feed';
+import type { FeedPost } from '@/lib/actions/feed';
 
 export const metadata: Metadata = { title: 'Activity Feed · PLAYOFFE' };
 
@@ -173,6 +177,28 @@ export default async function FeedPage({ searchParams }: Props) {
 
   const followingCount = scopedPlayerIds ? scopedPlayerIds.length - 1 : 0; // excludes self
 
+  // ── Fetch user-generated posts ────────────────────────────────────────────
+  const feedPosts: FeedPost[] = await getFeedPostsAction(showAll ? 'all' : 'following');
+
+  // Get current player info for CreatePostCard
+  const { data: currentPlayer } = user
+    ? await createAdminClient()
+        .from('players')
+        .select('full_name, photo_url, username')
+        .eq('id', user.id)
+        .maybeSingle()
+    : { data: null };
+
+  // ── Merge posts + activity items ─────────────────────────────────────────
+  type MergedItem =
+    | { kind: 'post'; at: string; post: FeedPost }
+    | { kind: 'activity'; at: string; item: FeedItem };
+
+  const merged: MergedItem[] = [
+    ...feedPosts.map((p) => ({ kind: 'post' as const, at: p.created_at, post: p })),
+    ...feed.map((item) => ({ kind: 'activity' as const, at: item.at, item })),
+  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
   return (
     <div className="min-h-screen bg-surface">
       <AppNav />
@@ -201,8 +227,16 @@ export default async function FeedPage({ searchParams }: Props) {
           </div>
         </div>
 
+        {/* Post composer — only for logged-in players */}
+        {currentPlayer && (
+          <CreatePostCard
+            playerName={currentPlayer.full_name}
+            playerPhotoUrl={(currentPlayer as { photo_url?: string | null }).photo_url}
+          />
+        )}
+
         {/* Empty state */}
-        {feed.length === 0 ? (
+        {merged.length === 0 ? (
           <div className="rounded-xl bg-surface-card p-10 text-center ring-1 ring-surface-border">
             <p className="text-2xl mb-2">🎾</p>
             {!showAll && followingCount === 0 ? (
@@ -224,9 +258,17 @@ export default async function FeedPage({ searchParams }: Props) {
           </div>
         ) : (
           <div className="space-y-2">
-            {feed.map((item) => (
-              <FeedCard key={`${item.kind}-${item.id}`} item={item} />
-            ))}
+            {merged.map((entry) =>
+              entry.kind === 'post' ? (
+                <FeedPostCard
+                  key={`post-${entry.post.id}`}
+                  post={entry.post}
+                  viewerPlayerId={user?.id ?? null}
+                />
+              ) : (
+                <FeedCard key={`${entry.item.kind}-${entry.item.id}`} item={entry.item} />
+              ),
+            )}
           </div>
         )}
       </main>

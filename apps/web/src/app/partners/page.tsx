@@ -2,22 +2,37 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
+import { Suspense } from 'react';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { PartnerActions } from '@/components/player/PartnerActions';
+import { PartnerFilters } from '@/components/player/PartnerFilters';
 import { getPartnerSuggestionsAction } from '@/lib/actions/partners';
 
 export const metadata: Metadata = { title: 'Partner Matching · PLAYOFFE' };
 
-export default async function PartnersPage() {
+interface Props {
+  searchParams: Promise<{ gender?: string; location?: string; format?: string }>;
+}
+
+export default async function PartnersPage({ searchParams }: Props) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
   const admin = createAdminClient();
 
-  // Suggestions
-  const { players, myRating, sentIds } = await getPartnerSuggestionsAction();
+  const sp = await searchParams;
+  const filterGender = (sp.gender as 'male' | 'female' | 'other' | undefined) ?? undefined;
+  const filterLocation = sp.location?.trim() ?? undefined;
+  const filterFormat = (sp.format as 'singles' | 'doubles' | undefined) ?? undefined;
+
+  // Suggestions with optional filters
+  const { players, myRating, sentIds } = await getPartnerSuggestionsAction({
+    gender: filterGender,
+    location: filterLocation,
+    format: filterFormat,
+  });
 
   // Incoming requests (to me, pending)
   const { data: incoming } = await admin
@@ -122,6 +137,15 @@ export default async function PartnersPage() {
             </div>
           </section>
         )}
+
+        {/* Filter bar */}
+        <Suspense fallback={null}>
+          <PartnerFilters
+            currentGender={sp.gender ?? ''}
+            currentLocation={sp.location ?? ''}
+            currentFormat={sp.format ?? ''}
+          />
+        </Suspense>
 
         {/* Suggestions */}
         <section>
