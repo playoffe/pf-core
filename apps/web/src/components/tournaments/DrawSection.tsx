@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { generateDrawAction, clearDrawAction, scheduleMatchesAction, generateNextSwissRoundAction } from '@/lib/actions/draws';
+import { generateDrawAction, clearDrawAction, scheduleMatchesAction, generateNextSwissRoundAction, promoteGroupWinnersAction } from '@/lib/actions/draws';
 import type { MatchWithPlayers } from '@/lib/actions/draws';
 import { BracketView } from './BracketView';
 import { useRealtimeCategoryMatches } from '@/hooks/useRealtimeCategoryMatches';
@@ -37,6 +37,7 @@ export function DrawSection({
   const [loading, setLoading] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [generatingSwissRound, setGeneratingSwissRound] = useState(false);
+  const [promotingGroups, setPromotingGroups] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [matches, setMatches] = useState(initialMatches);
@@ -66,6 +67,28 @@ export function DrawSection({
   const totalSwissRounds = Math.ceil(Math.log2(Math.max(entryCount, 2)));
   const canGenerateNextSwissRound =
     isSwiss && isDrawn && currentRoundComplete && maxRound < totalSwissRounds;
+
+  // Group stage knockout: can promote when all group matches are done and knockouts unfilled
+  const isGroupKnockout = drawFormat === 'group_stage_knockout';
+  const groupMatches = matches.filter((m) => m.group_name !== null);
+  const knockoutMatches = matches.filter((m) => m.group_name === null);
+  const allGroupMatchesDone =
+    groupMatches.length > 0 &&
+    groupMatches.every((m) => m.status === 'completed' || m.status === 'walkover');
+  const knockoutSlotsEmpty = knockoutMatches.some((m) => !m.entry_a && !m.entry_b);
+  const canPromoteGroups = isGroupKnockout && isDrawn && allGroupMatchesDone && knockoutSlotsEmpty;
+
+  async function handlePromoteGroups() {
+    setPromotingGroups(true);
+    setError(null);
+    const result = await promoteGroupWinnersAction(categoryId);
+    if ('error' in result && result.error) {
+      setError(result.error);
+    } else {
+      router.refresh();
+    }
+    setPromotingGroups(false);
+  }
 
   // Live subscription — auto-refreshes bracket when any match in this category changes
   const liveStatus = useRealtimeCategoryMatches(categoryId);
@@ -197,6 +220,17 @@ export function DrawSection({
                   className="rounded-lg border border-brand-600 px-3 py-1.5 text-xs text-brand-400 hover:bg-brand-600/10 transition-colors disabled:opacity-50"
                 >
                   {generatingSwissRound ? 'Generating…' : `Generate Round ${maxRound + 1}`}
+                </button>
+              )}
+
+              {/* Group stage knockout: promote group winners to knockout bracket */}
+              {canPromoteGroups && !showRegenConfirm && (
+                <button
+                  onClick={handlePromoteGroups}
+                  disabled={promotingGroups}
+                  className="rounded-lg border border-brand-600 px-3 py-1.5 text-xs text-brand-400 hover:bg-brand-600/10 transition-colors disabled:opacity-50"
+                >
+                  {promotingGroups ? 'Promoting…' : 'Promote group winners →'}
                 </button>
               )}
 

@@ -148,6 +148,24 @@ export async function registerForCategoryAction(categoryId: string) {
 
   if (error) return { error: 'Failed to register. Please try again.' };
 
+  // Send confirmation email when auto-approved to active
+  if (entryStatus === 'active') {
+    const { data: player } = await admin
+      .from('players')
+      .select('email, full_name')
+      .eq('id', user.id)
+      .single();
+    if (player?.email) {
+      void sendEntryConfirmedNotification({
+        playerEmail: player.email,
+        playerName: player.full_name,
+        tournamentName: tournament.name,
+        tournamentSlug: tournament.slug,
+        categoryName: cat.name,
+      });
+    }
+  }
+
   revalidatePath(`/events/${tournament.slug}`);
   revalidatePath(`/tournaments/${tournament.slug}`);
   revalidatePath('/dashboard');
@@ -598,6 +616,30 @@ export async function confirmPartnerInviteAction(entryId: string) {
     .from('tournament_entries')
     .update({ status: newStatus })
     .eq('id', entryId);
+
+  // Send confirmation email when auto-approved
+  if (newStatus === 'active') {
+    const { data: details } = await admin
+      .from('tournament_entries')
+      .select('players!player_id(email, full_name), tournament_categories!category_id(name, tournaments!tournament_id(name, slug))')
+      .eq('id', entryId)
+      .single();
+    if (details) {
+      type PR = { email: string; full_name: string } | null;
+      type CR = { name: string; tournaments: { name: string; slug: string } | null } | null;
+      const pl = details.players as unknown as PR;
+      const c = details.tournament_categories as unknown as CR;
+      if (pl?.email && c?.tournaments) {
+        void sendEntryConfirmedNotification({
+          playerEmail: pl.email,
+          playerName: pl.full_name,
+          tournamentName: c.tournaments.name,
+          tournamentSlug: c.tournaments.slug,
+          categoryName: c.name,
+        });
+      }
+    }
+  }
 
   revalidatePath(`/events/${tSlug}`);
   revalidatePath('/dashboard');

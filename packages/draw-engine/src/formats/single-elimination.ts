@@ -9,7 +9,7 @@ export function singleElimination(config: DrawConfig): GeneratedDraw {
   const slots = [...entries, ...Array(byes).fill(null)];
   const matchIds: string[][] = [];
   const rounds: DrawRound[] = [];
-  let totalRounds = Math.log2(bracketSize);
+  const totalRounds = Math.log2(bracketSize);
   let matchesInRound = bracketSize / 2;
   let roundIndex = 1;
 
@@ -71,6 +71,58 @@ export function singleElimination(config: DrawConfig): GeneratedDraw {
     matchesInRound /= 2;
     roundIndex++;
     if (matchesInRound < 1) break;
+  }
+
+  // ── 3rd place match ──────────────────────────────────────────────────────────
+  // Only meaningful when there are at least 4 entries (i.e. there is a semifinal
+  // round before the final).  The two semifinal losers play for bronze.
+  if (totalRounds >= 2) {
+    const finalRound = totalRounds; // 1-based round number of the Final
+    const semifinalRoundIndex = finalRound - 1; // round index of the Semis
+
+    // Find the round object that holds the semifinal matches
+    const semifinalRound = rounds.find((r) => r.round === semifinalRoundIndex);
+
+    if (semifinalRound && semifinalRound.matches.length === 2) {
+      const thirdPlaceId = makeId();
+
+      // Tag the 3rd place match with the bracket_type the DB + finalize action expect.
+      // Extended properties (prefixed with _) are picked up by generateDrawAction via `as any`.
+      const thirdPlaceMatch = Object.assign(
+        {
+          id: thirdPlaceId,
+          round: finalRound,
+          round_name: '3rd Place',
+          group_name: null,
+          entry_a: null,
+          entry_b: null,
+          winner_advances_to: null,
+          loser_advances_to: null,
+        } satisfies DrawMatch,
+        {
+          _bracket_type: 'third_place',
+          _winner_to_match_id: null,
+          _loser_to_match_id: null,
+          _winner_slot: null,
+          _loser_slot: null,
+        },
+      );
+
+      // Wire the two semifinalists' losers into the 3rd place match
+      const [semi1, semi2] = semifinalRound.matches;
+      const s1 = semi1 as DrawMatch & Record<string, unknown>;
+      const s2 = semi2 as DrawMatch & Record<string, unknown>;
+      s1._loser_to_match_id = thirdPlaceId;
+      s1._loser_slot = 'a';
+      s2._loser_to_match_id = thirdPlaceId;
+      s2._loser_slot = 'b';
+
+      // Append the 3rd place match to the final round (alongside the main final)
+      const finalRoundObj = rounds.find((r) => r.round === finalRound);
+      if (finalRoundObj) {
+        finalRoundObj.matches.push(thirdPlaceMatch as unknown as DrawMatch);
+      }
+    }
   }
 
   return { format: 'single_elimination', category_id, rounds, generated_at: new Date().toISOString() };
