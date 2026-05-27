@@ -163,6 +163,46 @@ export async function setUserPasswordAction(userId: string, newPassword: string)
   return { success: true as const };
 }
 
+/**
+ * Finds every non-super-admin auth user whose app_metadata.roles does NOT
+ * include 'player' and adds 'player' to their roles.
+ * Safe to run multiple times — already-correct users are skipped.
+ */
+export async function backfillPlayerRoleAction() {
+  const { user: actor, admin } = await assertSuperAdmin();
+
+  const { data: authList } = await admin.auth.admin.listUsers({ perPage: 1000 });
+  const users = (authList?.users ?? []).filter(
+    (u) => u.app_metadata?.role !== 'super_admin',
+  );
+
+  const toFix = users.filter((u) => {
+    const roles = (u.app_metadata?.roles as string[] | undefined) ?? [];
+    return !roles.includes('player');
+  });
+
+  await Promise.all(
+    toFix.map((u) => {
+      const existingRoles = (u.app_metadata?.roles as string[] | undefined) ?? [];
+      return admin.auth.admin.updateUserById(u.id, {
+        app_metadata: { ...u.app_metadata, roles: Array.from(new Set([...existingRoles, 'player'])) },
+      });
+    }),
+  );
+
+  if (toFix.length > 0) {
+    await writeAuditLog({
+      admin,
+      actorId: actor.id,
+      actionType: 'player_role_backfill',
+      metadata: { count: toFix.length, userIds: toFix.map((u) => u.id) },
+    });
+  }
+
+  revalidatePath('/superadmin/users');
+  return { success: true as const, fixed: toFix.length };
+}
+
 // ── Club management ───────────────────────────────────────────────────────────
 
 export async function getAllClubsAction() {

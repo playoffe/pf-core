@@ -151,10 +151,11 @@ export async function claimAccountAction({
     if (!available) return { error: 'Username is already taken' };
   }
 
-  // Set password + confirm email on the auth user
+  // Set password + confirm email + ensure player role is stored in JWT
   const { error: updateAuthErr } = await admin.auth.admin.updateUserById(player.id, {
     password,
     email_confirm: true,
+    app_metadata: { roles: ['player'] },
   });
   if (updateAuthErr) return { error: 'Failed to set password. Please try again.' };
 

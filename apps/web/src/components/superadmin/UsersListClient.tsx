@@ -5,6 +5,7 @@ import type { UserRow } from '@/lib/actions/superadmin';
 import {
   generatePasswordResetLinkAction,
   setUserPasswordAction,
+  backfillPlayerRoleAction,
 } from '@/lib/actions/superadmin';
 
 // ── Filter types ──────────────────────────────────────────────────────────────
@@ -156,9 +157,11 @@ function ResetPanel({ userId, email }: { userId: string; email: string }) {
 
 function UserRow({ user }: { user: UserRow }) {
   const [expanded, setExpanded] = useState(false);
-  const hasAdmin  = user.roles.includes('admin');
-  const hasPlayer = user.roles.includes('player');
-  const displayName = user.full_name ?? user.email;
+  const hasAdmin      = user.roles.includes('admin');
+  // Player is the default — treat an empty roles array as player
+  const hasPlayer     = user.roles.includes('player') || user.roles.length === 0;
+  const roleNotStored = user.roles.length === 0; // role is defaulted but not written to JWT yet
+  const displayName   = user.full_name ?? user.email;
 
   return (
     <div className="rounded-xl bg-surface-card ring-1 ring-surface-border px-5 py-4">
@@ -182,13 +185,12 @@ function UserRow({ user }: { user: UserRow }) {
               </span>
             )}
             {hasPlayer && (
-              <span className="rounded-full bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-300">
-                Player
-              </span>
-            )}
-            {!hasAdmin && !hasPlayer && (
-              <span className="rounded-full bg-slate-700/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                No roles
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                roleNotStored
+                  ? 'bg-slate-700/40 text-slate-400'   // default, not yet stored
+                  : 'bg-brand-500/20 text-brand-300'   // explicitly stored
+              }`}>
+                Player{roleNotStored ? ' *' : ''}
               </span>
             )}
             {user.is_provisional && (
@@ -237,6 +239,24 @@ export function UsersListClient({ users }: Props) {
   const [search, setSearch]     = useState('');
   const [role, setRole]         = useState<RoleFilter>('all');
   const [account, setAccount]   = useState<AccountFilter>('all');
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
+  const [backfilling, startBackfill]  = useTransition();
+
+  // Users whose role is not yet stored in JWT
+  const needsBackfill = useMemo(() => users.filter((u) => u.roles.length === 0), [users]);
+
+  function handleBackfill() {
+    setBackfillMsg(null);
+    startBackfill(async () => {
+      const res = await backfillPlayerRoleAction();
+      if ('error' in res) { setBackfillMsg(`Error: ${(res as { error: string }).error}`); return; }
+      setBackfillMsg(
+        res.fixed === 0
+          ? 'All users already have the player role.'
+          : `✓ Player role added to ${res.fixed} user${res.fixed !== 1 ? 's' : ''}.`,
+      );
+    });
+  }
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -247,9 +267,10 @@ export function UsersListClient({ users }: Props) {
         !(u.username ?? '').toLowerCase().includes(q)
       )) return false;
 
-      if (role === 'admin'       && !u.roles.includes('admin'))  return false;
-      if (role === 'player_only' && (u.roles.includes('admin') || !u.roles.includes('player'))) return false;
-      if (role === 'no_profile'  && u.username !== null)         return false;
+      // Player filter: treat empty roles as player (default)
+      if (role === 'admin'       && !u.roles.includes('admin')) return false;
+      if (role === 'player_only' && (u.roles.includes('admin') || (u.roles.length > 0 && !u.roles.includes('player')))) return false;
+      if (role === 'no_profile'  && u.username !== null)        return false;
 
       if (account === 'regular'     &&  u.is_provisional) return false;
       if (account === 'provisional' && !u.is_provisional) return false;
@@ -262,6 +283,35 @@ export function UsersListClient({ users }: Props) {
 
   return (
     <div>
+      {/* Backfill banner — shown when any user is missing the player role in their JWT */}
+      {needsBackfill.length > 0 && !backfillMsg && (
+        <div className="mb-5 flex items-center justify-between gap-4 rounded-lg border border-amber-700/40 bg-amber-950/30 px-4 py-3">
+          <p className="text-sm text-amber-300">
+            <span className="font-semibold">{needsBackfill.length} user{needsBackfill.length !== 1 ? 's' : ''}</span>{' '}
+            {needsBackfill.length === 1 ? 'is' : 'are'} missing the player role in their JWT.
+            {' '}Marked as <span className="font-mono text-xs">Player *</span> below.
+          </p>
+          <button
+            onClick={handleBackfill}
+            disabled={backfilling}
+            className="shrink-0 rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-500 disabled:opacity-50 transition-colors"
+          >
+            {backfilling ? 'Fixing…' : 'Fix all →'}
+          </button>
+        </div>
+      )}
+
+      {/* Backfill result feedback */}
+      {backfillMsg && (
+        <div className={`mb-5 rounded-lg px-4 py-3 text-sm ${
+          backfillMsg.startsWith('✓')
+            ? 'border border-green-800 bg-green-950/40 text-green-300'
+            : 'border border-red-800 bg-red-950/40 text-red-300'
+        }`}>
+          {backfillMsg}
+        </div>
+      )}
+
       {/* Filter bar */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
         {/* Search */}
