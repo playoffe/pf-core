@@ -1,15 +1,19 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { setActiveModeAction } from '@/lib/actions/mode';
 
 interface Props {
   roles: string[];
 }
 
+// Pages that only make sense in admin mode — redirect to /dashboard when switching to player
+const ADMIN_ONLY_ROUTES = ['/tournaments'];
+
 export function RoleToggle({ roles }: Props) {
-  const router = useRouter();
+  const router   = useRouter();
+  const pathname = usePathname();
   const [activeMode, setActiveMode] = useState<'admin' | 'player'>('admin');
 
   useEffect(() => {
@@ -28,7 +32,12 @@ export function RoleToggle({ roles }: Props) {
     localStorage.setItem('active_mode', mode);
     // Persist to cookie so server components can read it
     await setActiveModeAction(mode);
-    router.refresh();
+    // If switching to player while on an admin-only page, go to dashboard instead
+    if (mode === 'player' && ADMIN_ONLY_ROUTES.some((r) => pathname === r || pathname.startsWith(r + '/'))) {
+      router.push('/dashboard');
+    } else {
+      router.refresh();
+    }
   }
 
   return (
