@@ -24,11 +24,19 @@ export default async function MyTournamentsPage() {
       <AppNav />
 
       <main className="mx-auto max-w-4xl px-6 py-10">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">My Tournaments</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Tournaments across the clubs you manage.
-          </p>
+        <div className="mb-8 flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white">My Tournaments</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Tournaments across the clubs you manage.
+            </p>
+          </div>
+          <Link
+            href="/tournaments/new"
+            className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
+          >
+            + New Tournament
+          </Link>
         </div>
 
         {tournaments.length === 0 ? (
