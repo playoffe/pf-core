@@ -87,7 +87,7 @@ export async function registerAction(input: RegisterPlayerInput, returnUrl?: str
   await supabase.auth.signInWithPassword({ email, password });
 
   const destination = returnUrl && returnUrl.startsWith('/') ? returnUrl : '/dashboard';
-  redirect(destination);
+  return { redirectTo: destination };
 }
 
 export async function loginAction(email: string, password: string, returnUrl?: string) {
@@ -95,7 +95,9 @@ export async function loginAction(email: string, password: string, returnUrl?: s
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { error: error.message };
   const destination = returnUrl && returnUrl.startsWith('/') ? returnUrl : '/dashboard';
-  redirect(destination);
+  // Return the destination so the client can do a hard navigation (window.location.href),
+  // which bypasses the Next.js Router Cache and guarantees a fresh AppNav render.
+  return { redirectTo: destination };
 }
 
 export async function logoutAction() {

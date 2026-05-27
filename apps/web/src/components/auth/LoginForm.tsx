@@ -16,6 +16,12 @@ export function LoginForm({ returnUrl }: { returnUrl?: string }) {
     if (result?.error) {
       setError(result.error);
       setLoading(false);
+      return;
+    }
+    // Hard navigation bypasses the Next.js Router Cache so AppNav always
+    // re-renders from the server with the fresh session after login.
+    if (result?.redirectTo) {
+      window.location.href = result.redirectTo;
     }
   }
 

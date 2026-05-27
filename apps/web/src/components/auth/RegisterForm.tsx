@@ -38,7 +38,11 @@ export function RegisterForm({ returnUrl }: { returnUrl?: string }) {
     setServerError(null);
     if (usernameStatus === 'taken') return;
     const result = await registerAction(data, returnUrl);
-    if (result?.error) setServerError(result.error);
+    if (result?.error) { setServerError(result.error); return; }
+    // Hard navigation so AppNav always re-renders from server with the fresh session.
+    if (result?.redirectTo) {
+      window.location.href = result.redirectTo;
+    }
   }
 
   return (
