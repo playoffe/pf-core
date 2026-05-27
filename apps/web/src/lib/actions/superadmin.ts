@@ -316,7 +316,7 @@ export async function getClubPendingInvitesAction(clubId: string) {
   const { admin } = await assertSuperAdmin();
   const { data } = await admin
     .from('admin_invites' as any)
-    .select('id, invitee_email, invitee_name, expires_at')
+    .select('id, invitee_email, invitee_name, expires_at, token')
     .eq('club_id', clubId)
     .is('claimed_at', null)
     .is('revoked_at', null)
@@ -327,6 +327,7 @@ export async function getClubPendingInvitesAction(clubId: string) {
     invitee_email: string;
     invitee_name: string | null;
     expires_at: string;
+    token: string;
   }>;
 }
 

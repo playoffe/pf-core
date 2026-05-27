@@ -23,6 +23,7 @@ interface PendingInvite {
   invitee_email: string;
   invitee_name: string | null;
   expires_at: string;
+  token: string;
 }
 
 interface Props {
@@ -53,6 +54,9 @@ export function ClubManagersPanel({ clubId, clubName }: Props) {
 
   // Revoke state
   const [revokingId, setRevokingId] = useState<string | null>(null);
+
+  // Copy-link state
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   async function loadData() {
     setLoadingManagers(true);
@@ -117,6 +121,13 @@ export function ClubManagersPanel({ clubId, clubName }: Props) {
         setPendingInvites(fresh);
       }
     });
+  }
+
+  function handleCopyLink(invite: PendingInvite) {
+    const url = `${window.location.origin}/invite/${invite.token}`;
+    navigator.clipboard.writeText(url);
+    setCopiedId(invite.id);
+    setTimeout(() => setCopiedId(null), 2000);
   }
 
   async function handleRevoke(invite: PendingInvite) {
@@ -196,28 +207,45 @@ export function ClubManagersPanel({ clubId, clubName }: Props) {
               <p className="mb-2 text-xs font-semibold text-amber-400 uppercase tracking-wide">
                 Pending invites
               </p>
-              <div className="space-y-1.5">
-                {pendingInvites.map((invite) => (
-                  <div key={invite.id} className="flex items-center gap-3 rounded-lg border border-amber-700/30 bg-amber-950/20 px-3 py-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-200 truncate">
-                        {invite.invitee_name
-                          ? <><span className="font-medium">{invite.invitee_name}</span> · {invite.invitee_email}</>
-                          : invite.invitee_email}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        Expires {new Date(invite.expires_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </p>
+              <div className="space-y-2">
+                {pendingInvites.map((invite) => {
+                  const inviteUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/invite/${invite.token}`;
+                  return (
+                    <div key={invite.id} className="rounded-lg border border-amber-700/30 bg-amber-950/20 px-3 py-2.5 space-y-2">
+                      {/* Header row: name/email + expiry + revoke */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-slate-200 truncate">
+                            {invite.invitee_name
+                              ? <><span className="font-medium">{invite.invitee_name}</span><span className="text-slate-400"> · {invite.invitee_email}</span></>
+                              : invite.invitee_email}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            Expires {new Date(invite.expires_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleRevoke(invite)}
+                          disabled={revokingId === invite.id}
+                          className="shrink-0 rounded-lg bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                        >
+                          {revokingId === invite.id ? '…' : 'Revoke'}
+                        </button>
+                      </div>
+                      {/* Invite link — always visible while pending */}
+                      <div className="flex items-center gap-2 rounded bg-surface px-2.5 py-1.5">
+                        <p className="flex-1 truncate text-xs text-brand-400 font-mono">{inviteUrl}</p>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyLink(invite)}
+                          className="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium border border-surface-border hover:border-slate-500 transition-colors text-slate-400 hover:text-slate-200"
+                        >
+                          {copiedId === invite.id ? '✓ Copied' : 'Copy'}
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => handleRevoke(invite)}
-                      disabled={revokingId === invite.id}
-                      className="shrink-0 rounded-lg bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
-                    >
-                      {revokingId === invite.id ? '…' : 'Revoke'}
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
