@@ -10,6 +10,7 @@ interface MobileNavProps {
   fullName?: string;
   email?: string;
   isSuperAdmin?: boolean;
+  activeMode?: 'admin' | 'player';
 }
 
 interface NavEntry {
@@ -23,17 +24,24 @@ const GUEST_LINKS: NavEntry[] = [
   { label: 'Rankings', href: '/rankings' },
 ];
 
-const AUTH_LINKS: NavEntry[] = [
-  { label: 'Dashboard',      href: '/dashboard',      exact: true },
-  { label: 'Events',         href: '/events' },
+/** Admin mode: club/tournament management, no player-only pages */
+const ADMIN_LINKS: NavEntry[] = [
+  { label: 'Dashboard',      href: '/dashboard',       exact: true },
   { label: 'Rankings',       href: '/rankings' },
-  { label: 'Feed',           href: '/feed',           exact: true },
-  { label: 'Practice',       href: '/practice',       exact: true },
-  { label: 'Partners',       href: '/partners',       exact: true },
   { label: 'New tournament', href: '/tournaments/new', exact: true },
 ];
 
-export function MobileNav({ isLoggedIn, username, fullName, email, isSuperAdmin }: MobileNavProps) {
+/** Player mode: full player experience, no admin-only tools */
+const PLAYER_LINKS: NavEntry[] = [
+  { label: 'Dashboard', href: '/dashboard', exact: true },
+  { label: 'Events',    href: '/events' },
+  { label: 'Rankings',  href: '/rankings' },
+  { label: 'Feed',      href: '/feed',      exact: true },
+  { label: 'Practice',  href: '/practice',  exact: true },
+  { label: 'Partners',  href: '/partners',  exact: true },
+];
+
+export function MobileNav({ isLoggedIn, username, fullName, email, isSuperAdmin, activeMode }: MobileNavProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -46,8 +54,11 @@ export function MobileNav({ isLoggedIn, username, fullName, email, isSuperAdmin 
     return () => { document.body.style.overflow = ''; };
   }, [open]);
 
-  // Super admins see no player links — only the Super Admin link added below
-  const links = isSuperAdmin ? [] : isLoggedIn ? AUTH_LINKS : GUEST_LINKS;
+  // Pick the correct link set based on role mode
+  const links = isSuperAdmin ? []
+    : !isLoggedIn ? GUEST_LINKS
+    : activeMode === 'admin' ? ADMIN_LINKS
+    : PLAYER_LINKS;
 
   function isActive(href: string, exact?: boolean) {
     return exact ? pathname === href : pathname.startsWith(href);

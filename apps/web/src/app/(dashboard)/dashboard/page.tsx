@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { createClient, createAdminClient, getUserRoles } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { getMyTournaments } from '@/lib/actions/tournaments';
 import { getMyClubs } from '@/lib/actions/clubs';
@@ -8,11 +9,11 @@ import { getMyEntries, getMyPartnerInvites } from '@/lib/actions/registration';
 import { PartnerInvitesBanner } from '@/components/events/PartnerInvitesBanner';
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  draft: { label: 'Draft', className: 'bg-slate-700 text-slate-300' },
+  draft:             { label: 'Draft',             className: 'bg-slate-700 text-slate-300' },
   registration_open: { label: 'Registration open', className: 'bg-blue-900/60 text-blue-300' },
-  in_progress: { label: 'In progress', className: 'bg-accent-500/20 text-accent-400' },
-  completed: { label: 'Completed', className: 'bg-brand-600/20 text-brand-300' },
-  cancelled: { label: 'Cancelled', className: 'bg-red-900/40 text-red-400' },
+  in_progress:       { label: 'In progress',       className: 'bg-accent-500/20 text-accent-400' },
+  completed:         { label: 'Completed',          className: 'bg-brand-600/20 text-brand-300' },
+  cancelled:         { label: 'Cancelled',          className: 'bg-red-900/40 text-red-400' },
 };
 
 export default async function DashboardPage() {
@@ -28,14 +29,170 @@ export default async function DashboardPage() {
     .eq('id', user.id)
     .single();
 
-  const [tournaments, clubs, myEntries, partnerInvites] = await Promise.all([
-    getMyTournaments(),
-    getMyClubs(),
+  // ── Active mode resolution ──────────────────────────────────────────────────
+  const roles    = getUserRoles(user);
+  const isAdmin  = roles.includes('admin');
+  const isPlayer = roles.includes('player') || roles.length === 0;
+  const hasBothRoles = isAdmin && isPlayer;
+
+  const rawMode = (await cookies()).get('active_mode')?.value;
+  const activeMode: 'admin' | 'player' = hasBothRoles
+    ? (rawMode === 'player' ? 'player' : 'admin')
+    : isAdmin ? 'admin'
+    : 'player';
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ADMIN MODE — show clubs + tournaments the user manages
+  // ══════════════════════════════════════════════════════════════════════════
+  if (activeMode === 'admin') {
+    const [tournaments, clubs] = await Promise.all([
+      getMyTournaments(),
+      getMyClubs(),
+    ]);
+
+    return (
+      <div className="min-h-screen bg-surface">
+        <AppNav />
+
+        <main className="mx-auto max-w-6xl px-6 py-10">
+          <h1 className="text-2xl font-bold text-white">
+            Welcome back, {player?.full_name ?? 'Admin'} 🏆
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">Your admin overview — clubs and tournaments you manage.</p>
+
+          <div className="mt-10 grid gap-6 lg:grid-cols-3">
+            {/* Quick actions */}
+            <div className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
+              <h2 className="text-base font-semibold text-white">Quick actions</h2>
+              <div className="mt-4 space-y-3">
+                <Link
+                  href="/tournaments/new"
+                  className="flex items-center gap-3 rounded-lg border border-surface-border p-3 hover:bg-surface transition-colors"
+                >
+                  <span className="text-xl">🏆</span>
+                  <span className="text-sm font-medium text-slate-300">New tournament</span>
+                </Link>
+                <Link
+                  href="/clubs/new"
+                  className="flex items-center gap-3 rounded-lg border border-surface-border p-3 hover:bg-surface transition-colors"
+                >
+                  <span className="text-xl">🏟️</span>
+                  <span className="text-sm font-medium text-slate-300">Create a club</span>
+                </Link>
+                <Link
+                  href={player ? `/p/${player.username}` : '#'}
+                  className="flex items-center gap-3 rounded-lg border border-surface-border p-3 hover:bg-surface transition-colors"
+                >
+                  <span className="text-xl">👤</span>
+                  <span className="text-sm font-medium text-slate-300">View my profile</span>
+                </Link>
+              </div>
+            </div>
+
+            {/* My clubs */}
+            <div className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-semibold text-white">My clubs</h2>
+                <Link
+                  href="/clubs/new"
+                  className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+                >
+                  + New
+                </Link>
+              </div>
+              {clubs.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">
+                  No clubs yet.{' '}
+                  <Link href="/clubs/new" className="text-brand-400 hover:text-brand-300">
+                    Create one →
+                  </Link>
+                </p>
+              ) : (
+                <ul className="mt-4 space-y-2">
+                  {clubs.map((c) => (
+                    <li key={c.id}>
+                      <Link
+                        href={`/clubs/${c.slug}`}
+                        className="flex items-center gap-3 rounded-lg p-2 hover:bg-surface transition-colors"
+                      >
+                        <span
+                          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
+                          style={{ backgroundColor: c.brand_primary_color }}
+                        >
+                          {c.name[0]}
+                        </span>
+                        <span className="text-sm text-slate-300">{c.name}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* My tournaments */}
+            <div className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-semibold text-white">My tournaments</h2>
+                <Link
+                  href="/tournaments/new"
+                  className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+                >
+                  + New
+                </Link>
+              </div>
+              {tournaments.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">
+                  No tournaments yet.{' '}
+                  <Link href="/tournaments/new" className="text-brand-400 hover:text-brand-300">
+                    Create one →
+                  </Link>
+                </p>
+              ) : (
+                <ul className="mt-4 space-y-2">
+                  {tournaments.map((t) => {
+                    const badge = STATUS_BADGE[t.status] ?? STATUS_BADGE.draft;
+                    return (
+                      <li key={t.id}>
+                        <Link
+                          href={`/tournaments/${(t as unknown as { slug: string }).slug}`}
+                          className="flex items-center justify-between rounded-lg p-2 hover:bg-surface transition-colors"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm text-slate-300">{t.name}</p>
+                            <p className="text-xs text-slate-500">
+                              {new Date(t.start_date).toLocaleDateString('en-AU', {
+                                day: 'numeric',
+                                month: 'short',
+                              })}
+                            </p>
+                          </div>
+                          <span
+                            className={`ml-2 flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
+                          >
+                            {badge.label}
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PLAYER MODE — stats, next match, registrations, partner invites
+  // ══════════════════════════════════════════════════════════════════════════
+  const [myEntries, partnerInvites] = await Promise.all([
     getMyEntries(),
     getMyPartnerInvites(),
   ]);
 
-  // ── Next match widget ────────────────────────────────────────────────────────
+  // ── Next match widget ────────────────────────────────────────────────────
   const admin = createAdminClient();
   const activeEntryIds = myEntries
     .filter((e) => (e.status as string) === 'active')
@@ -78,12 +235,11 @@ export default async function DashboardPage() {
       const ea = nm.ea as unknown as EntryRef;
       const eb = nm.eb as unknown as EntryRef;
       const tc = nm.tc as { name: string } | null;
-      const t = nm.t as { name: string; slug: string } | null;
+      const t  = nm.t  as { name: string; slug: string } | null;
 
-      // Which side is the viewer? Opponent is the other side.
       const isA = activeEntryIds.includes(nm.entry_a_id ?? '');
       const opponentEntry = isA ? eb : ea;
-      const opponentName = opponentEntry?.players?.full_name ?? 'TBD';
+      const opponentName  = opponentEntry?.players?.full_name ?? 'TBD';
 
       nextMatch = {
         id: nm.id,
@@ -91,21 +247,21 @@ export default async function DashboardPage() {
         court: nm.court as number | null,
         round_name: nm.round_name as string | null,
         opponentName,
-        categoryName: tc?.name ?? '',
-        tournamentName: t?.name ?? '',
-        tournamentSlug: t?.slug ?? '',
+        categoryName:    tc?.name ?? '',
+        tournamentName:  t?.name  ?? '',
+        tournamentSlug:  t?.slug  ?? '',
       };
     }
   }
 
   function formatMatchTime(iso: string) {
-    const d = new Date(iso);
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const d       = new Date(iso);
+    const now     = new Date();
+    const today   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const tomorrow = new Date(today.getTime() + 86400000);
     const matchDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    const timeStr = d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
-    if (matchDay.getTime() === today.getTime()) return `Today at ${timeStr}`;
+    const timeStr  = d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+    if (matchDay.getTime() === today.getTime())    return `Today at ${timeStr}`;
     if (matchDay.getTime() === tomorrow.getTime()) return `Tomorrow at ${timeStr}`;
     return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ` at ${timeStr}`;
   }
@@ -122,21 +278,12 @@ export default async function DashboardPage() {
         {/* Stats row */}
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            {
-              label: 'Rating',
-              value: player?.global_stats?.current_rating?.toFixed(2) ?? '3.50',
-            },
-            { label: 'Matches', value: player?.global_stats?.total_matches ?? 0 },
-            { label: 'Wins', value: player?.global_stats?.wins ?? 0 },
-            {
-              label: 'Win rate',
-              value: `${(((player?.global_stats?.win_rate ?? 0) as number) * 100).toFixed(0)}%`,
-            },
+            { label: 'Rating',   value: player?.global_stats?.current_rating?.toFixed(2) ?? '3.50' },
+            { label: 'Matches',  value: player?.global_stats?.total_matches ?? 0 },
+            { label: 'Wins',     value: player?.global_stats?.wins ?? 0 },
+            { label: 'Win rate', value: `${(((player?.global_stats?.win_rate ?? 0) as number) * 100).toFixed(0)}%` },
           ].map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border"
-            >
+            <div key={stat.label} className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
               <p className="text-3xl font-bold text-white">{stat.value}</p>
               <p className="mt-1 text-sm text-slate-400">{stat.label}</p>
             </div>
@@ -195,10 +342,10 @@ export default async function DashboardPage() {
           {/* My registrations */}
           {myEntries.length > 0 && (() => {
             const ENTRY_STATUS_BADGE: Record<string, { label: string; className: string }> = {
-              active:     { label: 'Registered',       className: 'bg-accent-500/20 text-accent-400' },
-              pending:    { label: 'Pending approval',  className: 'bg-amber-900/40 text-amber-300' },
-              waitlisted: { label: 'Waitlisted',        className: 'bg-slate-700/50 text-slate-300' },
-              provisional:{ label: 'Invited',           className: 'bg-brand-900/40 text-brand-300' },
+              active:      { label: 'Registered',      className: 'bg-accent-500/20 text-accent-400' },
+              pending:     { label: 'Pending approval', className: 'bg-amber-900/40 text-amber-300' },
+              waitlisted:  { label: 'Waitlisted',       className: 'bg-slate-700/50 text-slate-300' },
+              provisional: { label: 'Invited',          className: 'bg-brand-900/40 text-brand-300' },
             };
             return (
               <div className="lg:col-span-3 rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
@@ -210,8 +357,8 @@ export default async function DashboardPage() {
                 </div>
                 <div className="space-y-2">
                   {myEntries.slice(0, 5).map((entry) => {
-                    const cat = entry.tournament_categories as { id: string; name: string; play_format: string } | null;
-                    const t = entry.tournaments as { id: string; name: string; slug: string; start_date: string; status: string } | null;
+                    const cat   = entry.tournament_categories as { id: string; name: string; play_format: string } | null;
+                    const t     = entry.tournaments as { id: string; name: string; slug: string; start_date: string; status: string } | null;
                     const badge = ENTRY_STATUS_BADGE[entry.status as string] ?? { label: entry.status, className: 'text-slate-500' };
                     return (
                       <Link
@@ -234,23 +381,23 @@ export default async function DashboardPage() {
             );
           })()}
 
-          {/* Quick actions */}
+          {/* Quick actions — player mode */}
           <div className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
             <h2 className="text-base font-semibold text-white">Quick actions</h2>
             <div className="mt-4 space-y-3">
               <Link
-                href="/tournaments/new"
+                href="/events"
                 className="flex items-center gap-3 rounded-lg border border-surface-border p-3 hover:bg-surface transition-colors"
               >
-                <span className="text-xl">🏆</span>
-                <span className="text-sm font-medium text-slate-300">New tournament</span>
+                <span className="text-xl">🎾</span>
+                <span className="text-sm font-medium text-slate-300">Browse events</span>
               </Link>
               <Link
-                href="/clubs/new"
+                href="/partners"
                 className="flex items-center gap-3 rounded-lg border border-surface-border p-3 hover:bg-surface transition-colors"
               >
-                <span className="text-xl">🏟️</span>
-                <span className="text-sm font-medium text-slate-300">Create a club</span>
+                <span className="text-xl">🤝</span>
+                <span className="text-sm font-medium text-slate-300">Find a partner</span>
               </Link>
               <Link
                 href={player ? `/p/${player.username}` : '#'}
@@ -260,96 +407,6 @@ export default async function DashboardPage() {
                 <span className="text-sm font-medium text-slate-300">View my profile</span>
               </Link>
             </div>
-          </div>
-
-          {/* My clubs */}
-          <div className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-white">My clubs</h2>
-              <Link
-                href="/clubs/new"
-                className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
-              >
-                + New
-              </Link>
-            </div>
-            {clubs.length === 0 ? (
-              <p className="mt-4 text-sm text-slate-500">
-                No clubs yet.{' '}
-                <Link href="/clubs/new" className="text-brand-400 hover:text-brand-300">
-                  Create one →
-                </Link>
-              </p>
-            ) : (
-              <ul className="mt-4 space-y-2">
-                {clubs.map((c) => (
-                  <li key={c.id}>
-                    <Link
-                      href={`/clubs/${c.slug}`}
-                      className="flex items-center gap-3 rounded-lg p-2 hover:bg-surface transition-colors"
-                    >
-                      <span
-                        className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
-                        style={{ backgroundColor: c.brand_primary_color }}
-                      >
-                        {c.name[0]}
-                      </span>
-                      <span className="text-sm text-slate-300">{c.name}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* Recent tournaments */}
-          <div className="rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-white">My tournaments</h2>
-              <Link
-                href="/tournaments/new"
-                className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
-              >
-                + New
-              </Link>
-            </div>
-            {tournaments.length === 0 ? (
-              <p className="mt-4 text-sm text-slate-500">
-                No tournaments yet.{' '}
-                <Link href="/tournaments/new" className="text-brand-400 hover:text-brand-300">
-                  Create one →
-                </Link>
-              </p>
-            ) : (
-              <ul className="mt-4 space-y-2">
-                {tournaments.map((t) => {
-                  const badge = STATUS_BADGE[t.status] ?? STATUS_BADGE.draft;
-                  return (
-                    <li key={t.id}>
-                      <Link
-                        href={`/tournaments/${(t as unknown as { slug: string }).slug}`}
-                        className="flex items-center justify-between rounded-lg p-2 hover:bg-surface transition-colors"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm text-slate-300">{t.name}</p>
-                          <p className="text-xs text-slate-500">
-                            {new Date(t.start_date).toLocaleDateString('en-AU', {
-                              day: 'numeric',
-                              month: 'short',
-                            })}
-                          </p>
-                        </div>
-                        <span
-                          className={`ml-2 flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
-                        >
-                          {badge.label}
-                        </span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
           </div>
         </div>
       </main>

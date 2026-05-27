@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { createClient, createAdminClient, isSuperAdmin, getUserRoles } from '@/lib/supabase/server';
 import { NotificationBell } from './NotificationBell';
 import { NavLink } from './NavLink';
@@ -18,6 +19,17 @@ export async function AppNav() {
 
   const superAdmin = isSuperAdmin(user);
   const roles = getUserRoles(user);
+
+  // ── Active mode resolution ──────────────────────────────────────────────────
+  const isAdmin     = roles.includes('admin');
+  const isPlayer    = roles.includes('player') || roles.length === 0;
+  const hasBothRoles = isAdmin && isPlayer;
+
+  const rawMode = (await cookies()).get('active_mode')?.value;
+  const activeMode: 'admin' | 'player' = hasBothRoles
+    ? (rawMode === 'player' ? 'player' : 'admin')   // default to admin for dual-role
+    : isAdmin ? 'admin'
+    : 'player';
 
   // Fetch initial notifications for the bell (last 30, server-side)
   let initialNotifications: Notification[] = [];
@@ -43,25 +55,52 @@ export async function AppNav() {
             fullName={player?.full_name ?? undefined}
             email={user?.email}
             isSuperAdmin={superAdmin}
+            activeMode={activeMode}
           />
           <Link href={superAdmin ? '/superadmin' : player ? '/dashboard' : '/'} className="text-lg font-black text-white shrink-0">
             PLAY<span className="text-brand-500">OFFE</span>
           </Link>
         </div>
 
-        {/* Center nav — player links hidden for super admins */}
+        {/* Center nav */}
         <div className="hidden items-center gap-5 sm:flex">
-          {!superAdmin && player && <NavLink href="/dashboard" exact>Dashboard</NavLink>}
-          {!superAdmin && <NavLink href="/events">Events</NavLink>}
-          {!superAdmin && <NavLink href="/rankings">Rankings</NavLink>}
-          {!superAdmin && player && (
+          {/* Admin mode: Dashboard, Rankings, New Tournament */}
+          {!superAdmin && player && activeMode === 'admin' && (
             <>
-              <NavLink href="/feed" exact>Feed</NavLink>
-              <NavLink href="/practice" exact>Practice</NavLink>
-              <NavLink href="/partners" exact>Partners</NavLink>
+              <NavLink href="/dashboard" exact>Dashboard</NavLink>
+              <NavLink href="/rankings">Rankings</NavLink>
               <NavLink href="/tournaments/new" exact>New tournament</NavLink>
             </>
           )}
+
+          {/* Player mode: Dashboard, Events, Rankings, Feed, Practice, Partners */}
+          {!superAdmin && player && activeMode === 'player' && (
+            <>
+              <NavLink href="/dashboard" exact>Dashboard</NavLink>
+              <NavLink href="/events">Events</NavLink>
+              <NavLink href="/rankings">Rankings</NavLink>
+              <NavLink href="/feed" exact>Feed</NavLink>
+              <NavLink href="/practice" exact>Practice</NavLink>
+              <NavLink href="/partners" exact>Partners</NavLink>
+            </>
+          )}
+
+          {/* Logged in but no player profile yet */}
+          {!superAdmin && !player && user && (
+            <>
+              <NavLink href="/events">Events</NavLink>
+              <NavLink href="/rankings">Rankings</NavLink>
+            </>
+          )}
+
+          {/* Logged out */}
+          {!superAdmin && !user && (
+            <>
+              <NavLink href="/events">Events</NavLink>
+              <NavLink href="/rankings">Rankings</NavLink>
+            </>
+          )}
+
           {superAdmin && (
             <Link href="/superadmin" className="text-violet-400 hover:text-violet-300 text-sm font-semibold transition-colors">
               Super Admin
@@ -136,4 +175,3 @@ export async function AppNav() {
     </nav>
   );
 }
-

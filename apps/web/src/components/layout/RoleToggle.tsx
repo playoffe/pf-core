@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { setActiveModeAction } from '@/lib/actions/mode';
 
 interface Props {
   roles: string[];
@@ -21,9 +22,12 @@ export function RoleToggle({ roles }: Props) {
   // Only show when user has BOTH admin and player roles
   if (!roles.includes('admin') || !roles.includes('player')) return null;
 
-  function handleSwitch(mode: 'admin' | 'player') {
+  async function handleSwitch(mode: 'admin' | 'player') {
+    // Optimistic update so the toggle responds immediately
     setActiveMode(mode);
     localStorage.setItem('active_mode', mode);
+    // Persist to cookie so server components can read it
+    await setActiveModeAction(mode);
     router.refresh();
   }
 
