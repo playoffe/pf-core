@@ -116,6 +116,97 @@ export async function suspendClubAction(clubId: string, suspend: boolean) {
   return { success: true };
 }
 
+// ── Player search (used by ClubManagersPanel & CreateClubForm) ───────────────
+
+export async function searchPlayersAction(query: string) {
+  await assertSuperAdmin();
+  const admin = createAdminClient();
+  const { data } = await admin.rpc('search_players_for_assignment' as any, {
+    p_query: query.trim(),
+    p_limit: 10,
+  });
+  return (data ?? []) as Array<{ id: string; full_name: string; username: string; email: string }>;
+}
+
+// ── Direct club creation by super admin ──────────────────────────────────────
+
+export async function createClubAsSuperAdminAction(input: {
+  name: string;
+  subscriptionTier: 'free' | 'starter' | 'pro' | 'enterprise';
+  ownerId?: string; // optional — existing player UUID
+}) {
+  const { user, admin } = await assertSuperAdmin();
+  const { name, subscriptionTier, ownerId } = input;
+
+  // Generate unique slug
+  const baseSlug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  // Ensure uniqueness by appending a random suffix if needed
+  let slug = baseSlug;
+  const { data: existing } = await admin.from('clubs').select('id').eq('slug', slug).maybeSingle();
+  if (existing) {
+    slug = `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+
+  const { data: club, error: clubError } = await admin
+    .from('clubs')
+    .insert({ name, slug, subscription_tier: subscriptionTier } as any)
+    .select('id, name, slug')
+    .single() as { data: { id: string; name: string; slug: string } | null; error: unknown };
+
+  if (clubError || !club) return { error: 'Failed to create club. The name may already be taken.' };
+
+  if (ownerId) {
+    // Fetch owner's current JWT metadata so we can merge roles
+    const { data: ownerAuth } = await admin.auth.admin.getUserById(ownerId);
+    if (!ownerAuth?.user) return { error: 'Club created but the selected owner account was not found.' };
+
+    // Add as owner in club_managers
+    await admin.from('club_managers').insert({
+      club_id: club.id,
+      player_id: ownerId,
+      role: 'owner',
+    });
+
+    // Add user_role (idempotent)
+    await admin.from('user_roles' as any).upsert(
+      { user_id: ownerId, role: 'admin', club_id: club.id },
+      { onConflict: 'user_id,role,club_id' },
+    );
+
+    // Merge JWT roles — both 'admin' and 'player' required for role toggle
+    const currentRoles = (ownerAuth.user.app_metadata?.roles as string[] | undefined) ?? [];
+    const newRoles = Array.from(new Set([...currentRoles, 'admin', 'player']));
+    await admin.auth.admin.updateUserById(ownerId, {
+      app_metadata: { ...ownerAuth.user.app_metadata, roles: newRoles },
+    });
+
+    await writeAuditLog({
+      admin,
+      actorId: user.id,
+      actionType: 'club_created_with_owner',
+      targetType: 'club',
+      targetId: club.id,
+      newValue: { name, slug, subscriptionTier, ownerId },
+    });
+  } else {
+    await writeAuditLog({
+      admin,
+      actorId: user.id,
+      actionType: 'club_created_direct',
+      targetType: 'club',
+      targetId: club.id,
+      newValue: { name, slug, subscriptionTier },
+    });
+  }
+
+  revalidatePath('/superadmin/clubs');
+  return { success: true as const, club };
+}
+
 // ── Admin invite flow ─────────────────────────────────────────────────────────
 
 export async function createAdminInviteAction(input: {
@@ -263,7 +354,7 @@ export async function claimAdminInviteAction(input: {
       email: invite.invitee_email,
       password,
       email_confirm: true,
-      app_metadata: { roles: ['admin'] },
+      app_metadata: { roles: ['player'] },  // default to player; club manager branch adds 'admin'
     });
     if (createError || !newUser.user) {
       return { error: createError?.message ?? 'Failed to create account.' };

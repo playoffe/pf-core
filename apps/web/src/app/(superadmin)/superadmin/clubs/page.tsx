@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { getAllClubsAction } from '@/lib/actions/superadmin';
 import { SuspendClubButton } from '@/components/superadmin/SuspendClubButton';
 import { ClubManagersPanel } from '@/components/superadmin/ClubManagersPanel';
+import { ClubsPageHeader } from '@/components/superadmin/ClubsPageHeader';
 
 export const metadata: Metadata = { title: 'Clubs · Super Admin' };
 
@@ -17,12 +18,8 @@ export default async function SuperAdminClubsPage() {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white">Club management</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {clubs.length} club{clubs.length !== 1 ? 's' : ''} on the platform.
-        </p>
-      </div>
+      {/* Header with "+ New Club" button (client component) */}
+      <ClubsPageHeader clubCount={clubs.length} />
 
       <div className="space-y-3">
         {clubs.map((club) => (
@@ -69,7 +66,7 @@ export default async function SuperAdminClubsPage() {
 
         {clubs.length === 0 && (
           <div className="rounded-xl bg-surface-card p-10 text-center ring-1 ring-surface-border">
-            <p className="text-sm text-slate-500">No clubs yet. Create an admin invite to add the first club.</p>
+            <p className="text-sm text-slate-500">No clubs yet. Use &quot;+ New Club&quot; above to create the first one.</p>
           </div>
         )}
       </div>

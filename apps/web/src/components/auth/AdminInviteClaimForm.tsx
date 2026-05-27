@@ -61,8 +61,13 @@ export function AdminInviteClaimForm({
       return;
     }
 
-    // Redirect to login so the user can establish / refresh their session
-    router.push('/login?joined=1');
+    // Existing logged-in users go straight to dashboard (their session is already active).
+    // New users need to sign in first with their freshly-created password.
+    if (isExistingUser) {
+      router.push('/dashboard?clubJoined=1');
+    } else {
+      router.push('/login?joined=1');
+    }
   }
 
   return (

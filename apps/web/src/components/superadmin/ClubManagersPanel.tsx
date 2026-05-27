@@ -6,6 +6,7 @@ import {
   addClubManagerDirectAction,
   createManagerInviteAction,
 } from '@/lib/actions/superadmin';
+import { PlayerSearchInput, type PlayerResult } from './PlayerSearchInput';
 
 interface Manager {
   id: string;
@@ -24,13 +25,14 @@ export function ClubManagersPanel({ clubId, clubName }: Props) {
   const [managers, setManagers] = useState<Manager[] | null>(null);
   const [loadingManagers, setLoadingManagers] = useState(false);
 
-  // Direct add state
-  const [directEmail, setDirectEmail] = useState('');
-  const [directResult, setDirectResult] = useState<string | null>(null);
-  const [directSuccess, setDirectSuccess] = useState(false);
+  // Search + direct-add state
+  const [selectedPlayer, setSelectedPlayer] = useState<PlayerResult | null>(null);
+  const [addResult, setAddResult] = useState<string | null>(null);
+  const [addSuccess, setAddSuccess] = useState(false);
   const [addingDirect, startDirectTransition] = useTransition();
 
   // Invite state
+  const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteResult, setInviteResult] = useState<string | null>(null);
@@ -47,24 +49,28 @@ export function ClubManagersPanel({ clubId, clubName }: Props) {
   function handleToggle() {
     const next = !open;
     setOpen(next);
-    if (next && managers === null) {
-      loadManagers();
-    }
+    if (next && managers === null) loadManagers();
   }
 
-  function handleAddDirect(e: React.FormEvent) {
-    e.preventDefault();
-    setDirectResult(null);
-    setDirectSuccess(false);
+  function handleSelectPlayer(player: PlayerResult) {
+    setSelectedPlayer(player);
+    setAddResult(null);
+    setAddSuccess(false);
+  }
+
+  function handleAddDirect() {
+    if (!selectedPlayer) return;
+    setAddResult(null);
+    setAddSuccess(false);
     startDirectTransition(async () => {
-      const result = await addClubManagerDirectAction(clubId, directEmail.trim());
+      const result = await addClubManagerDirectAction(clubId, selectedPlayer.email);
       if ('error' in result) {
-        setDirectResult(result.error ?? 'Unknown error');
-        setDirectSuccess(false);
+        setAddResult(result.error ?? 'Unknown error');
+        setAddSuccess(false);
       } else {
-        setDirectResult(`✓ ${result.player.full_name} (@${result.player.username}) added as manager.`);
-        setDirectSuccess(true);
-        setDirectEmail('');
+        setAddResult(`✓ ${result.player.full_name} (@${result.player.username}) added as manager.`);
+        setAddSuccess(true);
+        setSelectedPlayer(null);
         loadManagers();
       }
     });
@@ -143,72 +149,104 @@ export function ClubManagersPanel({ clubId, clubName }: Props) {
             )}
           </div>
 
-          {/* Add existing user */}
+          {/* Add existing user — typeahead search */}
           <div>
             <p className="mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wide">Add existing user</p>
-            <form onSubmit={handleAddDirect} className="flex gap-2">
-              <input
-                type="email"
-                value={directEmail}
-                onChange={(e) => setDirectEmail(e.target.value)}
-                placeholder="player@email.com"
-                required
-                className="flex-1 rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-sm text-white outline-none placeholder:text-slate-600 focus:border-brand-500"
-              />
-              <button
-                type="submit"
+
+            {selectedPlayer ? (
+              /* Confirmation row after selecting a player */
+              <div className="flex items-center gap-2 rounded-lg border border-brand-600/30 bg-brand-600/10 px-3 py-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white truncate">
+                    {selectedPlayer.full_name}
+                    <span className="ml-1.5 text-xs text-slate-400">@{selectedPlayer.username}</span>
+                  </p>
+                  <p className="text-xs text-slate-400 truncate">{selectedPlayer.email}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddDirect}
+                  disabled={addingDirect}
+                  className="shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50 transition-colors"
+                >
+                  {addingDirect ? '…' : 'Add as manager'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlayer(null)}
+                  className="shrink-0 text-slate-500 hover:text-slate-300 text-xs transition-colors"
+                  aria-label="Clear selection"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <PlayerSearchInput
+                onSelect={handleSelectPlayer}
                 disabled={addingDirect}
-                className="shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50 transition-colors"
-              >
-                {addingDirect ? '…' : 'Add'}
-              </button>
-            </form>
-            {directResult && (
-              <p className={`mt-1.5 text-xs ${directSuccess ? 'text-green-400' : 'text-red-400'}`}>
-                {directResult}
+              />
+            )}
+
+            {addResult && (
+              <p className={`mt-1.5 text-xs ${addSuccess ? 'text-green-400' : 'text-red-400'}`}>
+                {addResult}
               </p>
             )}
           </div>
 
-          {/* Send invite link */}
+          {/* Invite by email (for users who don't have an account yet) */}
           <div>
-            <p className="mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wide">Send invite link</p>
-            <form onSubmit={handleSendInvite} className="space-y-2">
-              <div className="flex gap-2">
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="Email"
-                  required
-                  className="flex-1 rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-sm text-white outline-none placeholder:text-slate-600 focus:border-brand-500"
-                />
-                <input
-                  type="text"
-                  value={inviteName}
-                  onChange={(e) => setInviteName(e.target.value)}
-                  placeholder="Name (optional)"
-                  className="flex-1 rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-sm text-white outline-none placeholder:text-slate-600 focus:border-brand-500"
-                />
-                <button
-                  type="submit"
-                  disabled={sendingInvite}
-                  className="shrink-0 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-brand-500 hover:text-brand-400 disabled:opacity-50 transition-colors"
-                >
-                  {sendingInvite ? '…' : 'Send invite'}
-                </button>
-              </div>
-            </form>
-            {inviteUrl && (
-              <div className="mt-2 flex items-center gap-2 rounded-lg bg-surface px-3 py-2">
-                <p className="flex-1 truncate text-xs text-brand-400">{inviteUrl}</p>
-                <button
-                  onClick={copyInviteUrl}
-                  className="shrink-0 rounded px-2 py-1 text-[10px] text-slate-400 border border-surface-border hover:border-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  Copy
-                </button>
-              </div>
+            <button
+              type="button"
+              onClick={() => setShowInvite((v) => !v)}
+              className="mb-2 flex items-center gap-1 text-xs font-semibold text-slate-400 uppercase tracking-wide hover:text-slate-200 transition-colors"
+            >
+              <span className={`transition-transform text-[8px] ${showInvite ? 'rotate-90' : ''}`}>▶</span>
+              Send invite link (user doesn&apos;t have an account yet)
+            </button>
+
+            {showInvite && (
+              <form onSubmit={handleSendInvite} className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="Email address"
+                    required
+                    className="flex-1 rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-sm text-white outline-none placeholder:text-slate-600 focus:border-brand-500"
+                  />
+                  <input
+                    type="text"
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    placeholder="Name (optional)"
+                    className="flex-1 rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-sm text-white outline-none placeholder:text-slate-600 focus:border-brand-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={sendingInvite}
+                    className="shrink-0 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-brand-500 hover:text-brand-400 disabled:opacity-50 transition-colors"
+                  >
+                    {sendingInvite ? '…' : 'Send invite'}
+                  </button>
+                </div>
+                {inviteResult && (
+                  <p className="text-xs text-red-400">{inviteResult}</p>
+                )}
+                {inviteUrl && (
+                  <div className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2">
+                    <p className="flex-1 truncate text-xs text-brand-400">{inviteUrl}</p>
+                    <button
+                      type="button"
+                      onClick={copyInviteUrl}
+                      className="shrink-0 rounded px-2 py-1 text-[10px] text-slate-400 border border-surface-border hover:border-slate-500 hover:text-slate-300 transition-colors"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                )}
+              </form>
             )}
           </div>
         </div>

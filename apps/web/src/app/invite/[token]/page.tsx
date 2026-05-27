@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { createAdminClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AdminInviteClaimForm } from '@/components/auth/AdminInviteClaimForm';
 
 export const metadata: Metadata = { title: 'Set up your club · PLAYOFFE' };
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
 interface Props {
   params: Promise<{ token: string }>;
@@ -74,16 +76,24 @@ export default async function AdminInviteClaimPage({ params }: Props) {
     );
   }
 
-  // ── Valid — show setup form ────────────────────────────────────────────────
+  // ── Valid — determine auth state ──────────────────────────────────────────
   const isManagerInvite = invite.invite_type === 'existing_club_manager';
 
-  // For manager invites, check if the invitee already has an auth account.
-  // If yes, show a simplified "confirm" UI — no need to set up a new password.
+  // Check if the invitee already has a Supabase auth account
   let isExistingUser = false;
   if (isManagerInvite) {
     const { data: authList } = await admin.auth.admin.listUsers({ perPage: 1000 });
     isExistingUser = (authList?.users ?? []).some((u) => u.email === invite.invitee_email);
   }
+
+  // Check the current session to determine the login-gate state
+  const supabase = await createClient();
+  const { data: { user: currentUser } } = await supabase.auth.getUser();
+  const isLoggedInAsInvitee = currentUser?.email === invite.invitee_email;
+  const isLoggedInAsOther   = !!currentUser && currentUser.email !== invite.invitee_email;
+
+  // Build the return URL for the login page redirect
+  const inviteReturnUrl = `${APP_URL}/invite/${token}`;
 
   return (
     <Shell>
@@ -98,6 +108,7 @@ export default async function AdminInviteClaimPage({ params }: Props) {
         </div>
 
         <div className="rounded-xl bg-surface-card px-8 py-8 ring-1 ring-surface-border">
+          {/* Invite context banner */}
           <div className="mb-6 rounded-lg bg-brand-600/10 border border-brand-600/30 px-4 py-3">
             <p className="text-xs font-semibold text-brand-400 uppercase tracking-wide mb-1">
               {isManagerInvite ? 'Join as club manager' : "You've been invited to manage"}
@@ -106,22 +117,57 @@ export default async function AdminInviteClaimPage({ params }: Props) {
             <p className="text-xs text-slate-400 mt-1">as {invite.invitee_email}</p>
           </div>
 
-          <AdminInviteClaimForm
-            token={token}
-            email={invite.invitee_email}
-            defaultName={invite.invitee_name ?? ''}
-            clubName={invite.club_name}
-            inviteType={invite.invite_type as 'new_club_owner' | 'existing_club_manager'}
-            isExistingUser={isExistingUser}
-          />
+          {/* Existing user — login-gate logic */}
+          {isExistingUser && isLoggedInAsOther ? (
+            /* Logged in as a DIFFERENT account */
+            <div className="space-y-4">
+              <div className="rounded-lg border border-amber-800/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">
+                You&apos;re signed in as <strong>{currentUser?.email}</strong>, but this invite is
+                for <strong>{invite.invitee_email}</strong>. Please sign out and log in with the
+                correct account to accept this invitation.
+              </div>
+              <Link
+                href="/login"
+                className="block w-full rounded-lg border border-slate-600 px-4 py-2.5 text-center text-sm font-semibold text-slate-300 hover:border-brand-500 hover:text-brand-400 transition-colors"
+              >
+                Sign out and switch accounts
+              </Link>
+            </div>
+          ) : isExistingUser && !isLoggedInAsInvitee ? (
+            /* Existing user NOT logged in — gate behind login */
+            <div className="space-y-4">
+              <div className="rounded-lg border border-brand-800/40 bg-brand-950/30 px-4 py-3 text-sm text-brand-300">
+                You already have a PLAYOFFE account. Log in with your existing password to accept
+                this invitation and join <strong>{invite.club_name}</strong>.
+              </div>
+              <Link
+                href={`/login?redirectTo=${encodeURIComponent(`/invite/${token}`)}`}
+                className="block w-full rounded-lg bg-brand-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-brand-700 transition-colors"
+              >
+                Log in to accept →
+              </Link>
+            </div>
+          ) : (
+            /* New user OR existing user already logged in as invitee */
+            <AdminInviteClaimForm
+              token={token}
+              email={invite.invitee_email}
+              defaultName={invite.invitee_name ?? ''}
+              clubName={invite.club_name}
+              inviteType={invite.invite_type as 'new_club_owner' | 'existing_club_manager'}
+              isExistingUser={isExistingUser && isLoggedInAsInvitee}
+            />
+          )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-slate-600">
-          Already have an account?{' '}
-          <Link href="/login" className="text-brand-400 hover:text-brand-300 transition-colors">
-            Log in instead
-          </Link>
-        </p>
+        {!isExistingUser && (
+          <p className="mt-6 text-center text-xs text-slate-600">
+            Already have an account?{' '}
+            <Link href={`/login?redirectTo=${encodeURIComponent(`/invite/${token}`)}`} className="text-brand-400 hover:text-brand-300 transition-colors">
+              Log in instead
+            </Link>
+          </p>
+        )}
       </div>
     </Shell>
   );
