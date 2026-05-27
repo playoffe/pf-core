@@ -26,6 +26,7 @@ export async function registerAction(input: RegisterPlayerInput, returnUrl?: str
     email,
     password,
     email_confirm: false,
+    app_metadata: { roles: ['player'] },
   });
 
   if (authError || !authData.user) {

@@ -298,13 +298,12 @@ export async function claimAdminInviteAction(input: {
       club_id: invite.club_id,
     });
 
-    // Update JWT app_metadata roles
+    // Update JWT app_metadata roles — ensure both 'admin' and 'player' for role toggle
     const currentRoles = existingUser?.app_metadata?.roles as string[] ?? [];
-    if (!currentRoles.includes('admin')) {
-      await admin.auth.admin.updateUserById(authUserId, {
-        app_metadata: { ...existingUser?.app_metadata, roles: [...currentRoles, 'admin'] },
-      });
-    }
+    const newRoles = Array.from(new Set([...currentRoles, 'admin', 'player']));
+    await admin.auth.admin.updateUserById(authUserId, {
+      app_metadata: { ...existingUser?.app_metadata, roles: newRoles },
+    });
 
     // Mark claimed
     await admin.from('admin_invites' as any).update({ claimed_at: new Date().toISOString() }).eq('id', invite.id);
@@ -352,16 +351,15 @@ export async function claimAdminInviteAction(input: {
     club_id: club.id,
   });
 
-  // 6. Update JWT app_metadata to include roles[] (for dual-role support)
+  // 6. Update JWT app_metadata to include roles[] (both 'admin' and 'player' for role toggle)
   const currentRoles = existingUser?.app_metadata?.roles as string[] ?? [];
-  if (!currentRoles.includes('admin')) {
-    await admin.auth.admin.updateUserById(authUserId, {
-      app_metadata: {
-        ...existingUser?.app_metadata,
-        roles: [...currentRoles, 'admin'],
-      },
-    });
-  }
+  const newRoles = Array.from(new Set([...currentRoles, 'admin', 'player']));
+  await admin.auth.admin.updateUserById(authUserId, {
+    app_metadata: {
+      ...existingUser?.app_metadata,
+      roles: newRoles,
+    },
+  });
 
   // 7. Mark invite as claimed
   await admin
@@ -695,13 +693,12 @@ export async function addClubManagerDirectAction(clubId: string, email: string) 
     club_id: clubId,
   }, { onConflict: 'user_id,role,club_id' });
 
-  // Update JWT app_metadata.roles to include 'admin' (reuse authUserData already fetched above)
+  // Update JWT app_metadata.roles — ensure both 'admin' and 'player' for role toggle
   const currentRoles = (authUserData.user.app_metadata?.roles as string[] | undefined) ?? [];
-  if (!currentRoles.includes('admin')) {
-    await admin.auth.admin.updateUserById(player.id, {
-      app_metadata: { ...authUserData.user.app_metadata, roles: [...currentRoles, 'admin'] },
-    });
-  }
+  const newRoles = Array.from(new Set([...currentRoles, 'admin', 'player']));
+  await admin.auth.admin.updateUserById(player.id, {
+    app_metadata: { ...authUserData.user.app_metadata, roles: newRoles },
+  });
 
   await writeAuditLog({
     admin,

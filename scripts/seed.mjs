@@ -149,7 +149,17 @@ async function seed() {
     riley:  await upsertUser('riley@playoffe.dev',  PW, 'Riley Martinez'),
     drew:   await upsertUser('drew@playoffe.dev',   PW, 'Drew Thompson'),
   };
-  console.log('  ✓ auth users (8)');
+
+  // Grant alex the super_admin JWT claim (required by isSuperAdmin() in middleware)
+  // Also give admin+player roles so the role toggle works if needed
+  await admin.auth.admin.updateUserById(PID.alex, {
+    app_metadata: { role: 'super_admin', roles: ['admin', 'player'] },
+  });
+  // Grant sam admin+player roles for the role toggle (he's a club manager + player)
+  await admin.auth.admin.updateUserById(PID.sam, {
+    app_metadata: { roles: ['admin', 'player'] },
+  });
+  console.log('  ✓ auth users (8) + super_admin claim set for alex');
 
   // ── 2. Players ───────────────────────────────────────────────────────────
   const { error: pErr } = await admin.from('players').upsert([
