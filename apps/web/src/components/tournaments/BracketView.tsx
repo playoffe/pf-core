@@ -361,7 +361,114 @@ function DoubleEliminationBracket({ matches, tournamentSlug, readOnly }: { match
 }
 
 // ── Round-robin schedule ──────────────────────────────────────────────────────
-function RoundRobinBracket({ matches, tournamentSlug, readOnly }: { matches: MatchWithPlayers[]; tournamentSlug: string; readOnly?: boolean }) {
+function RoundRobinMatchList({
+  sectionMatches,
+  sectionLabel,
+  tournamentSlug,
+  readOnly,
+}: {
+  sectionMatches: MatchWithPlayers[];
+  sectionLabel: string;
+  tournamentSlug: string;
+  readOnly?: boolean;
+}) {
+  // Sort by round within the section
+  const sorted = [...sectionMatches].sort((a, b) => a.round - b.round);
+
+  const rowClass = `flex items-center gap-3 rounded-lg bg-surface-card px-4 py-2.5 ring-1 ring-surface-border transition-all ${
+    readOnly ? '' : 'hover:ring-brand-500/40'
+  }`;
+
+  return (
+    <div>
+      {sectionLabel && (
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
+          {sectionLabel}
+        </h4>
+      )}
+      <div className="space-y-1.5">
+        {sorted.map((m) => {
+          const matchSets = Array.isArray(m.sets)
+            ? (m.sets as { score_a: number; score_b: number }[])
+            : [];
+          const isDone = m.status === 'completed' || m.status === 'walkover';
+          const scoreLabel = isDone && matchSets.length > 0
+            ? matchSets.map((s) => `${s.score_a}–${s.score_b}`).join('  ')
+            : null;
+
+          const rowContent = (
+            <>
+              <PlayerChip entry={m.entry_a} winnerId={m.winner_entry_id} />
+              <span className="shrink-0 text-xs font-bold text-slate-600">vs</span>
+              <PlayerChip entry={m.entry_b} winnerId={m.winner_entry_id} />
+              {scoreLabel ? (
+                <span className="shrink-0 text-xs font-mono text-slate-400">{scoreLabel}</span>
+              ) : (
+                <StatusBadge status={m.status} />
+              )}
+            </>
+          );
+
+          return readOnly ? (
+            <div key={m.id} className={rowClass}>{rowContent}</div>
+          ) : (
+            <Link
+              key={m.id}
+              href={`/tournaments/${tournamentSlug}/scoring/${m.id}`}
+              className={rowClass}
+            >
+              {rowContent}
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RoundRobinBracket({ matches, tournamentSlug, readOnly, format }: { matches: MatchWithPlayers[]; tournamentSlug: string; readOnly?: boolean; format?: string }) {
+  // For group_stage_knockout: group by group_name first (alphabetical), then knockout (null) last
+  if (format === 'group_stage_knockout') {
+    const groupMap = new Map<string, MatchWithPlayers[]>();
+    const knockoutMatches: MatchWithPlayers[] = [];
+
+    for (const m of matches) {
+      if (!m.group_name) {
+        knockoutMatches.push(m);
+      } else {
+        const list = groupMap.get(m.group_name) ?? [];
+        list.push(m);
+        groupMap.set(m.group_name, list);
+      }
+    }
+
+    const sortedGroupNames = Array.from(groupMap.keys()).sort();
+
+    return (
+      <div className="space-y-6">
+        {sortedGroupNames.map((groupName) => (
+          <RoundRobinMatchList
+            key={groupName}
+            sectionMatches={groupMap.get(groupName)!}
+            sectionLabel={groupName}
+            tournamentSlug={tournamentSlug}
+            readOnly={readOnly}
+          />
+        ))}
+        {knockoutMatches.length > 0 && (
+          <RoundRobinMatchList
+            key="knockout"
+            sectionMatches={knockoutMatches}
+            sectionLabel="Knockout Stage"
+            tournamentSlug={tournamentSlug}
+            readOnly={readOnly}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // Standard round-robin / swiss: group by round number
   const roundMap = new Map<number, MatchWithPlayers[]>();
   for (const m of matches) {
     const list = roundMap.get(m.round) ?? [];
@@ -370,56 +477,16 @@ function RoundRobinBracket({ matches, tournamentSlug, readOnly }: { matches: Mat
   }
   const rounds = Array.from(roundMap.entries()).sort(([a], [b]) => a - b);
 
-  const rowClass = `flex items-center gap-3 rounded-lg bg-surface-card px-4 py-2.5 ring-1 ring-surface-border transition-all ${
-    readOnly ? '' : 'hover:ring-brand-500/40'
-  }`;
-
   return (
     <div className="space-y-6">
       {rounds.map(([round, roundMatches]) => (
-        <div key={round}>
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
-            {roundMatches[0].group_name
-              ? `${roundMatches[0].group_name} · ${roundMatches[0].round_name ?? `Round ${round}`}`
-              : (roundMatches[0].round_name ?? `Round ${round}`)}
-          </h4>
-          <div className="space-y-1.5">
-            {roundMatches.map((m) => {
-              const matchSets = Array.isArray(m.sets)
-                ? (m.sets as { score_a: number; score_b: number }[])
-                : [];
-              const isDone = m.status === 'completed' || m.status === 'walkover';
-              const scoreLabel = isDone && matchSets.length > 0
-                ? matchSets.map((s) => `${s.score_a}–${s.score_b}`).join('  ')
-                : null;
-
-              const rowContent = (
-                <>
-                  <PlayerChip entry={m.entry_a} winnerId={m.winner_entry_id} />
-                  <span className="shrink-0 text-xs font-bold text-slate-600">vs</span>
-                  <PlayerChip entry={m.entry_b} winnerId={m.winner_entry_id} />
-                  {scoreLabel ? (
-                    <span className="shrink-0 text-xs font-mono text-slate-400">{scoreLabel}</span>
-                  ) : (
-                    <StatusBadge status={m.status} />
-                  )}
-                </>
-              );
-
-              return readOnly ? (
-                <div key={m.id} className={rowClass}>{rowContent}</div>
-              ) : (
-                <Link
-                  key={m.id}
-                  href={`/tournaments/${tournamentSlug}/scoring/${m.id}`}
-                  className={rowClass}
-                >
-                  {rowContent}
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+        <RoundRobinMatchList
+          key={round}
+          sectionMatches={roundMatches}
+          sectionLabel={roundMatches[0].round_name ?? `Round ${round}`}
+          tournamentSlug={tournamentSlug}
+          readOnly={readOnly}
+        />
       ))}
     </div>
   );
@@ -446,7 +513,7 @@ function PlayerChip({
       }`}
     >
       {entry?.seed ? <span className="mr-1 text-xs text-brand-400">[{entry.seed}]</span> : null}
-      {entry ? entry.player_name : 'TBD'}
+      {entry ? (entry.partner_name ? `${entry.player_name} / ${entry.partner_name}` : entry.player_name) : 'TBD'}
     </span>
   );
 }
@@ -476,5 +543,5 @@ export function BracketView({ matches, format, tournamentSlug, readOnly }: Props
   if (format === 'single_elimination') {
     return <EliminationBracket matches={matches} tournamentSlug={tournamentSlug} readOnly={readOnly} />;
   }
-  return <RoundRobinBracket matches={matches} tournamentSlug={tournamentSlug} readOnly={readOnly} />;
+  return <RoundRobinBracket matches={matches} tournamentSlug={tournamentSlug} readOnly={readOnly} format={format} />;
 }
