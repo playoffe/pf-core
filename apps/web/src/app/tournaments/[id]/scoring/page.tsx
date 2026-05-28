@@ -70,11 +70,11 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
   // Active referee sessions (for the "who's online" strip)
   const { data: refSessions } = await (admin
     .from('referee_sessions' as any)
-    .select('id, referee_name, last_active_at, matches_scored_count')
+    .select('id, pin_id, referee_name, last_active_at, matches_scored_count')
     .eq('tournament_id', t.id)
     .eq('is_active', true)
     .order('last_active_at', { ascending: false })) as {
-      data: Array<{ id: string; referee_name: string; last_active_at: string | null; matches_scored_count: number }> | null;
+      data: Array<{ id: string; pin_id: string; referee_name: string; last_active_at: string | null; matches_scored_count: number }> | null;
     };
 
   // Build the assignable referee list from active PIN labels.

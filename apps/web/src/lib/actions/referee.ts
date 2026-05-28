@@ -58,6 +58,50 @@ export async function revokePinAction(pinId: string) {
   return { success: true };
 }
 
+// ── Delete a referee: revoke their PIN + deactivate their session ─────────────
+// Used from the "Active Referees" panel — one action cleans up both the PIN
+// (so they can't check in again) and the session (removes them from the list).
+export async function deleteRefereeAction(pinId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  // Fetch pin to verify tournament + manager access
+  const { data: pin } = await admin
+    .from('tournament_referee_pins')
+    .select('tournament_id')
+    .eq('id', pinId)
+    .maybeSingle();
+
+  if (!pin) return { error: 'PIN not found' };
+
+  const { data: t } = await admin
+    .from('tournaments')
+    .select('club_id')
+    .eq('id', pin.tournament_id)
+    .single();
+
+  if (!t) return { error: 'Tournament not found' };
+
+  const { data: mgr } = await admin
+    .from('club_managers')
+    .select('role')
+    .eq('club_id', t.club_id)
+    .eq('player_id', user.id)
+    .maybeSingle();
+
+  if (!mgr) return { error: 'Permission denied' };
+
+  // Revoke PIN + deactivate all sessions tied to it
+  await admin.from('tournament_referee_pins').update({ is_revoked: true }).eq('id', pinId);
+  await (admin.from('referee_sessions' as any).update({ is_active: false }).eq('pin_id', pinId));
+
+  revalidatePath('/');
+  return { success: true };
+}
+
 // ── Regenerate a PIN (revoke old, create new with same label) ─────────────────
 export async function regeneratePinAction(pinId: string) {
   const supabase = await createClient();

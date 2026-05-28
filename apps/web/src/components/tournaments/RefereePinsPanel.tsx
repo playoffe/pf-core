@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
-import { createRefereePinAction, revokePinAction, regeneratePinAction } from '@/lib/actions/referee';
+import { createRefereePinAction, revokePinAction, regeneratePinAction, deleteRefereeAction } from '@/lib/actions/referee';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Pin {
@@ -18,6 +18,7 @@ interface Props {
   pins: Pin[];
   initialSessions?: Array<{
     id: string;
+    pin_id: string;
     referee_name: string;
     last_active_at: string | null;
     matches_scored_count: number;
@@ -33,6 +34,7 @@ export function RefereePinsPanel({ tournamentId, pins, initialSessions }: Props)
   const [newPinLabel, setNewPinLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [deletingPinId, setDeletingPinId] = useState<string | null>(null);
   const [sessions, setSessions] = useState(initialSessions ?? []);
 
   // Sync when the parent re-renders after router.refresh() (server state wins).
@@ -125,6 +127,23 @@ export function RefereePinsPanel({ tournamentId, pins, initialSessions }: Props)
     if (!await confirm({ title: 'Revoke PIN?', message: 'This PIN will stop working immediately. Any referee currently using it will lose access.', confirmLabel: 'Revoke', variant: 'danger' })) return;
     await revokePinAction(pinId);
     router.refresh();
+  }
+
+  async function handleDelete(pinId: string, name: string) {
+    if (!await confirm({
+      title: `Remove ${name}?`,
+      message: 'Their PIN will be revoked immediately and they will be removed from the active referees list.',
+      confirmLabel: 'Remove',
+      variant: 'danger',
+    })) return;
+    setDeletingPinId(pinId);
+    const result = await deleteRefereeAction(pinId);
+    if (result.error) setError(result.error);
+    else {
+      setSessions((prev) => prev.filter((s) => s.pin_id !== pinId));
+      router.refresh();
+    }
+    setDeletingPinId(null);
   }
 
   const activePins = pins.filter((p) => !p.is_revoked && new Date(p.expires_at) > new Date());
@@ -220,31 +239,43 @@ export function RefereePinsPanel({ tournamentId, pins, initialSessions }: Props)
       </div>
       {error && <p className="px-5 pb-3 text-xs text-red-400">{error}</p>}
 
-      {/* Active referee sessions */}
-      <div className="mt-8">
-        <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">
-          Active referees
+      {/* Active referee sessions — part of the same card, separated by a border */}
+      <div className="border-t border-surface-border px-5 py-4">
+        <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">
+          Active Referees
         </h3>
         {sessions.length === 0 ? (
-          <p className="text-sm text-slate-600">No active referees.</p>
+          <p className="text-sm text-slate-600">No referees checked in yet.</p>
         ) : (
           <div className="space-y-2">
             {sessions.map((session) => (
               <div
                 key={session.id}
-                className="flex items-center justify-between rounded-xl bg-surface-card px-4 py-3 ring-1 ring-surface-border"
+                className="flex items-center gap-3 rounded-xl bg-surface px-4 py-3 ring-1 ring-surface-border"
               >
-                <div>
-                  <p className="text-sm font-semibold text-white">{session.referee_name}</p>
-                  {session.last_active_at && (
-                    <p className="text-xs text-slate-500">
-                      Last active {new Date(session.last_active_at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true })}
-                    </p>
-                  )}
+                {/* Status dot */}
+                <span className="h-2 w-2 shrink-0 rounded-full bg-accent-400 animate-pulse" />
+
+                {/* Info */}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-white leading-tight">{session.referee_name}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {session.matches_scored_count ?? 0} match{(session.matches_scored_count ?? 0) !== 1 ? 'es' : ''} scored
+                    {session.last_active_at
+                      ? ` · Last active ${new Date(session.last_active_at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: true })}`
+                      : ''}
+                  </p>
                 </div>
-                <span className="text-xs text-slate-500">
-                  {session.matches_scored_count ?? 0} match{(session.matches_scored_count ?? 0) !== 1 ? 'es' : ''} scored
-                </span>
+
+                {/* Delete */}
+                <button
+                  onClick={() => handleDelete(session.pin_id, session.referee_name)}
+                  disabled={deletingPinId === session.pin_id}
+                  title="Revoke PIN and remove this referee"
+                  className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-red-950/40 hover:text-red-400 transition-colors disabled:opacity-40"
+                >
+                  {deletingPinId === session.pin_id ? 'Removing…' : 'Remove'}
+                </button>
               </div>
             ))}
           </div>
