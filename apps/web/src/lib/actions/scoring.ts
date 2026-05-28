@@ -90,8 +90,40 @@ async function assertMatchManager(matchId: string, userId: string) {
   return mgr ? { match, clubId: t.club_id, tournamentSlug: t.slug, tournamentName: t.name } : null;
 }
 
+// ── Assign court / referee to a scheduled match (without starting it) ─────────
+export async function assignMatchDetailsAction(
+  matchId: string,
+  court: number | null,
+  refereeName: string | null,
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const ctx = await assertMatchManager(matchId, user.id);
+  if (!ctx) return { error: 'Permission denied' };
+
+  const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const patch: Record<string, any> = {};
+  if (court !== null) patch.court = court;
+  if (refereeName !== null) patch.assigned_referee_name = refereeName || null;
+
+  if (Object.keys(patch).length === 0) return { success: true };
+
+  const { error } = await admin.from('matches').update(patch).eq('id', matchId);
+  if (error) return { error: 'Failed to update match' };
+
+  revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring`);
+  return { success: true };
+}
+
 // ── Start a match ─────────────────────────────────────────────────────────────
-export async function startMatchAction(matchId: string, court: number) {
+export async function startMatchAction(
+  matchId: string,
+  court: number,
+  refereeName?: string,
+) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: 'Not authenticated' };
@@ -104,13 +136,18 @@ export async function startMatchAction(matchId: string, court: number) {
   }
 
   const admin = createAdminClient();
-  const { error } = await admin
-    .from('matches')
-    .update({ status: 'in_progress', started_at: new Date().toISOString(), court })
-    .eq('id', matchId);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const patch: Record<string, any> = {
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+    court,
+  };
+  if (refereeName) patch.assigned_referee_name = refereeName;
 
+  const { error } = await admin.from('matches').update(patch).eq('id', matchId);
   if (error) return { error: 'Failed to start match' };
 
+  revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring`);
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring/${matchId}`);
   return { success: true };
 }

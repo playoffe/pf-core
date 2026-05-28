@@ -7,6 +7,7 @@ import { AppNav } from '@/components/layout/AppNav';
 import { RefereePinsPanel } from '@/components/tournaments/RefereePinsPanel';
 import { PrintButton } from '@/components/ui/PrintButton';
 import { DisputeQueue } from '@/components/scoring/DisputeQueue';
+import { ScheduledMatchCard } from '@/components/scoring/ScheduledMatchCard';
 
 export const metadata: Metadata = { title: 'Scoring' };
 
@@ -41,7 +42,7 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
 
   const { data: t } = await admin
     .from('tournaments')
-    .select('id, name, club_id, start_date, end_date')
+    .select('id, name, club_id, start_date, end_date, court_count')
     .eq('slug', slug)
     .single();
   if (!t) notFound();
@@ -65,6 +66,8 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
     : isAdminRole ? 'admin' : 'player';
   if (activeMode === 'player') redirect(`/events/${slug}`);
 
+  const maxCourts = (t.court_count as number | null) ?? 10;
+
   // Referee PINs for this tournament
   const { data: refPins } = await admin
     .from('tournament_referee_pins')
@@ -82,10 +85,13 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
       data: Array<{ id: string; referee_name: string; last_active_at: string | null; matches_scored_count: number }> | null;
     };
 
+  const activeReferees = refSessions ?? [];
+
   const { data: matches } = await admin
     .from('matches')
     .select(`
       id, round, round_name, group_name, status, court, scheduled_time, sets,
+      assigned_referee_name,
       player_reported_winner_id, player_reported_sets,
       ea:tournament_entries!entry_a_id(id, seed, players!player_id(full_name), partner:players!partner_id(full_name)),
       eb:tournament_entries!entry_b_id(id, seed, players!player_id(full_name), partner:players!partner_id(full_name)),
@@ -106,6 +112,7 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
     status: string;
     court: number | null;
     scheduled_time: string | null;
+    assigned_referee_name: string | null;
     sets: { set_number: number; score_a: number; score_b: number }[];
     player_reported_winner_id: string | null;
     player_reported_sets: unknown;
@@ -118,7 +125,6 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
 
   // ── Multi-day grouping ────────────────────────────────────────────────────
 
-  // Collect all unique dates that have matches with scheduled_time
   const allDates = [...new Set(
     rows
       .filter((m) => m.scheduled_time)
@@ -126,14 +132,11 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
   )].sort();
 
   const isMultiDay = allDates.length > 1;
-
-  // Active date filter (null = show all / single-day tournaments)
   const activeDate = isMultiDay ? (dateFilter ?? allDates[0] ?? null) : null;
 
-  // Filter rows for the selected date
   const filteredRows = activeDate
     ? rows.filter((m) => {
-        if (!m.scheduled_time) return m.status === 'in_progress'; // always show live
+        if (!m.scheduled_time) return m.status === 'in_progress';
         return m.scheduled_time.slice(0, 10) === activeDate;
       })
     : rows;
@@ -150,6 +153,13 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
       m.status !== 'walkover',
   );
 
+  function entryTeamName(entry: MatchRow['ea'], playFormat?: string | null): string {
+    if (!entry?.players) return 'TBD';
+    const isDoubles = playFormat === 'doubles' || playFormat === 'mixed_doubles';
+    if (isDoubles && entry.partner) return `${entry.players.full_name} / ${entry.partner.full_name}`;
+    return entry.players.full_name;
+  }
+
   // Shape dispute data for the DisputeQueue component
   const disputeMatches = pendingReport.map((m) => {
     const aName = entryTeamName(m.ea, m.tc?.play_format);
@@ -161,9 +171,7 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
     const reportedSetsArr = Array.isArray(m.player_reported_sets)
       ? (m.player_reported_sets as { score_a: number; score_b: number }[])
       : [];
-    const reportedSets = reportedSetsArr
-      .map((s) => `${s.score_a}-${s.score_b}`)
-      .join(', ');
+    const reportedSets = reportedSetsArr.map((s) => `${s.score_a}-${s.score_b}`).join(', ');
     return {
       id: m.id,
       tournamentSlug: slug,
@@ -176,14 +184,7 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
     };
   });
 
-  function entryTeamName(entry: MatchRow['ea'], playFormat?: string | null): string {
-    if (!entry?.players) return 'TBD';
-    const isDoubles = playFormat === 'doubles' || playFormat === 'mixed_doubles';
-    if (isDoubles && entry.partner) return `${entry.players.full_name} / ${entry.partner.full_name}`;
-    return entry.players.full_name;
-  }
-
-  function MatchCard({ match }: { match: MatchRow }) {
+  function LiveMatchCard({ match }: { match: MatchRow }) {
     const aName = entryTeamName(match.ea, match.tc?.play_format);
     const bName = entryTeamName(match.eb, match.tc?.play_format);
     const sets = match.sets as { score_a: number; score_b: number }[] ?? [];
@@ -205,21 +206,14 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
         }`}
       >
         <div className="w-16 shrink-0 text-center space-y-0.5">
-          {match.scheduled_time && (
-            <p className="text-xs font-mono text-slate-400">
-              {new Date(match.scheduled_time).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </p>
-          )}
           {match.court ? (
             <span className="rounded bg-surface px-2 py-0.5 text-xs font-mono text-slate-500">
               Ct {match.court}
             </span>
-          ) : !match.scheduled_time ? (
-            <span className="text-xs text-slate-700">—</span>
           ) : null}
+          {match.assigned_referee_name && (
+            <p className="text-[10px] text-slate-600 truncate max-w-[56px]">{match.assigned_referee_name}</p>
+          )}
         </div>
 
         <div className="flex-1 min-w-0">
@@ -254,6 +248,47 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
     );
   }
 
+  function CompletedMatchCard({ match }: { match: MatchRow }) {
+    const aName = entryTeamName(match.ea, match.tc?.play_format);
+    const bName = entryTeamName(match.eb, match.tc?.play_format);
+    const sets = match.sets as { score_a: number; score_b: number }[] ?? [];
+    const scoreStr = sets.length > 0 ? sets.map((s) => `${s.score_a}-${s.score_b}`).join(', ') : null;
+
+    return (
+      <Link
+        href={`/tournaments/${slug}/scoring/${match.id}`}
+        className="flex items-center gap-4 rounded-xl bg-surface-card px-5 py-3.5 ring-1 ring-surface-border transition-all hover:ring-brand-500/40"
+      >
+        <div className="w-16 shrink-0 text-center">
+          {match.court && (
+            <span className="rounded bg-surface px-2 py-0.5 text-xs font-mono text-slate-600">
+              Ct {match.court}
+            </span>
+          )}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-slate-400 truncate">
+            {aName}
+            <span className="mx-2 text-slate-700">vs</span>
+            {bName}
+          </p>
+          <p className="text-xs text-slate-600 mt-0.5">
+            {match.tc?.name ?? ''}{match.round_name ? ` · ${match.round_name}` : ''}
+          </p>
+        </div>
+
+        {scoreStr && <span className="text-xs font-mono text-slate-600 shrink-0">{scoreStr}</span>}
+
+        <span className={`shrink-0 text-xs ${STATUS_STYLE[match.status] ?? 'text-slate-500'}`}>
+          {STATUS_LABEL[match.status] ?? match.status}
+        </span>
+
+        <span className="text-slate-700 shrink-0">›</span>
+      </Link>
+    );
+  }
+
   function formatDate(d: string) {
     return new Date(d + 'T00:00:00').toLocaleDateString('en-AU', {
       weekday: 'short',
@@ -275,15 +310,54 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
           <span className="text-slate-400">Scoring</span>
         </nav>
 
-        <div className="mb-8 flex items-center justify-between flex-wrap gap-3">
+        <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
           <h1 className="text-2xl font-bold text-white">Match scoring</h1>
-          <PrintButton label="Print schedule" />
-          {pendingReport.length > 0 && (
-            <span className="flex items-center gap-1.5 rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-              {pendingReport.length} player report{pendingReport.length !== 1 ? 's' : ''} pending
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            <PrintButton label="Print schedule" />
+            {pendingReport.length > 0 && (
+              <span className="flex items-center gap-1.5 rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                {pendingReport.length} report{pendingReport.length !== 1 ? 's' : ''} pending
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* ── Active referees strip ─────────────────────────────────────────── */}
+        <div className="mb-6 rounded-xl bg-surface-card ring-1 ring-surface-border px-5 py-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">
+                Active referees
+              </p>
+              {activeReferees.length === 0 ? (
+                <p className="text-xs text-slate-600">
+                  No referees online. Generate a PIN below so a referee can check in at{' '}
+                  <a href="/ref" target="_blank" className="text-brand-400 hover:underline">
+                    playoffe.com/ref
+                  </a>
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {activeReferees.map((r) => (
+                    <span
+                      key={r.id}
+                      className="flex items-center gap-1.5 rounded-full bg-surface px-3 py-1 text-xs font-medium text-slate-300 ring-1 ring-surface-border"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-accent-400 shrink-0" />
+                      {r.referee_name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <a
+              href="#referee-pins"
+              className="text-xs text-brand-400 hover:text-brand-300 transition-colors shrink-0"
+            >
+              Manage PINs ↓
+            </a>
+          </div>
         </div>
 
         {/* Multi-day date picker */}
@@ -318,35 +392,62 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
         {/* Dispute queue — player-reported scores awaiting organiser review */}
         <DisputeQueue matches={disputeMatches} tournamentSlug={slug} />
 
+        {/* Live matches */}
         {live.length > 0 && (
           <section className="mb-8">
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-accent-400">
               Live now — {live.length} match{live.length !== 1 ? 'es' : ''}
             </h2>
             <div className="space-y-2">
-              {live.map((m) => <MatchCard key={m.id} match={m} />)}
+              {live.map((m) => <LiveMatchCard key={m.id} match={m} />)}
             </div>
           </section>
         )}
 
+        {/* Scheduled matches — with inline court / referee assignment + Start button */}
         {scheduled.length > 0 && (
           <section className="mb-8">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">
-              Upcoming — {scheduled.length}
-            </h2>
-            <div className="space-y-2">
-              {scheduled.map((m) => <MatchCard key={m.id} match={m} />)}
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                Upcoming — {scheduled.length}
+              </h2>
+              {activeReferees.length === 0 && (
+                <span className="text-[11px] text-slate-600">
+                  No referees online — type a name manually to assign
+                </span>
+              )}
+            </div>
+            <div className="space-y-3">
+              {scheduled.map((m) => (
+                <ScheduledMatchCard
+                  key={m.id}
+                  matchId={m.id}
+                  tournamentSlug={slug}
+                  categoryName={m.tc?.name ?? ''}
+                  roundLabel={m.round_name ?? `Round ${m.round}`}
+                  groupName={m.group_name}
+                  scheduledTime={m.scheduled_time}
+                  court={m.court}
+                  assignedRefereeName={m.assigned_referee_name}
+                  maxCourts={maxCourts}
+                  entryA={m.ea}
+                  entryB={m.eb}
+                  playFormat={m.tc?.play_format ?? 'singles'}
+                  activeReferees={activeReferees}
+                />
+              ))}
             </div>
           </section>
         )}
 
+        {/* Completed matches */}
         {done.length > 0 && (
           <section>
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-600">
               Completed — {done.length}
             </h2>
             <div className="space-y-2">
-              {done.map((m) => <MatchCard key={m.id} match={m} />)}
+              {done.map((m) => <CompletedMatchCard key={m.id} match={m} />)}
             </div>
           </section>
         )}
@@ -365,18 +466,18 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
           </div>
         )}
 
-        {/* Referee PIN management — hidden when printing */}
-        <div data-print-hide>
-        <RefereePinsPanel
-          tournamentId={t.id}
-          pins={(refPins ?? []).map((p) => ({
-            id: p.id,
-            label: p.label as string | null,
-            expires_at: p.expires_at as string,
-            is_revoked: p.is_revoked as boolean,
-          }))}
-          initialSessions={refSessions ?? []}
-        />
+        {/* Referee PIN management */}
+        <div id="referee-pins" className="mt-10" data-print-hide>
+          <RefereePinsPanel
+            tournamentId={t.id}
+            pins={(refPins ?? []).map((p) => ({
+              id: p.id,
+              label: p.label as string | null,
+              expires_at: p.expires_at as string,
+              is_revoked: p.is_revoked as boolean,
+            }))}
+            initialSessions={activeReferees}
+          />
         </div>
       </main>
     </div>
