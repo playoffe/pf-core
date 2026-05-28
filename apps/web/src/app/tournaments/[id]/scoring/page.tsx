@@ -307,25 +307,25 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
         >
           <div className="w-14 shrink-0 text-center">
             {match.court && (
-              <span className="rounded bg-surface px-2 py-0.5 text-[11px] font-mono text-slate-700">
+              <span className="rounded bg-surface px-2 py-0.5 text-[11px] font-mono text-slate-500">
                 Ct {match.court}
               </span>
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-sm truncate ${needsRestart ? 'text-slate-300' : 'text-slate-500'}`}>
-              {aName}<span className="mx-2 text-slate-700">vs</span>{bName}
+            <p className={`text-sm font-medium truncate ${needsRestart ? 'text-white' : 'text-slate-300'}`}>
+              {aName}<span className="mx-2 text-slate-500 font-normal">vs</span>{bName}
             </p>
-            <p className="text-xs text-slate-600 mt-0.5 truncate">
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
               {match.tc?.name ?? ''}{match.round_name ? ` · ${match.round_name}` : ''}
               {match.group_name ? ` · ${match.group_name}` : ''}
             </p>
           </div>
-          {scoreStr && <span className="text-xs font-mono text-slate-700 shrink-0">{scoreStr}</span>}
-          <span className="shrink-0 text-xs text-slate-700">
+          {scoreStr && <span className="text-xs font-mono font-semibold text-slate-400 shrink-0">{scoreStr}</span>}
+          <span className="shrink-0 text-xs font-medium text-slate-500">
             {match.status === 'walkover' ? 'W/O' : 'Done'}
           </span>
-          <span className="text-slate-800 shrink-0">›</span>
+          <span className="text-slate-600 shrink-0">›</span>
         </Link>
 
         {/* Approve restart controls */}
@@ -576,7 +576,7 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
         {/* ── 5. Completed ─────────────────────────────────────────────────── */}
         {done.length > 0 && (
           <section>
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-700">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">
               Completed — {done.length}
             </h2>
             <div className="space-y-2">

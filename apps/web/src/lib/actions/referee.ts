@@ -26,6 +26,21 @@ export async function createRefereePinAction(tournamentId: string, label: string
     .eq('club_id', t.club_id).eq('player_id', user.id).maybeSingle();
   if (!mgr) return { error: 'Permission denied' };
 
+  const trimmedLabel = label.trim() || 'Referee';
+
+  // Enforce unique label per tournament (active PINs only)
+  const now = new Date().toISOString();
+  const { data: duplicate } = await admin
+    .from('tournament_referee_pins')
+    .select('id')
+    .eq('tournament_id', tournamentId)
+    .eq('label', trimmedLabel)
+    .eq('is_revoked', false)
+    .gt('expires_at', now)
+    .maybeSingle();
+
+  if (duplicate) return { error: `A referee named "${trimmedLabel}" already exists for this tournament. Use a different label.` };
+
   // Generate a random 6-digit PIN
   const pin = String(Math.floor(100000 + Math.random() * 900000));
   const pinHash = hashPin(pin);
@@ -36,7 +51,7 @@ export async function createRefereePinAction(tournamentId: string, label: string
   const { error } = await admin.from('tournament_referee_pins').insert({
     tournament_id: tournamentId,
     pin_hash: pinHash,
-    label: label.trim() || 'Referee',
+    label: trimmedLabel,
     created_by: user.id,
     expires_at: expiresAt.toISOString(),
   });

@@ -237,37 +237,23 @@ export function ScheduledMatchCard({
           </select>
         </div>
 
-        {/* Referee picker */}
+        {/* Referee picker — always a dropdown; empty when no PINs have been created yet */}
         <div className="flex items-center gap-2 flex-1 min-w-[160px]">
           <label className="text-[11px] text-slate-500 shrink-0 font-medium">Referee</label>
-          {liveReferees.length > 0 ? (
-            <select
-              value={referee}
-              onChange={(e) => { setReferee(e.target.value); setSaved(false); }}
-              className={`flex-1 rounded-lg border bg-surface px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none ${
-                pausedForReassignment
-                  ? 'border-amber-700/50 focus:border-amber-500'
-                  : 'border-slate-700 focus:border-brand-500'
-              }`}
-            >
-              <option value="">— none —</option>
-              {liveReferees.map((r) => (
-                <option key={r.id} value={r.referee_name}>{r.referee_name}</option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="text"
-              value={referee}
-              onChange={(e) => { setReferee(e.target.value); setSaved(false); }}
-              placeholder="Name (optional)"
-              className={`flex-1 rounded-lg border bg-surface px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none ${
-                pausedForReassignment
-                  ? 'border-amber-700/50 focus:border-amber-500'
-                  : 'border-slate-700 focus:border-brand-500'
-              }`}
-            />
-          )}
+          <select
+            value={referee}
+            onChange={(e) => { setReferee(e.target.value); setSaved(false); }}
+            className={`flex-1 rounded-lg border bg-surface px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none ${
+              pausedForReassignment
+                ? 'border-amber-700/50 focus:border-amber-500'
+                : 'border-slate-700 focus:border-brand-500'
+            }`}
+          >
+            <option value="">— none —</option>
+            {liveReferees.map((r) => (
+              <option key={r.id} value={r.referee_name}>{r.referee_name}</option>
+            ))}
+          </select>
         </div>
 
         {/* Assign / Re-assign button */}
