@@ -293,8 +293,15 @@ export async function getRefereeMatchesAction(pin: string, refereeName?: string)
     .not('entry_b_id', 'is', null);
 
   if (refereeName) {
-    activeQ    = activeQ.eq('assigned_referee_name', refereeName);
-    completedQ = completedQ.eq('assigned_referee_name', refereeName);
+    activeQ = activeQ.eq('assigned_referee_name', refereeName);
+    // Use OR so completed matches appear whether they were found via the formal
+    // assignment (assigned_referee_name) or via who actually submitted the
+    // result through their PIN (submitted_by_name). The two can diverge when:
+    //   • assigned_referee_name was cleared by a pause-request before completion
+    //   • the PIN was regenerated with a different label after the match was scored
+    completedQ = completedQ.or(
+      `assigned_referee_name.eq.${refereeName},submitted_by_name.eq.${refereeName}`,
+    );
   }
 
   const [
@@ -540,6 +547,11 @@ export async function scoreMatchAsRefereeAction(
       submitted_by_name: refereeName,
       submitted_via: 'guest_pin',
       paused_for_reassignment: false,
+      // Always stamp the completing referee's name so the match appears in their
+      // completed section even if assigned_referee_name was null (e.g. it was
+      // cleared by a pause-request) or references a stale label (e.g. the PIN
+      // was regenerated with a different label since the match was assigned).
+      assigned_referee_name: refereeName,
     })
     .eq('id', matchId);
 
