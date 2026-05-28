@@ -119,6 +119,10 @@ export function ScheduledMatchCard({
       setError('Select a court before assigning.');
       return;
     }
+    if (!referee) {
+      setError('Select a referee before assigning.');
+      return;
+    }
     setError(null);
     setSaved(false);
     startTransition(async () => {
@@ -256,10 +260,10 @@ export function ScheduledMatchCard({
           </select>
         </div>
 
-        {/* Assign / Re-assign button */}
+        {/* Assign / Re-assign button — requires both court and referee */}
         <button
           onClick={handleAssign}
-          disabled={isPending}
+          disabled={isPending || !courtVal || !referee}
           className={`shrink-0 flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${
             saved
               ? 'bg-accent-500/20 text-accent-400 ring-1 ring-accent-500/30'
