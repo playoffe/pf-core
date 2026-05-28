@@ -1,19 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { setActiveModeAction } from '@/lib/actions/mode';
 
 interface Props {
   roles: string[];
 }
 
-// Pages that only make sense in admin mode — redirect to /dashboard when switching to player
-const ADMIN_ONLY_ROUTES = ['/tournaments'];
-
 export function RoleToggle({ roles }: Props) {
-  const router   = useRouter();
-  const pathname = usePathname();
+  const router = useRouter();
   const [activeMode, setActiveMode] = useState<'admin' | 'player'>('admin');
 
   useEffect(() => {
@@ -27,17 +23,14 @@ export function RoleToggle({ roles }: Props) {
   if (!roles.includes('admin') || !roles.includes('player')) return null;
 
   async function handleSwitch(mode: 'admin' | 'player') {
-    // Optimistic update so the toggle responds immediately
-    setActiveMode(mode);
+    if (mode === activeMode) return;           // no-op if already in this mode
+    setActiveMode(mode);                       // optimistic — toggle responds instantly
     localStorage.setItem('active_mode', mode);
-    // Persist to cookie so server components can read it
-    await setActiveModeAction(mode);
-    // If switching to player while on an admin-only page, go to dashboard instead
-    if (mode === 'player' && ADMIN_ONLY_ROUTES.some((r) => pathname === r || pathname.startsWith(r + '/'))) {
-      router.push('/dashboard');
-    } else {
-      router.refresh();
-    }
+    await setActiveModeAction(mode);           // write cookie + revalidate layout
+    // Always navigate to /dashboard so the user immediately sees mode-appropriate
+    // content (admin tiles vs player tiles). router.refresh() on pages without
+    // mode-conditional content is invisible and confusing.
+    router.push('/dashboard');
   }
 
   return (
