@@ -15,6 +15,9 @@ interface Props {
   categoryStatus: string;
   entryCount: number;
   initialMatches: MatchWithPlayers[];
+  showBracket?: boolean;   // when false, hides BracketView (default true)
+  showStandings?: boolean; // when false, hides StandingsTable (default true)
+  readOnly?: boolean;      // when true, match tiles in BracketView are non-clickable
 }
 
 const FORMAT_LABEL: Record<string, string> = {
@@ -32,6 +35,9 @@ export function DrawSection({
   categoryStatus,
   entryCount,
   initialMatches,
+  showBracket = true,
+  showStandings = true,
+  readOnly = false,
 }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -170,6 +176,12 @@ export function DrawSection({
             )}
           </div>
           <p className="mt-0.5 text-xs text-slate-600">{FORMAT_LABEL[drawFormat] ?? drawFormat}</p>
+          {readOnly && isDrawn && (
+            <p className="mt-1 text-xs text-slate-500">
+              To assign referees and start scoring, use the{' '}
+              <span className="text-slate-400 font-medium">🎾 Scoring</span> button above.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
@@ -296,12 +308,12 @@ export function DrawSection({
       )}
 
       {/* Bracket / schedule */}
-      {isDrawn && matches.length > 0 && (
-        <BracketView matches={matches} format={drawFormat} tournamentSlug={tournamentSlug} />
+      {showBracket && isDrawn && matches.length > 0 && (
+        <BracketView matches={matches} format={drawFormat} tournamentSlug={tournamentSlug} readOnly={readOnly} />
       )}
 
       {/* Live standings — round-robin, swiss, group stage */}
-      {isDrawn && matches.length > 0 && (
+      {showStandings && isDrawn && matches.length > 0 && (
         <StandingsTable matches={matches} format={drawFormat} />
       )}
     </section>

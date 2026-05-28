@@ -26,7 +26,7 @@ interface Standing {
   pointsLost: number;
 }
 
-function buildStandings(matches: MatchWithPlayers[]): Map<string, Standing> {
+function buildStandings(matches: MatchWithPlayers[], includeAll = false): Map<string, Standing> {
   const map = new Map<string, Standing>();
 
   function getOrCreate(entry: NonNullable<MatchWithPlayers['entry_a']>): Standing {
@@ -47,6 +47,15 @@ function buildStandings(matches: MatchWithPlayers[]): Map<string, Standing> {
       });
     }
     return map.get(entry.id)!;
+  }
+
+  // When includeAll=true, seed the map with every entry in the match list so
+  // players appear even before their first match is completed.
+  if (includeAll) {
+    for (const m of matches) {
+      if (m.entry_a) getOrCreate(m.entry_a);
+      if (m.entry_b) getOrCreate(m.entry_b);
+    }
   }
 
   for (const m of matches) {
@@ -122,18 +131,21 @@ export function StandingsTable({ matches, format }: Props) {
 
   // For group_stage_knockout, group standings by group_name
   if (format === 'group_stage_knockout') {
-    const groupNames = [...new Set(relevantMatches.map((m) => m.group_name).filter(Boolean))];
+    const groupNames = [...new Set(relevantMatches.map((m) => m.group_name).filter(Boolean))].sort();
 
     return (
       <section className="mt-8">
         <div className="mb-3 flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">Group standings</h3>
-          <span className="text-xs text-slate-600">{completed}/{total} matches done</span>
+          <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">Groups</h3>
+          {completed > 0 && (
+            <span className="text-xs text-slate-600">{completed}/{total} matches done</span>
+          )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           {groupNames.map((groupName) => {
             const groupMatches = relevantMatches.filter((m) => m.group_name === groupName);
-            const groupStandings = buildStandings(groupMatches);
+            // includeAll=true so every player in the group appears even before play starts
+            const groupStandings = buildStandings(groupMatches, true);
             const sorted = sortStandings([...groupStandings.values()]);
             return (
               <div key={groupName} className="rounded-xl bg-surface-card ring-1 ring-surface-border overflow-hidden">
@@ -174,34 +186,40 @@ function StandingsRows({ standings }: { standings: Standing[] }) {
           <th className="px-2 py-2 text-center font-medium w-10">P</th>
           <th className="px-2 py-2 text-center font-medium w-10">W</th>
           <th className="px-2 py-2 text-center font-medium w-10">L</th>
-          <th className="px-2 py-2 text-center font-medium w-14">Sets</th>
-          <th className="px-2 py-2 text-center font-medium w-14 hidden sm:table-cell">Pts</th>
+          <th className="px-2 py-2 text-center font-medium w-12" title="Points scored">PF</th>
+          <th className="px-2 py-2 text-center font-medium w-12 hidden sm:table-cell" title="Points against">PA</th>
+          <th className="px-2 py-2 text-center font-medium w-14" title="Point difference">+/−</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-surface-border">
-        {standings.map((s, idx) => (
-          <tr
-            key={s.entryId}
-            className={idx === 0 && standings.length > 1 ? 'bg-brand-600/5' : ''}
-          >
-            <td className="px-4 py-2.5 text-slate-500">{idx + 1}</td>
-            <td className="px-2 py-2.5 font-medium text-slate-200 truncate max-w-[140px]">
-              {s.playerName}
-              {idx === 0 && standings.length > 1 && (
-                <span className="ml-1.5 text-[10px] text-brand-400">●</span>
-              )}
-            </td>
-            <td className="px-2 py-2.5 text-center text-slate-400">{s.played}</td>
-            <td className="px-2 py-2.5 text-center font-semibold text-white">{s.wins}</td>
-            <td className="px-2 py-2.5 text-center text-slate-500">{s.losses}</td>
-            <td className="px-2 py-2.5 text-center text-slate-400">
-              {s.setsWon}–{s.setsLost}
-            </td>
-            <td className="px-2 py-2.5 text-center text-slate-500 hidden sm:table-cell">
-              {s.pointsWon}–{s.pointsLost}
-            </td>
-          </tr>
-        ))}
+        {standings.map((s, idx) => {
+          const diff = s.pointsWon - s.pointsLost;
+          const diffStr = diff > 0 ? `+${diff}` : `${diff}`;
+          return (
+            <tr
+              key={s.entryId}
+              className={idx === 0 && standings.length > 1 ? 'bg-brand-600/5' : ''}
+            >
+              <td className="px-4 py-2.5 text-slate-500">{idx + 1}</td>
+              <td className="px-2 py-2.5 font-medium text-slate-200 truncate max-w-[140px]">
+                {s.playerName}
+                {idx === 0 && standings.length > 1 && (
+                  <span className="ml-1.5 text-[10px] text-brand-400">●</span>
+                )}
+              </td>
+              <td className="px-2 py-2.5 text-center text-slate-400">{s.played}</td>
+              <td className="px-2 py-2.5 text-center font-semibold text-white">{s.wins}</td>
+              <td className="px-2 py-2.5 text-center text-slate-500">{s.losses}</td>
+              <td className="px-2 py-2.5 text-center text-slate-300">{s.pointsWon}</td>
+              <td className="px-2 py-2.5 text-center text-slate-500 hidden sm:table-cell">{s.pointsLost}</td>
+              <td className={`px-2 py-2.5 text-center font-medium ${
+                diff > 0 ? 'text-accent-400' : diff < 0 ? 'text-red-400' : 'text-slate-500'
+              }`}>
+                {diffStr}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

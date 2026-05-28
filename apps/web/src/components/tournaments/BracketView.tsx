@@ -8,10 +8,11 @@ interface Props {
   matches: MatchWithPlayers[];
   format: string;
   tournamentSlug: string;
+  readOnly?: boolean; // when true, match tiles are non-clickable divs
 }
 
 // ── Single match card ─────────────────────────────────────────────────────────
-function MatchCard({ match, tournamentSlug }: { match: MatchWithPlayers; tournamentSlug: string }) {
+function MatchCard({ match, tournamentSlug, readOnly }: { match: MatchWithPlayers; tournamentSlug: string; readOnly?: boolean }) {
   const isCompleted = match.status === 'completed' || match.status === 'walkover';
 
   function PlayerRow({
@@ -64,11 +65,23 @@ function MatchCard({ match, tournamentSlug }: { match: MatchWithPlayers; tournam
   // Auto-advance byes
   const isByeMatch = match.entry_a === null || match.entry_b === null;
 
+  const sets = Array.isArray(match.sets)
+    ? (match.sets as { score_a: number; score_b: number }[])
+    : [];
+
   const inner = (
     <>
       <PlayerRow entry={match.entry_a} isWinner={aWins} />
       <div className="border-t border-surface-border" />
       <PlayerRow entry={match.entry_b} isWinner={bWins} />
+      {/* Score footer — only visible once the match is done */}
+      {isCompleted && sets.length > 0 && (
+        <div className="border-t border-surface-border bg-black/20 px-3 py-1">
+          <p className="text-[10px] font-mono text-center text-slate-500">
+            {sets.map((s) => `${s.score_a}–${s.score_b}`).join('  ')}
+          </p>
+        </div>
+      )}
     </>
   );
 
@@ -77,10 +90,12 @@ function MatchCard({ match, tournamentSlug }: { match: MatchWithPlayers; tournam
       ? 'opacity-40 ring-surface-border'
       : match.status === 'in_progress'
         ? 'ring-accent-500/60'
-        : 'ring-surface-border hover:ring-brand-500/40'
+        : readOnly
+          ? 'ring-surface-border'
+          : 'ring-surface-border hover:ring-brand-500/40'
   } bg-surface-card transition-all`;
 
-  if (isByeMatch) {
+  if (isByeMatch || readOnly) {
     return <div className={cardClass}>{inner}</div>;
   }
   return (
@@ -96,11 +111,13 @@ function RoundColumn({
   matches,
   matchSlots,
   tournamentSlug,
+  readOnly,
 }: {
   round_name: string;
   matches: MatchWithPlayers[];
   matchSlots: number;
   tournamentSlug: string;
+  readOnly?: boolean;
 }) {
   const slotsPerMatch = matchSlots / matches.length;
 
@@ -116,7 +133,7 @@ function RoundColumn({
             className="flex items-center justify-center"
             style={{ flex: slotsPerMatch }}
           >
-            <MatchCard match={m} tournamentSlug={tournamentSlug} />
+            <MatchCard match={m} tournamentSlug={tournamentSlug} readOnly={readOnly} />
           </div>
         ))}
       </div>
@@ -129,10 +146,12 @@ function MobileRoundNav({
   rounds,
   maxSlots,
   tournamentSlug,
+  readOnly,
 }: {
   rounds: [number, MatchWithPlayers[]][];
   maxSlots: number;
   tournamentSlug: string;
+  readOnly?: boolean;
 }) {
   const [idx, setIdx] = useState(0);
   const [, roundMatches] = rounds[idx];
@@ -187,6 +206,7 @@ function MobileRoundNav({
           matches={roundMatches}
           matchSlots={maxSlots}
           tournamentSlug={tournamentSlug}
+          readOnly={readOnly}
         />
       </div>
     </div>
@@ -194,7 +214,7 @@ function MobileRoundNav({
 }
 
 // ── Bracket (single elimination) ─────────────────────────────────────────────
-function EliminationBracket({ matches, tournamentSlug }: { matches: MatchWithPlayers[]; tournamentSlug: string }) {
+function EliminationBracket({ matches, tournamentSlug, readOnly }: { matches: MatchWithPlayers[]; tournamentSlug: string; readOnly?: boolean }) {
   // Group by round
   const roundMap = new Map<number, MatchWithPlayers[]>();
   for (const m of matches) {
@@ -211,7 +231,7 @@ function EliminationBracket({ matches, tournamentSlug }: { matches: MatchWithPla
     <>
       {/* Mobile: swipeable round-by-round navigator */}
       <div className="md:hidden">
-        <MobileRoundNav rounds={rounds} maxSlots={maxSlots} tournamentSlug={tournamentSlug} />
+        <MobileRoundNav rounds={rounds} maxSlots={maxSlots} tournamentSlug={tournamentSlug} readOnly={readOnly} />
       </div>
 
       {/* Desktop: full horizontal bracket */}
@@ -229,6 +249,7 @@ function EliminationBracket({ matches, tournamentSlug }: { matches: MatchWithPla
                 matches={roundMatches}
                 matchSlots={maxSlots}
                 tournamentSlug={tournamentSlug}
+                readOnly={readOnly}
               />
             );
           })}
@@ -239,7 +260,7 @@ function EliminationBracket({ matches, tournamentSlug }: { matches: MatchWithPla
 }
 
 // ── Double elimination bracket ────────────────────────────────────────────────
-function DoubleEliminationBracket({ matches, tournamentSlug }: { matches: MatchWithPlayers[]; tournamentSlug: string }) {
+function DoubleEliminationBracket({ matches, tournamentSlug, readOnly }: { matches: MatchWithPlayers[]; tournamentSlug: string; readOnly?: boolean }) {
   const winners = matches.filter((m) => m.bracket_type === 'winners');
   const losers  = matches.filter((m) => m.bracket_type === 'losers');
   const gf      = matches.filter((m) => m.bracket_type === 'grand_final');
@@ -270,7 +291,7 @@ function DoubleEliminationBracket({ matches, tournamentSlug }: { matches: MatchW
             Winners Bracket
           </p>
           <div className="md:hidden">
-            <MobileRoundNav rounds={wbRounds} maxSlots={wbMaxSlots} tournamentSlug={tournamentSlug} />
+            <MobileRoundNav rounds={wbRounds} maxSlots={wbMaxSlots} tournamentSlug={tournamentSlug} readOnly={readOnly} />
           </div>
           <div className="hidden md:block overflow-x-auto pb-2">
             <div className="flex gap-6" style={{ minHeight: `${Math.max(wbMaxSlots * 72, 140)}px` }}>
@@ -281,6 +302,7 @@ function DoubleEliminationBracket({ matches, tournamentSlug }: { matches: MatchW
                   matches={roundMatches}
                   matchSlots={wbMaxSlots}
                   tournamentSlug={tournamentSlug}
+                  readOnly={readOnly}
                 />
               ))}
             </div>
@@ -295,7 +317,7 @@ function DoubleEliminationBracket({ matches, tournamentSlug }: { matches: MatchW
             Losers Bracket
           </p>
           <div className="md:hidden">
-            <MobileRoundNav rounds={lbRounds} maxSlots={lbMaxSlots} tournamentSlug={tournamentSlug} />
+            <MobileRoundNav rounds={lbRounds} maxSlots={lbMaxSlots} tournamentSlug={tournamentSlug} readOnly={readOnly} />
           </div>
           <div className="hidden md:block overflow-x-auto pb-2">
             <div className="flex gap-6" style={{ minHeight: `${Math.max(lbMaxSlots * 72, 100)}px` }}>
@@ -306,6 +328,7 @@ function DoubleEliminationBracket({ matches, tournamentSlug }: { matches: MatchW
                   matches={roundMatches}
                   matchSlots={lbMaxSlots}
                   tournamentSlug={tournamentSlug}
+                  readOnly={readOnly}
                 />
               ))}
             </div>
@@ -327,6 +350,7 @@ function DoubleEliminationBracket({ matches, tournamentSlug }: { matches: MatchW
                 matches={roundMatches}
                 matchSlots={1}
                 tournamentSlug={tournamentSlug}
+                readOnly={readOnly}
               />
             ))}
           </div>
@@ -337,7 +361,7 @@ function DoubleEliminationBracket({ matches, tournamentSlug }: { matches: MatchW
 }
 
 // ── Round-robin schedule ──────────────────────────────────────────────────────
-function RoundRobinBracket({ matches, tournamentSlug }: { matches: MatchWithPlayers[]; tournamentSlug: string }) {
+function RoundRobinBracket({ matches, tournamentSlug, readOnly }: { matches: MatchWithPlayers[]; tournamentSlug: string; readOnly?: boolean }) {
   const roundMap = new Map<number, MatchWithPlayers[]>();
   for (const m of matches) {
     const list = roundMap.get(m.round) ?? [];
@@ -345,6 +369,10 @@ function RoundRobinBracket({ matches, tournamentSlug }: { matches: MatchWithPlay
     roundMap.set(m.round, list);
   }
   const rounds = Array.from(roundMap.entries()).sort(([a], [b]) => a - b);
+
+  const rowClass = `flex items-center gap-3 rounded-lg bg-surface-card px-4 py-2.5 ring-1 ring-surface-border transition-all ${
+    readOnly ? '' : 'hover:ring-brand-500/40'
+  }`;
 
   return (
     <div className="space-y-6">
@@ -356,18 +384,40 @@ function RoundRobinBracket({ matches, tournamentSlug }: { matches: MatchWithPlay
               : (roundMatches[0].round_name ?? `Round ${round}`)}
           </h4>
           <div className="space-y-1.5">
-            {roundMatches.map((m) => (
-              <Link
-                key={m.id}
-                href={`/tournaments/${tournamentSlug}/scoring/${m.id}`}
-                className="flex items-center gap-3 rounded-lg bg-surface-card px-4 py-2.5 ring-1 ring-surface-border hover:ring-brand-500/40 transition-all"
-              >
-                <PlayerChip entry={m.entry_a} winnerId={m.winner_entry_id} />
-                <span className="shrink-0 text-xs font-bold text-slate-600">vs</span>
-                <PlayerChip entry={m.entry_b} winnerId={m.winner_entry_id} />
-                <StatusBadge status={m.status} />
-              </Link>
-            ))}
+            {roundMatches.map((m) => {
+              const matchSets = Array.isArray(m.sets)
+                ? (m.sets as { score_a: number; score_b: number }[])
+                : [];
+              const isDone = m.status === 'completed' || m.status === 'walkover';
+              const scoreLabel = isDone && matchSets.length > 0
+                ? matchSets.map((s) => `${s.score_a}–${s.score_b}`).join('  ')
+                : null;
+
+              const rowContent = (
+                <>
+                  <PlayerChip entry={m.entry_a} winnerId={m.winner_entry_id} />
+                  <span className="shrink-0 text-xs font-bold text-slate-600">vs</span>
+                  <PlayerChip entry={m.entry_b} winnerId={m.winner_entry_id} />
+                  {scoreLabel ? (
+                    <span className="shrink-0 text-xs font-mono text-slate-400">{scoreLabel}</span>
+                  ) : (
+                    <StatusBadge status={m.status} />
+                  )}
+                </>
+              );
+
+              return readOnly ? (
+                <div key={m.id} className={rowClass}>{rowContent}</div>
+              ) : (
+                <Link
+                  key={m.id}
+                  href={`/tournaments/${tournamentSlug}/scoring/${m.id}`}
+                  className={rowClass}
+                >
+                  {rowContent}
+                </Link>
+              );
+            })}
           </div>
         </div>
       ))}
@@ -413,7 +463,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export function BracketView({ matches, format, tournamentSlug }: Props) {
+export function BracketView({ matches, format, tournamentSlug, readOnly }: Props) {
   if (matches.length === 0) {
     return (
       <p className="text-sm italic text-slate-600">No matches found.</p>
@@ -421,10 +471,10 @@ export function BracketView({ matches, format, tournamentSlug }: Props) {
   }
 
   if (format === 'double_elimination') {
-    return <DoubleEliminationBracket matches={matches} tournamentSlug={tournamentSlug} />;
+    return <DoubleEliminationBracket matches={matches} tournamentSlug={tournamentSlug} readOnly={readOnly} />;
   }
   if (format === 'single_elimination') {
-    return <EliminationBracket matches={matches} tournamentSlug={tournamentSlug} />;
+    return <EliminationBracket matches={matches} tournamentSlug={tournamentSlug} readOnly={readOnly} />;
   }
-  return <RoundRobinBracket matches={matches} tournamentSlug={tournamentSlug} />;
+  return <RoundRobinBracket matches={matches} tournamentSlug={tournamentSlug} readOnly={readOnly} />;
 }

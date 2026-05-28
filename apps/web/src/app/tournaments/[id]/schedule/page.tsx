@@ -27,7 +27,7 @@ export default async function SchedulePage({ params }: Props) {
   // Tournament + auth check
   const { data: t } = await admin
     .from('tournaments')
-    .select('id, name, slug, club_id, start_date, court_count')
+    .select('id, name, slug, club_id, start_date')
     .eq('slug', slug)
     .single();
   if (!t) notFound();
@@ -131,8 +131,7 @@ export default async function SchedulePage({ params }: Props) {
 
         <ScheduleEditor
           tournamentSlug={slug}
-          courtCount={t.court_count ?? 1}
-          startDate={t.start_date}
+          startDate={t.start_date ?? new Date().toISOString().slice(0, 10)}
           matches={matches}
         />
       </main>

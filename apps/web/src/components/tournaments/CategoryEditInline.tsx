@@ -74,9 +74,10 @@ export function CategoryEditInline({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-surface hover:border-slate-500 transition-colors"
+        className="flex flex-col items-center justify-center rounded-xl bg-surface-card px-4 py-3 ring-1 ring-surface-border hover:ring-brand-500/40 transition-colors text-center min-w-[60px]"
       >
-        <span>✏️</span> Edit
+        <span className="text-lg leading-none">✏️</span>
+        <span className="mt-1 text-[11px] text-slate-400">Edit</span>
       </button>
     );
   }

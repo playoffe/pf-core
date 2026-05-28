@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import Link from 'next/link';
 import { batchScheduleMatchesAction } from '@/lib/actions/scheduling';
 
 export interface MatchForScheduling {
@@ -20,7 +19,6 @@ export interface MatchForScheduling {
 
 interface Props {
   tournamentSlug: string;
-  courtCount: number;
   startDate: string; // YYYY-MM-DD — default for auto-fill
   matches: MatchForScheduling[];
 }
@@ -46,12 +44,12 @@ function fromLocalInput(local: string): string | null {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches }: Props) {
-  // Per-match edit state: matchId → { time: datetime-local, court: string }
-  const [edits, setEdits] = useState<Record<string, { time: string; court: string }>>(() => {
-    const init: Record<string, { time: string; court: string }> = {};
+export function ScheduleEditor({ tournamentSlug, startDate, matches }: Props) {
+  // Per-match edit state: matchId → { time: datetime-local }
+  const [edits, setEdits] = useState<Record<string, { time: string }>>(() => {
+    const init: Record<string, { time: string }> = {};
     for (const m of matches) {
-      init[m.id] = { time: toLocalInput(m.scheduled_time), court: m.court?.toString() ?? '' };
+      init[m.id] = { time: toLocalInput(m.scheduled_time) };
     }
     return init;
   });
@@ -62,10 +60,9 @@ export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches 
   // Auto-fill controls
   const [fillDatetime, setFillDatetime] = useState(`${startDate}T09:00`);
   const [fillInterval, setFillInterval] = useState(30);
-  const [fillCourts, setFillCourts] = useState(Math.min(courtCount, 4));
 
-  function updateEdit(id: string, field: 'time' | 'court', value: string) {
-    setEdits((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  function updateTime(id: string, value: string) {
+    setEdits((prev) => ({ ...prev, [id]: { time: value } }));
     setSaveMsg(null);
   }
 
@@ -94,11 +91,10 @@ export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches 
     setEdits((prev) => {
       const next = { ...prev };
       sorted.forEach((m, i) => {
-        const courtNum = (i % fillCourts) + 1;
-        const minuteOffset = Math.floor(i / fillCourts) * fillInterval;
+        const minuteOffset = i * fillInterval;
         const matchTime = new Date(base.getTime() + minuteOffset * 60_000);
         const timeStr = `${matchTime.getFullYear()}-${pad(matchTime.getMonth() + 1)}-${pad(matchTime.getDate())}T${pad(matchTime.getHours())}:${pad(matchTime.getMinutes())}`;
-        next[m.id] = { time: timeStr, court: courtNum.toString() };
+        next[m.id] = { time: timeStr };
       });
       return next;
     });
@@ -115,7 +111,7 @@ export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches 
       .map((m) => ({
         matchId: m.id,
         scheduledTime: fromLocalInput(edits[m.id]?.time ?? ''),
-        court: parseInt(edits[m.id]?.court ?? '', 10) || null,
+        court: null, // court assignment handled separately on the scoring page
       }));
 
     const result = await batchScheduleMatchesAction(tournamentSlug, updates);
@@ -123,20 +119,19 @@ export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches 
     if (result.error) {
       setSaveMsg({ err: result.error });
     } else {
-      // Sync baseline to match saved state
       setSaveMsg({ ok: `Saved ${result.count} match${result.count !== 1 ? 'es' : ''}.` });
     }
     setSaving(false);
   }
 
-  // ── Dirty-count (edits differ from DB values) ─────────────────────────────────
+  // ── Dirty-count (time differs from DB value) ──────────────────────────────────
   const dirtyCount = useMemo(
     () =>
       matches.filter((m) => {
         if (m.status !== 'scheduled') return false;
-        const orig = { time: toLocalInput(m.scheduled_time), court: m.court?.toString() ?? '' };
-        const curr = edits[m.id] ?? orig;
-        return curr.time !== orig.time || curr.court !== orig.court;
+        const origTime = toLocalInput(m.scheduled_time);
+        const currTime = edits[m.id]?.time ?? origTime;
+        return currTime !== origTime;
       }).length,
     [matches, edits],
   );
@@ -160,7 +155,7 @@ export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches 
       <div className="rounded-xl bg-surface-card p-5 ring-1 ring-surface-border">
         <h2 className="mb-1 text-sm font-semibold text-white">Auto-schedule</h2>
         <p className="mb-4 text-xs text-slate-500">
-          Distribute all currently unscheduled matches across courts starting from a chosen time.
+          Assign times to all currently unscheduled matches starting from a chosen date &amp; time.
         </p>
         <div className="flex flex-wrap items-end gap-4">
           <label className="space-y-1">
@@ -182,18 +177,6 @@ export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches 
               value={fillInterval}
               onChange={(e) => setFillInterval(parseInt(e.target.value) || 30)}
               className="block w-24 rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white outline-none focus:border-brand-500"
-            />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-xs text-slate-400">Courts to use</span>
-            <input
-              type="number"
-              min={1}
-              max={courtCount || 20}
-              value={fillCourts}
-              onChange={(e) => setFillCourts(Math.max(1, parseInt(e.target.value) || 1))}
-              className="block w-20 rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white outline-none focus:border-brand-500"
             />
           </label>
 
@@ -225,23 +208,16 @@ export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches 
                   <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-52">
                     Date &amp; time
                   </th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-20">Court</th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-20 text-center">
+                  <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-24 text-center">
                     Status
-                  </th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-16 text-right">
-                    Score
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-border">
                 {group.matches.map((m) => {
-                  const edit = edits[m.id] ?? { time: '', court: '' };
+                  const edit = edits[m.id] ?? { time: '' };
                   const origTime = toLocalInput(m.scheduled_time);
-                  const origCourt = m.court?.toString() ?? '';
-                  const isDirty =
-                    m.status === 'scheduled' &&
-                    (edit.time !== origTime || edit.court !== origCourt);
+                  const isDirty = m.status === 'scheduled' && edit.time !== origTime;
                   const isLocked = m.status !== 'scheduled';
 
                   return (
@@ -268,28 +244,15 @@ export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches 
                         <input
                           type="datetime-local"
                           value={edit.time}
-                          onChange={(e) => updateEdit(m.id, 'time', e.target.value)}
+                          onChange={(e) => updateTime(m.id, e.target.value)}
                           disabled={isLocked}
                           className={inputCls}
                         />
                       </td>
 
-                      <td className="px-4 py-3">
-                        <input
-                          type="number"
-                          min={1}
-                          max={99}
-                          value={edit.court}
-                          onChange={(e) => updateEdit(m.id, 'court', e.target.value)}
-                          placeholder="—"
-                          disabled={isLocked}
-                          className={`${inputCls} text-center`}
-                        />
-                      </td>
-
                       <td className="px-4 py-3 text-center">
                         {isLocked ? (
-                          <span className="rounded-full bg-slate-700/50 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                          <span className="rounded-full bg-slate-700/50 px-2 py-0.5 text-[10px] font-medium text-slate-400 capitalize">
                             {m.status}
                           </span>
                         ) : isDirty ? (
@@ -299,16 +262,6 @@ export function ScheduleEditor({ tournamentSlug, courtCount, startDate, matches 
                         ) : (
                           <span className="text-xs text-slate-700">—</span>
                         )}
-                      </td>
-
-                      {/* Per-match scoring hub link */}
-                      <td className="px-4 py-3 text-right">
-                        <Link
-                          href={`/tournaments/${tournamentSlug}/scoring/${m.id}`}
-                          className="text-xs font-medium text-brand-400 hover:text-brand-300 transition-colors whitespace-nowrap"
-                        >
-                          Score →
-                        </Link>
                       </td>
                     </tr>
                   );
