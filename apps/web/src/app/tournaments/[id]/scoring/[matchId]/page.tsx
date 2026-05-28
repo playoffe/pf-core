@@ -53,6 +53,7 @@ export default async function MatchScoringPage({ params }: Props) {
     .from('matches')
     .select(`
       id, round, round_name, group_name, status, court, sets,
+      assigned_referee_name,
       started_at, completed_at, winner_entry_id,
       player_reported_winner_id, player_reported_sets,
       ea:tournament_entries!entry_a_id(
@@ -127,6 +128,27 @@ export default async function MatchScoringPage({ params }: Props) {
             <span className="mx-3 text-slate-600 font-normal">vs</span>
             {teamName(eb)}
           </h1>
+          {/* Court / referee assignment info */}
+          {(match.court || (match as any).assigned_referee_name) && (
+            <div className="mt-2 flex items-center gap-3 flex-wrap">
+              {match.court && (
+                <span className="rounded-full bg-surface-card px-3 py-1 text-xs font-medium text-slate-400 ring-1 ring-surface-border">
+                  Court {match.court}
+                </span>
+              )}
+              {(match as any).assigned_referee_name && (
+                <span className="rounded-full bg-surface-card px-3 py-1 text-xs font-medium text-slate-400 ring-1 ring-surface-border">
+                  Referee: {(match as any).assigned_referee_name}
+                </span>
+              )}
+              <Link
+                href={`/tournaments/${slug}/scoring`}
+                className="text-[11px] text-slate-600 hover:text-slate-400 transition-colors"
+              >
+                Re-assign →
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* Player self-report link — only for unscored matches */}

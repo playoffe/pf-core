@@ -629,7 +629,7 @@ export function MatchScoreCard({
               disabled={loading || !effectiveWinner}
               className="flex-1 rounded-lg bg-brand-600 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
             >
-              {loading ? 'Saving…' : 'Submit result'}
+              {loading ? 'Saving…' : '■ End match'}
             </button>
           )}
 
