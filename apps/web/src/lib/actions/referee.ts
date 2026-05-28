@@ -369,7 +369,12 @@ export async function pauseMatchAsRefereeAction(matchId: string, pin: string) {
 
   const { error } = await admin
     .from('matches')
-    .update({ paused_for_reassignment: true })
+    .update({
+      paused_for_reassignment: true,
+      // Clear the referee assignment so the admin's dropdown is empty and they
+      // must actively select (or re-select) a referee when re-assigning.
+      assigned_referee_name: null,
+    })
     .eq('id', matchId);
 
   if (error) return { error: 'Failed to request re-assignment' };

@@ -93,6 +93,20 @@ export function RefereeScoringView({ matches, pin, refereeName, tournamentId, to
     visibleMatchIds.current = new Set(matches.map((m) => m.id));
   }, [matches]);
 
+  // Sync locallyPaused with server data after each refresh.
+  // router.refresh() re-renders in-place (no unmount), so locallyPaused retains
+  // matchIds across refreshes. If the server now includes a previously-paused
+  // match (because the admin re-assigned it), remove it from locallyPaused so
+  // it becomes visible again.
+  useEffect(() => {
+    setLocallyPaused((prev) => {
+      if (prev.size === 0) return prev;
+      const serverIds = new Set(matches.map((m) => m.id));
+      const next = new Set([...prev].filter((id) => !serverIds.has(id)));
+      return next.size !== prev.size ? next : prev; // avoid re-render if unchanged
+    });
+  }, [matches]);
+
   // Keep a stable router ref so the subscription effect doesn't re-run on re-renders
   const routerRef = useRef(router);
   useEffect(() => { routerRef.current = router; });
