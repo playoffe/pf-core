@@ -36,9 +36,9 @@ interface Props {
 
 // ── Avatar initial ────────────────────────────────────────────────────────────
 
-function Avatar({ name }: { name: string }) {
+function Avatar({ name, ring }: { name: string; ring?: boolean }) {
   return (
-    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-900 text-xs font-bold text-brand-300">
+    <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-900 text-xs font-bold text-brand-300 ${ring ? 'ring-2 ring-surface-card' : ''}`}>
       {name[0]?.toUpperCase()}
     </div>
   );
@@ -111,7 +111,7 @@ export function EntryList({ entries, tournamentId, playFormat = 'singles' }: Pro
             return (
               <tr key={entry.id} className="hover:bg-surface/50 transition-colors">
                 {/* Seed */}
-                <td className="w-16 px-4 py-3 align-top">
+                <td className="w-16 px-4 py-3 align-middle">
                   {isEditingSeed ? (
                     <input
                       autoFocus
@@ -150,52 +150,32 @@ export function EntryList({ entries, tournamentId, playFormat = 'singles' }: Pro
                 {/* Player(s) */}
                 <td className="px-4 py-3">
                   {isDoubles ? (
-                    /* ── Doubles: stack both players ── */
-                    <div className="space-y-2">
-                      {/* Player 1 */}
-                      {player ? (
-                        <div className="flex items-center gap-3">
-                          <Avatar name={player.full_name} />
-                          <div>
-                            <Link
-                              href={`/p/${player.username}`}
-                              className="text-sm font-medium text-white hover:text-brand-300 transition-colors"
-                            >
+                    /* ── Doubles: single line with overlapping avatars + "P1 / P2" ── */
+                    <div className="flex items-center gap-3">
+                      {/* Overlapping avatars */}
+                      <div className="flex -space-x-2 shrink-0">
+                        {player  && <Avatar name={player.full_name}  ring />}
+                        {partner && <Avatar name={partner.full_name} ring />}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-white truncate">
+                          {player ? (
+                            <Link href={`/p/${player.username}`} className="hover:text-brand-300 transition-colors">
                               {player.full_name}
                             </Link>
-                            <p className="text-xs text-slate-500">@{player.username}</p>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-slate-500 italic text-xs">Unknown player</span>
-                      )}
-
-                      {/* Divider */}
-                      <div className="flex items-center gap-2">
-                        <div className="h-px flex-1 bg-surface-border" />
-                        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
-                          &amp;
-                        </span>
-                        <div className="h-px flex-1 bg-surface-border" />
-                      </div>
-
-                      {/* Partner */}
-                      {partner ? (
-                        <div className="flex items-center gap-3">
-                          <Avatar name={partner.full_name} />
-                          <div>
-                            <Link
-                              href={`/p/${partner.username}`}
-                              className="text-sm font-medium text-white hover:text-brand-300 transition-colors"
-                            >
+                          ) : <span className="italic text-slate-500">Unknown</span>}
+                          <span className="mx-1.5 text-slate-500">/</span>
+                          {partner ? (
+                            <Link href={`/p/${partner.username}`} className="hover:text-brand-300 transition-colors">
                               {partner.full_name}
                             </Link>
-                            <p className="text-xs text-slate-500">@{partner.username}</p>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-500 italic">No partner assigned</p>
-                      )}
+                          ) : <span className="italic text-slate-500">No partner</span>}
+                        </p>
+                        <p className="text-xs text-slate-500 truncate">
+                          {player && `@${player.username}`}
+                          {partner && ` · @${partner.username}`}
+                        </p>
+                      </div>
                     </div>
                   ) : (
                     /* ── Singles: single player ── */
@@ -226,7 +206,7 @@ export function EntryList({ entries, tournamentId, playFormat = 'singles' }: Pro
                 )}
 
                 {/* Remove */}
-                <td className="px-4 py-3 text-right align-top">
+                <td className="px-4 py-3 text-right align-middle">
                   <button
                     onClick={() => handleRemove(entry.id)}
                     disabled={removing === entry.id}
