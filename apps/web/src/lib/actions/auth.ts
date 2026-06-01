@@ -92,9 +92,14 @@ export async function registerAction(input: RegisterPlayerInput, returnUrl?: str
 
 export async function loginAction(email: string, password: string, returnUrl?: string) {
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { error: error.message };
-  const destination = returnUrl && returnUrl.startsWith('/') ? returnUrl : '/dashboard';
+
+  // Super admins land on the platform overview, not the player dashboard
+  const isSuperAdminUser = data.user?.app_metadata?.role === 'super_admin';
+  const defaultDestination = isSuperAdminUser ? '/superadmin' : '/dashboard';
+  const destination = returnUrl && returnUrl.startsWith('/') ? returnUrl : defaultDestination;
+
   // Return the destination so the client can do a hard navigation (window.location.href),
   // which bypasses the Next.js Router Cache and guarantees a fresh AppNav render.
   return { redirectTo: destination };
