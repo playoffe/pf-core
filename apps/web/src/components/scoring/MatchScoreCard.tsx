@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { startMatchAction, submitResultAction, walkoverAction, overrideMatchResultAction, approvePlayerReportAction, rejectPlayerReportAction, pauseMatchForReassignmentAction } from '@/lib/actions/scoring';
+import { startMatchAction, submitResultAction, walkoverAction, overrideMatchResultAction, approvePlayerReportAction, rejectPlayerReportAction, pauseMatchForReassignmentAction, saveScoreAction } from '@/lib/actions/scoring';
 import { useRealtimeMatch } from '@/hooks/useRealtimeMatch';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 
@@ -78,6 +78,30 @@ export function MatchScoreCard({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [externallyUpdated, setExternallyUpdated] = useState(false);
 
+  // ── Auto-save (debounced) ─────────────────────────────────────────────────
+  // Writes the current sets to the DB every 1500 ms after the last keystroke
+  // so the display screen receives a Realtime event and shows live scores.
+  type AutoSaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
+  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>('idle');
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const pendingSets = useRef<SetScore[]>([]);
+
+  const triggerAutoSave = useCallback((newSets: SetScore[]) => {
+    pendingSets.current = newSets;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    setAutoSaveStatus('pending');
+    autoSaveTimer.current = setTimeout(async () => {
+      setAutoSaveStatus('saving');
+      const result = await saveScoreAction(matchId, pendingSets.current);
+      if (result?.error) {
+        setAutoSaveStatus('error');
+      } else {
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+      }
+    }, 1500);
+  }, [matchId]);
+
   // Pause / re-assignment state
   const [isPausing, setIsPausing] = useState(false);
   const [pauseError, setPauseError] = useState<string | null>(null);
@@ -119,10 +143,11 @@ export function MatchScoreCard({
   const effectiveWinner = manualWinner ?? suggestedWinner;
 
   function updateSet(index: number, field: 'score_a' | 'score_b', value: number) {
-    setSets((prev) =>
-      prev.map((s, i) => (i === index ? { ...s, [field]: Math.max(0, value) } : s)),
-    );
-    setManualWinner(null); // reset manual selection when scores change
+    const next = sets.map((s, i) => (i === index ? { ...s, [field]: Math.max(0, value) } : s));
+    setSets(next);
+    setManualWinner(null);
+    // Auto-save to DB so the display screen gets a live Realtime update
+    if (status === 'in_progress') triggerAutoSave(next);
   }
 
   function addSet() {
@@ -183,6 +208,9 @@ export function MatchScoreCard({
 
     setLoading(true);
     setError(null);
+    // Cancel pending auto-save — final submit will write the definitive score
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    setAutoSaveStatus('idle');
     const result = await submitResultAction(matchId, sets, effectiveWinner);
     if (result.error) {
       setError(result.error);
@@ -541,7 +569,22 @@ export function MatchScoreCard({
       {/* Score entry */}
       <div className="rounded-xl bg-surface-card ring-1 ring-surface-border overflow-hidden">
         <div className="border-b border-surface-border px-5 py-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-white">Scores</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-semibold text-white">Scores</h3>
+            {/* Auto-save status pill — only visible while in progress */}
+            {status === 'in_progress' && autoSaveStatus !== 'idle' && (
+              <span className={`text-[11px] font-medium ${
+                autoSaveStatus === 'saved'  ? 'text-accent-400'
+                : autoSaveStatus === 'error' ? 'text-red-400'
+                : 'text-slate-500'
+              }`}>
+                {autoSaveStatus === 'pending' ? '…'
+                 : autoSaveStatus === 'saving' ? 'Saving…'
+                 : autoSaveStatus === 'saved'  ? '✓ Saved'
+                 : '⚠ Save failed'}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2 text-xs font-bold tabular-nums">
             <span className="text-2xl text-white">{aWins}</span>
             <span className="text-slate-500">—</span>

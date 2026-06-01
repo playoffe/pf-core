@@ -7,13 +7,12 @@ import { AppNav } from '@/components/layout/AppNav';
 import { RefereePinsPanel } from '@/components/tournaments/RefereePinsPanel';
 import { PrintButton } from '@/components/ui/PrintButton';
 import { DisputeQueue } from '@/components/scoring/DisputeQueue';
-import { ScheduledMatchCard } from '@/components/scoring/ScheduledMatchCard';
 import { CategoryFilter } from '@/components/scoring/CategoryFilter';
-import { RestartApproveButton } from '@/components/scoring/RestartApproveButton';
-import { LiveScoreDisplay } from '@/components/scoring/LiveScoreDisplay';
 import { ScoringHubRealtime } from '@/components/scoring/ScoringHubRealtime';
 import { ActiveRefereesProvider } from '@/components/scoring/ActiveRefereesProvider';
 import { ActiveRefereesStrip } from '@/components/scoring/ActiveRefereesStrip';
+import { ScoringMatchList } from '@/components/scoring/ScoringMatchList';
+import type { ScoringMatch } from '@/components/scoring/ScoringMatchList';
 
 export const metadata: Metadata = { title: 'Scoring' };
 
@@ -161,35 +160,6 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
       })
     : filteredByCategory;
 
-  // ── Four match sections ───────────────────────────────────────────────────
-  // 1. Live Now: referee has started the match and it is NOT paused
-  const liveActive = rows.filter(
-    (m) => m.status === 'in_progress' && !m.paused_for_reassignment,
-  );
-
-  // 2. Live but paused: referee sent back for re-assignment → admin must re-assign
-  const livePaused = rows.filter(
-    (m) => m.status === 'in_progress' && m.paused_for_reassignment,
-  );
-
-  // 3. Scheduled (assigned): court AND referee set but match hasn't started yet
-  const assignedNotStarted = rows.filter(
-    (m) => m.status === 'scheduled' && !!m.court && !!m.assigned_referee_name,
-  );
-
-  // 4. Upcoming (unassigned): no court or referee yet
-  const upcoming = rows.filter(
-    (m) => m.status === 'scheduled' && (!m.court || !m.assigned_referee_name),
-  );
-
-  // 5. Completed
-  const done = rows.filter(
-    (m) => m.status === 'completed' || m.status === 'walkover',
-  );
-
-  // Matches awaiting admin-approved restart (subset of done, globally — not date-filtered)
-  const restartRequests = allRows.filter((m) => m.restart_requested);
-
   // Player-reported matches pending review (all categories, no date filter)
   const pendingReport = allRows.filter(
     (m) => m.player_reported_winner_id && m.status !== 'completed' && m.status !== 'walkover',
@@ -201,6 +171,35 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
     if (isDoubles && entry.partner) return `${entry.players.full_name} / ${entry.partner.full_name}`;
     return entry.players.full_name;
   }
+
+  // ── Build serialisable ScoringMatch objects ───────────────────────────────
+  function toScoringMatch(m: MatchRow): ScoringMatch {
+    return {
+      id: m.id,
+      status: m.status,
+      round: m.round,
+      roundLabel: m.round_name ?? `Round ${m.round}`,
+      groupName: m.group_name,
+      categoryId: m.tc?.id ?? '',
+      categoryName: m.tc?.name ?? '',
+      playFormat: m.tc?.play_format ?? 'singles',
+      court: m.court,
+      scheduledTime: m.scheduled_time,
+      assignedRefereeName: m.assigned_referee_name,
+      pausedForReassignment: m.paused_for_reassignment,
+      restartRequested: m.restart_requested,
+      restartRequestedReason: m.restart_requested_reason,
+      sets: (m.sets as { score_a: number; score_b: number }[]) ?? [],
+      playerReportedWinnerId: m.player_reported_winner_id,
+      playerA: entryTeamName(m.ea, m.tc?.play_format),
+      playerB: entryTeamName(m.eb, m.tc?.play_format),
+      entryA: m.ea,
+      entryB: m.eb,
+    };
+  }
+
+  const scoringMatches   = rows.map(toScoringMatch);
+  const restartMatches   = allRows.filter((m) => m.restart_requested).map(toScoringMatch);
 
   const disputeMatches = pendingReport.map((m) => {
     const aName = entryTeamName(m.ea, m.tc?.play_format);
@@ -224,130 +223,11 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
     };
   });
 
-  // Read-only card for active live matches (no controls — referee is scoring).
-  // LiveScoreDisplay subscribes to Supabase Realtime so the score updates as
-  // the referee auto-saves on their device — no page refresh needed.
-  function LiveMatchCard({ match }: { match: MatchRow }) {
-    const aName = entryTeamName(match.ea, match.tc?.play_format);
-    const bName = entryTeamName(match.eb, match.tc?.play_format);
-    const initialSets = (match.sets as { score_a: number; score_b: number }[]) ?? [];
-
-    return (
-      <Link
-        href={`/tournaments/${slug}/scoring/${match.id}`}
-        className="flex items-center gap-4 rounded-xl bg-accent-950/20 px-5 py-4 ring-1 ring-accent-700/40 transition-all hover:ring-accent-500/60"
-      >
-        <div className="w-14 shrink-0 text-center space-y-1">
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-accent-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent-400 animate-pulse" />
-            LIVE
-          </span>
-          {match.court && (
-            <span className="block rounded bg-surface px-2 py-0.5 text-[11px] font-mono text-slate-500">
-              Ct {match.court}
-            </span>
-          )}
-        </div>
-
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white truncate">
-            {aName}<span className="mx-2 text-slate-500 font-normal">vs</span>{bName}
-          </p>
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            <p className="text-xs text-slate-500 truncate">
-              {match.tc?.name ?? ''}
-              {match.round_name ? ` · ${match.round_name}` : ''}
-              {match.group_name ? ` · ${match.group_name}` : ''}
-            </p>
-            {match.assigned_referee_name && (
-              <span className="text-[11px] text-slate-600">
-                Ref: <span className="text-slate-500">{match.assigned_referee_name}</span>
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Score updates in real-time as referee auto-saves */}
-        <LiveScoreDisplay
-          matchId={match.id}
-          initialSets={initialSets}
-          className="text-sm font-mono font-bold text-accent-300 shrink-0"
-          emptyLabel="—"
-        />
-
-        <span className="text-slate-600 shrink-0">›</span>
-      </Link>
-    );
-  }
-
-  function CompletedMatchCard({ match }: { match: MatchRow }) {
-    const aName = entryTeamName(match.ea, match.tc?.play_format);
-    const bName = entryTeamName(match.eb, match.tc?.play_format);
-    const sets = match.sets as { score_a: number; score_b: number }[] ?? [];
-    const scoreStr = sets.length > 0 ? sets.map((s) => `${s.score_a}-${s.score_b}`).join(', ') : null;
-    const needsRestart = match.restart_requested;
-
-    return (
-      <div className={`rounded-xl ring-1 overflow-hidden ${
-        needsRestart ? 'bg-red-950/20 ring-red-800/40' : 'bg-surface-card ring-surface-border'
-      }`}>
-        {/* Restart-requested banner */}
-        {needsRestart && (
-          <div className="flex items-center gap-2 border-b border-red-800/30 bg-red-900/20 px-5 py-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse shrink-0" />
-            <p className="text-xs font-semibold text-red-400">
-              ↺ Referee requested restart
-            </p>
-          </div>
-        )}
-
-        <Link
-          href={`/tournaments/${slug}/scoring/${match.id}`}
-          className="flex items-center gap-4 px-5 py-3.5 hover:bg-white/[0.02] transition-colors"
-        >
-          <div className="w-14 shrink-0 text-center">
-            {match.court && (
-              <span className="rounded bg-surface px-2 py-0.5 text-[11px] font-mono text-slate-500">
-                Ct {match.court}
-              </span>
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className={`text-sm font-medium truncate ${needsRestart ? 'text-white' : 'text-slate-300'}`}>
-              {aName}<span className="mx-2 text-slate-500 font-normal">vs</span>{bName}
-            </p>
-            <p className="text-xs text-slate-500 mt-0.5 truncate">
-              {match.tc?.name ?? ''}{match.round_name ? ` · ${match.round_name}` : ''}
-              {match.group_name ? ` · ${match.group_name}` : ''}
-            </p>
-          </div>
-          {scoreStr && <span className="text-xs font-mono font-semibold text-slate-400 shrink-0">{scoreStr}</span>}
-          <span className="shrink-0 text-xs font-medium text-slate-500">
-            {match.status === 'walkover' ? 'W/O' : 'Done'}
-          </span>
-          <span className="text-slate-600 shrink-0">›</span>
-        </Link>
-
-        {/* Approve restart controls */}
-        {needsRestart && (
-          <div className="border-t border-red-800/20 px-5 py-3">
-            <RestartApproveButton
-              matchId={match.id}
-              restartReason={match.restart_requested_reason}
-            />
-          </div>
-        )}
-      </div>
-    );
-  }
-
   function formatDate(d: string) {
     return new Date(d + 'T00:00:00').toLocaleDateString('en-AU', {
       weekday: 'short', day: 'numeric', month: 'short',
     });
   }
-
-  const totalVisible = restartRequests.length + liveActive.length + livePaused.length + assignedNotStarted.length + upcoming.length + done.length;
 
   return (
     <div className="min-h-screen bg-surface">
@@ -378,10 +258,10 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
                 {pendingReport.length} report{pendingReport.length !== 1 ? 's' : ''} pending
               </span>
             )}
-            {restartRequests.length > 0 && (
+            {restartMatches.length > 0 && (
               <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-3 py-1 text-xs font-semibold text-red-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
-                {restartRequests.length} restart request{restartRequests.length !== 1 ? 's' : ''}
+                {restartMatches.length} restart request{restartMatches.length !== 1 ? 's' : ''}
               </span>
             )}
           </div>
@@ -441,163 +321,14 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
         {/* Dispute queue */}
         <DisputeQueue matches={disputeMatches} tournamentSlug={slug} />
 
-        {/* ── 0. Restart requests (global — any category, any day) ─────────── */}
-        {restartRequests.length > 0 && (
-          <section className="mb-8">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-red-400">
-              ↺ Restart requests — {restartRequests.length}
-            </h2>
-            <p className="mb-3 text-[11px] text-slate-600">
-              Referee accidentally ended a match. Approve to reset it to the upcoming queue.
-            </p>
-            <div className="space-y-3">
-              {restartRequests.map((m) => <CompletedMatchCard key={m.id} match={m} />)}
-            </div>
-          </section>
-        )}
-
-        {/* ── 1. Live Now (active, not paused) ─────────────────────────────── */}
-        {liveActive.length > 0 && (
-          <section className="mb-8">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-accent-400">
-              Live now — {liveActive.length} match{liveActive.length !== 1 ? 'es' : ''}
-            </h2>
-            <p className="mb-3 text-[11px] text-slate-600">
-              Referee is scoring. Re-assignment available only after the referee pauses the match.
-            </p>
-            <div className="space-y-2">
-              {liveActive.map((m) => <LiveMatchCard key={m.id} match={m} />)}
-            </div>
-          </section>
-        )}
-
-        {/* ── 2. Live but paused (referee requested re-assignment) ─────────── */}
-        {livePaused.length > 0 && (
-          <section className="mb-8">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-amber-500">
-              ⏸ Paused — {livePaused.length} awaiting re-assignment
-            </h2>
-            <div className="space-y-3">
-              {livePaused.map((m) => (
-                <ScheduledMatchCard
-                  key={m.id}
-                  matchId={m.id}
-                  tournamentSlug={slug}
-                  status="in_progress"
-                  pausedForReassignment={true}
-                  initialSets={(m.sets as { score_a: number; score_b: number }[]) ?? []}
-                  categoryName={m.tc?.name ?? ''}
-                  roundLabel={m.round_name ?? `Round ${m.round}`}
-                  groupName={m.group_name}
-                  scheduledTime={m.scheduled_time}
-                  court={m.court}
-                  assignedRefereeName={m.assigned_referee_name}
-                  maxCourts={maxCourts}
-                  entryA={m.ea}
-                  entryB={m.eb}
-                  playFormat={m.tc?.play_format ?? 'singles'}
-                  activeReferees={activeReferees}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* ── 3. Scheduled — assigned (court + referee set, not started) ────── */}
-        {assignedNotStarted.length > 0 && (
-          <section className="mb-8">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-brand-400">
-              Scheduled — {assignedNotStarted.length} assigned
-            </h2>
-            <p className="mb-3 text-[11px] text-slate-600">
-              Court and referee assigned. Open the match to start it.
-            </p>
-            <div className="space-y-3">
-              {assignedNotStarted.map((m) => (
-                <ScheduledMatchCard
-                  key={m.id}
-                  matchId={m.id}
-                  tournamentSlug={slug}
-                  status="scheduled"
-                  pausedForReassignment={false}
-                  categoryName={m.tc?.name ?? ''}
-                  roundLabel={m.round_name ?? `Round ${m.round}`}
-                  groupName={m.group_name}
-                  scheduledTime={m.scheduled_time}
-                  court={m.court}
-                  assignedRefereeName={m.assigned_referee_name}
-                  maxCourts={maxCourts}
-                  entryA={m.ea}
-                  entryB={m.eb}
-                  playFormat={m.tc?.play_format ?? 'singles'}
-                  activeReferees={activeReferees}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* ── 4. Upcoming — unassigned ──────────────────────────────────────── */}
-        {upcoming.length > 0 && (
-          <section className="mb-8">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                Upcoming — {upcoming.length} unassigned
-              </h2>
-              {activeReferees.length === 0 && (
-                <span className="text-[11px] text-slate-600">No referees online — type a name</span>
-              )}
-            </div>
-            <div className="space-y-3">
-              {upcoming.map((m) => (
-                <ScheduledMatchCard
-                  key={m.id}
-                  matchId={m.id}
-                  tournamentSlug={slug}
-                  status="scheduled"
-                  pausedForReassignment={false}
-                  categoryName={m.tc?.name ?? ''}
-                  roundLabel={m.round_name ?? `Round ${m.round}`}
-                  groupName={m.group_name}
-                  scheduledTime={m.scheduled_time}
-                  court={m.court}
-                  assignedRefereeName={m.assigned_referee_name}
-                  maxCourts={maxCourts}
-                  entryA={m.ea}
-                  entryB={m.eb}
-                  playFormat={m.tc?.play_format ?? 'singles'}
-                  activeReferees={activeReferees}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* ── 5. Completed ─────────────────────────────────────────────────── */}
-        {done.length > 0 && (
-          <section>
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">
-              Completed — {done.length}
-            </h2>
-            <div className="space-y-2">
-              {done.map((m) => <CompletedMatchCard key={m.id} match={m} />)}
-            </div>
-          </section>
-        )}
-
-        {totalVisible === 0 && (
-          <div className="rounded-xl bg-surface-card p-10 text-center ring-1 ring-surface-border">
-            <p className="text-2xl mb-2">🎾</p>
-            <p className="text-sm font-medium text-white mb-1">
-              {categoryFilter ? 'No matches in this category yet'
-                : activeDate ? `No matches on ${formatDate(activeDate)}`
-                : 'No matches yet'}
-            </p>
-            <p className="text-xs text-slate-500">
-              Generate a draw for at least one category to start scoring.
-            </p>
-          </div>
-        )}
+        {/* Match list with search + filter (client component) */}
+        <ScoringMatchList
+          matches={scoringMatches}
+          restartMatches={restartMatches}
+          tournamentSlug={slug}
+          maxCourts={maxCourts}
+          activeReferees={activeReferees}
+        />
 
         {/* Referee PIN management */}
         <div id="referee-pins" className="mt-10" data-print-hide>

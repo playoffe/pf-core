@@ -183,6 +183,34 @@ export async function startMatchAction(
   return { success: true };
 }
 
+// ── Intermediate auto-save (no status change) ────────────────────────────────
+// Called on debounce as the admin enters scores. Persists to DB so the display
+// screen receives the Realtime event and shows live scores immediately.
+export async function saveScoreAction(
+  matchId: string,
+  sets: SetScore[],
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const ctx = await assertMatchManager(matchId, user.id);
+  if (!ctx) return { error: 'Permission denied' };
+
+  if (ctx.match.status !== 'in_progress') return { error: 'Match is not in progress' };
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from('matches')
+    .update({
+      sets: sets.map((s, i) => ({ set_number: i + 1, score_a: s.score_a, score_b: s.score_b })),
+    })
+    .eq('id', matchId);
+
+  if (error) return { error: 'Failed to save score' };
+  return { success: true };
+}
+
 // ── Submit final result ───────────────────────────────────────────────────────
 export async function submitResultAction(
   matchId: string,
