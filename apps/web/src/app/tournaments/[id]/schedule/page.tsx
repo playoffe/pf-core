@@ -51,13 +51,19 @@ export default async function SchedulePage({ params }: Props) {
     : isAdminRole ? 'admin' : 'player';
   if (activeMode === 'player') redirect(`/events/${slug}`);
 
-  // Fetch all matches that have both players (excludes TBD bracket slots)
+  // Fetch all matches — include partner joins for doubles categories
   const { data: raw } = await admin
     .from('matches')
     .select(`
       id, status, court, scheduled_time, round, round_name, group_name, category_id,
-      ea:tournament_entries!entry_a_id(players!player_id(full_name)),
-      eb:tournament_entries!entry_b_id(players!player_id(full_name)),
+      ea:tournament_entries!entry_a_id(
+        players!player_id(full_name),
+        partner:players!partner_id(full_name)
+      ),
+      eb:tournament_entries!entry_b_id(
+        players!player_id(full_name),
+        partner:players!partner_id(full_name)
+      ),
       tc:tournament_categories!category_id(name)
     `)
     .eq('tournament_id', t.id)
@@ -75,10 +81,19 @@ export default async function SchedulePage({ params }: Props) {
     round_name: string | null;
     group_name: string | null;
     category_id: string;
-    ea: { players: { full_name: string } | null } | null;
-    eb: { players: { full_name: string } | null } | null;
+    ea: { players: { full_name: string } | null; partner: { full_name: string } | null } | null;
+    eb: { players: { full_name: string } | null; partner: { full_name: string } | null } | null;
     tc: { name: string } | null;
   };
+
+  function buildName(
+    entry: { players: { full_name: string } | null; partner: { full_name: string } | null } | null,
+  ): string {
+    const main = entry?.players?.full_name;
+    const partner = entry?.partner?.full_name;
+    if (!main) return 'TBD';
+    return partner ? `${main} / ${partner}` : main;
+  }
 
   const matches: MatchForScheduling[] = ((raw ?? []) as unknown as RawMatch[]).map((m) => ({
     id: m.id,
@@ -90,8 +105,8 @@ export default async function SchedulePage({ params }: Props) {
     group_name: m.group_name,
     category_id: m.category_id,
     category_name: m.tc?.name ?? 'Unknown category',
-    player_a: m.ea?.players?.full_name ?? 'TBD',
-    player_b: m.eb?.players?.full_name ?? 'TBD',
+    player_a: buildName(m.ea),
+    player_b: buildName(m.eb),
   }));
 
   const scheduledCount = matches.filter((m) => m.scheduled_time).length;

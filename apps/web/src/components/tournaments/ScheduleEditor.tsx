@@ -177,30 +177,26 @@ export function ScheduleEditor({ tournamentSlug, startDate, matches }: Props) {
 
   return (
     <div className="space-y-5 pb-28">
-      {/* ── Category tabs ─────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 overflow-x-auto pb-1">
-        {categories.map((cat) => {
-          const dirty = dirtyCountByCat[cat.id] ?? 0;
-          const isActive = cat.id === activeCatId;
-          return (
-            <button
-              key={cat.id}
-              onClick={() => { setActiveCatId(cat.id); setSaveMsg(null); }}
-              className={`relative shrink-0 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-brand-600 text-white'
-                  : 'bg-surface-card text-slate-400 ring-1 ring-surface-border hover:text-white'
-              }`}
-            >
-              {cat.name}
-              {dirty > 0 && (
-                <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
-                  {dirty}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      {/* ── Category selector ─────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <label className="text-xs font-medium text-slate-400 shrink-0">Category</label>
+        <div className="relative flex-1 max-w-sm">
+          <select
+            value={activeCatId}
+            onChange={(e) => { setActiveCatId(e.target.value); setSaveMsg(null); }}
+            className="w-full appearance-none rounded-lg border border-slate-600 bg-surface-card px-4 py-2 pr-9 text-sm text-white outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 cursor-pointer"
+          >
+            {categories.map((cat) => {
+              const dirty = dirtyCountByCat[cat.id] ?? 0;
+              return (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}{dirty > 0 ? ` (${dirty} unsaved)` : ''}
+                </option>
+              );
+            })}
+          </select>
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">▾</span>
+        </div>
       </div>
 
       {/* ── Auto-schedule for active category ────────────────────────────────── */}
