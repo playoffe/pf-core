@@ -19,7 +19,19 @@ interface CategoryRow {
 
 interface EntryPlayer { entryId: string; playerName: string; partnerName: string | null; }
 interface SetScore { set_number: number; score_a: number; score_b: number; }
-interface StandingRow { entryId: string; played: number; wins: number; losses: number; setsFor: number; setsAgainst: number; pointDiff: number; }
+interface StandingRow {
+  entryId: string;
+  played: number;
+  wins: number;
+  losses: number;
+  setsFor: number;
+  setsAgainst: number;
+  pointDiff: number;
+  /** Total individual match points scored across all sets */
+  pointsFor: number;
+  /** Total individual match points conceded across all sets */
+  pointsAgainst: number;
+}
 
 interface TournamentWithClub {
   id: string;
@@ -358,33 +370,81 @@ function GroupStandingsSlide({ matches, categories, entryLabel, categoryFilter }
   const filtered = categoryFilter ? rrCats.filter((c) => c.id === categoryFilter) : rrCats;
   if (filtered.length === 0) return <EmptySlide icon="📊" title="No group standings" subtitle="Round-robin draws will appear here" />;
 
-  const buildStandings = (catId: string): (StandingRow & { rank: number })[] => {
+  // groupName = null → include all matches regardless of group (for round_robin)
+  // groupName = "Group A" → only matches from that specific group
+  const buildStandings = (catId: string, groupName: string | null): (StandingRow & { rank: number })[] => {
     const rowMap = new Map<string, StandingRow>();
-    const ensure = (id: string) => { if (!rowMap.has(id)) rowMap.set(id, { entryId: id, played: 0, wins: 0, losses: 0, setsFor: 0, setsAgainst: 0, pointDiff: 0 }); return rowMap.get(id)!; };
-    for (const m of matches.filter((m) => m.category_id === catId && m.status === 'completed')) {
+    const ensure = (id: string) => {
+      if (!rowMap.has(id)) rowMap.set(id, {
+        entryId: id, played: 0, wins: 0, losses: 0,
+        setsFor: 0, setsAgainst: 0, pointDiff: 0,
+        pointsFor: 0, pointsAgainst: 0,
+      });
+      return rowMap.get(id)!;
+    };
+    const catMatches = matches.filter(
+      (m) => m.category_id === catId &&
+             m.status === 'completed' &&
+             (groupName === null || m.group_name === groupName),
+    );
+    for (const m of catMatches) {
       if (!m.entry_a_id || !m.entry_b_id) continue;
       const a = ensure(m.entry_a_id); const b = ensure(m.entry_b_id);
       for (const s of (Array.isArray(m.sets) ? m.sets : []) as SetScore[]) {
         if (s.score_a > s.score_b) { a.setsFor++; b.setsAgainst++; } else { b.setsFor++; a.setsAgainst++; }
         a.pointDiff += s.score_a - s.score_b; b.pointDiff += s.score_b - s.score_a;
+        a.pointsFor += s.score_a;  a.pointsAgainst += s.score_b;
+        b.pointsFor += s.score_b;  b.pointsAgainst += s.score_a;
       }
       a.played++; b.played++;
       if (m.winner_entry_id === m.entry_a_id) { a.wins++; b.losses++; } else { b.wins++; a.losses++; }
     }
     return [...rowMap.values()]
-      .sort((a, b) => b.wins - a.wins || (b.setsFor - b.setsAgainst) - (a.setsFor - a.setsAgainst) || b.pointDiff - a.pointDiff)
+      .sort((a, b) => b.wins - a.wins || b.pointDiff - a.pointDiff || (b.pointsFor - b.pointsAgainst) - (a.pointsFor - a.pointsAgainst))
       .map((r, i) => ({ ...r, rank: i + 1 }));
   };
 
-  // Build a flat list of "column panels": each panel = one category's page of standings.
-  // We page through panels 2 at a time (2-column layout).
+  // Build panels — group_stage_knockout gets one panel per group;
+  // round_robin gets one panel per category (or paginated if many entries).
   const PAGE_ROWS = 8;
   const panels = filtered.flatMap((cat) => {
-    const standings = buildStandings(cat.id);
+    const isGroupStage = cat.draw_format === 'group_stage_knockout';
+
+    if (isGroupStage) {
+      // Collect sorted unique group names from completed group-stage matches
+      const groupNames = [...new Set(
+        matches
+          .filter((m) => m.category_id === cat.id && m.group_name)
+          .map((m) => m.group_name!),
+      )].sort();
+
+      if (groupNames.length === 0) {
+        // Draw not generated yet — show empty panel
+        return [{ id: cat.id, cat, groupName: null as string | null, catSubtitle: null as string | null, rows: [] as (StandingRow & { rank: number })[], chunkLabel: '' }];
+      }
+
+      return groupNames.flatMap((groupName) => {
+        const standings = buildStandings(cat.id, groupName);
+        const chunks = Math.max(1, Math.ceil(standings.length / PAGE_ROWS));
+        return Array.from({ length: chunks }, (_, p) => ({
+          id: `${cat.id}-${groupName}-${p}`,
+          cat,
+          groupName,
+          catSubtitle: cat.name,
+          rows: standings.slice(p * PAGE_ROWS, (p + 1) * PAGE_ROWS),
+          chunkLabel: chunks > 1 ? `${p + 1}/${chunks}` : '',
+        }));
+      });
+    }
+
+    // round_robin — single standings table per category
+    const standings = buildStandings(cat.id, null);
     const chunks = Math.max(1, Math.ceil(standings.length / PAGE_ROWS));
     return Array.from({ length: chunks }, (_, p) => ({
       id: `${cat.id}-${p}`,
       cat,
+      groupName: null as string | null,
+      catSubtitle: null as string | null,
       rows: standings.slice(p * PAGE_ROWS, (p + 1) * PAGE_ROWS),
       chunkLabel: chunks > 1 ? `${p + 1}/${chunks}` : '',
     }));
@@ -397,28 +457,46 @@ function GroupStandingsSlide({ matches, categories, entryLabel, categoryFilter }
       <div style={{ display: 'grid', gridTemplateColumns: visible.length === 1 ? '1fr' : 'repeat(2, 1fr)', gap: '2vw' }}>
         {visible.map((panel) => (
           <div key={panel.id} style={{ display: 'flex', flexDirection: 'column', gap: '1.2vh' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.8vw', marginBottom: '0.3vh' }}>
-              <h2 style={{ fontSize: '1.8vw', fontWeight: 700, color: '#e2e8f0' }}>{panel.cat.name}</h2>
-              {panel.chunkLabel && <span style={{ fontSize: '1vw', color: '#475569' }}>({panel.chunkLabel})</span>}
+            {/* Panel header */}
+            <div style={{ marginBottom: '0.3vh' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.8vw' }}>
+                <h2 style={{ fontSize: '1.8vw', fontWeight: 700, color: '#e2e8f0' }}>
+                  {panel.groupName ?? panel.cat.name}
+                </h2>
+                {panel.chunkLabel && <span style={{ fontSize: '1vw', color: '#475569' }}>({panel.chunkLabel})</span>}
+              </div>
+              {/* Category name as subtitle for group panels */}
+              {panel.catSubtitle && (
+                <p style={{ fontSize: '1.1vw', color: '#475569', marginTop: '0.15vh' }}>{panel.catSubtitle}</p>
+              )}
             </div>
-            <div style={{ display: 'flex', gap: '1vw', fontSize: '1.1vw', color: '#475569', fontWeight: 600, padding: '0 0.8vw' }}>
+            {/* Header — P W L | PS PL PD */}
+            <div style={{ display: 'flex', gap: '0.6vw', fontSize: '1vw', color: '#475569', fontWeight: 700, padding: '0 0.8vw', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
               <span style={{ minWidth: '2vw' }}>#</span>
               <span style={{ flex: 1 }}>Player</span>
-              <span style={{ width: '3vw', textAlign: 'center' }}>P</span>
-              <span style={{ width: '3vw', textAlign: 'center' }}>W</span>
-              <span style={{ width: '3vw', textAlign: 'center' }}>L</span>
-              <span style={{ width: '4.5vw', textAlign: 'center' }}>Sets</span>
+              <span style={{ width: '2.6vw', textAlign: 'center' }}>P</span>
+              <span style={{ width: '2.6vw', textAlign: 'center' }}>W</span>
+              <span style={{ width: '2.6vw', textAlign: 'center' }}>L</span>
+              <span style={{ width: '3.5vw', textAlign: 'center' }}>PS</span>
+              <span style={{ width: '3.5vw', textAlign: 'center' }}>PL</span>
+              <span style={{ width: '4vw',  textAlign: 'center' }}>PD</span>
             </div>
             {panel.rows.map((row) => {
               const isFirst = row.rank === 1;
+              const pd = row.pointsFor - row.pointsAgainst;
+              const pdColor = pd > 0 ? '#22c55e' : pd < 0 ? '#ef4444' : '#64748b';
               return (
-                <div key={row.entryId} style={{ display: 'flex', alignItems: 'center', gap: '1vw', padding: '0.9vh 0.8vw', background: isFirst ? 'rgba(99,102,241,0.15)' : row.rank % 2 === 0 ? '#0f172a' : '#1e293b', borderRadius: '0.5vw', border: isFirst ? '1px solid #4f46e5' : '1px solid transparent' }}>
+                <div key={row.entryId} style={{ display: 'flex', alignItems: 'center', gap: '0.6vw', padding: '0.85vh 0.8vw', background: isFirst ? 'rgba(99,102,241,0.15)' : row.rank % 2 === 0 ? '#0f172a' : '#1e293b', borderRadius: '0.5vw', border: isFirst ? '1px solid #4f46e5' : '1px solid transparent' }}>
                   <span style={{ fontSize: '1.2vw', color: isFirst ? '#a5b4fc' : '#475569', minWidth: '2vw', fontWeight: isFirst ? 700 : 400 }}>{row.rank}</span>
-                  <span style={{ flex: 1, fontSize: '1.6vw', fontWeight: 600, color: isFirst ? '#a5b4fc' : '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entryLabel(row.entryId)}</span>
-                  <span style={{ width: '3vw', textAlign: 'center', fontSize: '1.4vw', color: '#64748b' }}>{row.played}</span>
-                  <span style={{ width: '3vw', textAlign: 'center', fontSize: '1.4vw', fontWeight: 700, color: '#22c55e' }}>{row.wins}</span>
-                  <span style={{ width: '3vw', textAlign: 'center', fontSize: '1.4vw', color: '#ef4444' }}>{row.losses}</span>
-                  <span style={{ width: '4.5vw', textAlign: 'center', fontSize: '1.3vw', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>{row.setsFor}-{row.setsAgainst}</span>
+                  <span style={{ flex: 1, fontSize: '1.5vw', fontWeight: 600, color: isFirst ? '#a5b4fc' : '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entryLabel(row.entryId)}</span>
+                  <span style={{ width: '2.6vw', textAlign: 'center', fontSize: '1.3vw', color: '#64748b',  fontVariantNumeric: 'tabular-nums' }}>{row.played}</span>
+                  <span style={{ width: '2.6vw', textAlign: 'center', fontSize: '1.3vw', fontWeight: 700, color: '#22c55e', fontVariantNumeric: 'tabular-nums' }}>{row.wins}</span>
+                  <span style={{ width: '2.6vw', textAlign: 'center', fontSize: '1.3vw', color: '#ef4444', fontVariantNumeric: 'tabular-nums' }}>{row.losses}</span>
+                  <span style={{ width: '3.5vw', textAlign: 'center', fontSize: '1.3vw', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>{row.pointsFor}</span>
+                  <span style={{ width: '3.5vw', textAlign: 'center', fontSize: '1.3vw', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>{row.pointsAgainst}</span>
+                  <span style={{ width: '4vw',  textAlign: 'center', fontSize: '1.3vw', fontWeight: 700, color: pdColor, fontVariantNumeric: 'tabular-nums' }}>
+                    {pd > 0 ? `+${pd}` : pd}
+                  </span>
                 </div>
               );
             })}

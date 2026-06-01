@@ -91,6 +91,7 @@ export default async function DisplayControlPage({ params }: Props) {
         <DisplayControlPanel
           tournamentId={t.id}
           tournamentSlug={slug}
+          displayCode={t.display_code as string}
           initialDisplayState={ds}
           initialAnnouncements={announcements ?? []}
         />

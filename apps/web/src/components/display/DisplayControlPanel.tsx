@@ -34,6 +34,9 @@ interface AnnouncementRow {
 interface Props {
   tournamentId: string;
   tournamentSlug: string;
+  /** The short display code used in the /display/[code] URL (e.g. "F211D951").
+   *  Distinct from the tournament slug — must come from tournaments.display_code. */
+  displayCode: string;
   initialDisplayState: DisplayStateLocal;
   initialAnnouncements: AnnouncementRow[];
 }
@@ -70,6 +73,7 @@ const ROTATABLE_SLIDES: { value: DisplaySlide; label: string; icon: string }[] =
 export function DisplayControlPanel({
   tournamentId,
   tournamentSlug,
+  displayCode,
   initialDisplayState,
   initialAnnouncements,
 }: Props) {
@@ -86,9 +90,9 @@ export function DisplayControlPanel({
   const [annSent, setAnnSent] = useState(false);
   const [isPending, startTransition] = useTransition();
 
-  // Start with the relative path so server and client agree during hydration,
-  // then patch to the full absolute URL once the component mounts.
-  const relativePath = `/display/${tournamentSlug.toUpperCase()}`;
+  // Use the tournament's display_code (e.g. "F211D951"), not the slug.
+  // Start relative so server/client agree during hydration; patch to absolute on mount.
+  const relativePath = `/display/${displayCode}`;
   const [displayUrl, setDisplayUrl] = useState(relativePath);
   useEffect(() => {
     setDisplayUrl(`${window.location.origin}${relativePath}`);
