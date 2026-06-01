@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { generateDrawAction, clearDrawAction, scheduleMatchesAction, generateNextSwissRoundAction, promoteGroupWinnersAction } from '@/lib/actions/draws';
+import Link from 'next/link';
+import { generateDrawAction, clearDrawAction, generateNextSwissRoundAction, promoteGroupWinnersAction } from '@/lib/actions/draws';
 import type { MatchWithPlayers } from '@/lib/actions/draws';
 import { BracketView } from './BracketView';
 import { useRealtimeCategoryMatches } from '@/hooks/useRealtimeCategoryMatches';
@@ -41,14 +42,11 @@ export function DrawSection({
 }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [scheduling, setScheduling] = useState(false);
   const [generatingSwissRound, setGeneratingSwissRound] = useState(false);
   const [promotingGroups, setPromotingGroups] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [matches, setMatches] = useState(initialMatches);
-  const [startTime, setStartTime] = useState('');
-  const [matchDuration, setMatchDuration] = useState(30);
 
   // Sync matches when server re-renders after router.refresh() passes new initialMatches
   useEffect(() => {
@@ -56,11 +54,6 @@ export function DrawSection({
   }, [initialMatches]);
 
   const isDrawn = categoryStatus === 'draw_generated' || categoryStatus === 'in_progress' || categoryStatus === 'completed';
-
-  // Count how many matches already have a court assigned
-  const unscheduledCount = matches.filter(
-    (m) => !m.court && m.entry_a !== null && m.entry_b !== null && (m.status === 'scheduled' || m.status === 'in_progress'),
-  ).length;
 
   // Swiss next-round logic
   const isSwiss = drawFormat === 'swiss';
@@ -121,21 +114,6 @@ export function DrawSection({
     setLoading(false);
   }
 
-  async function handleSchedule() {
-    setScheduling(true);
-    setError(null);
-    const result = await scheduleMatchesAction(categoryId, {
-      startTime: startTime || undefined,
-      matchDurationMins: matchDuration,
-    });
-    if ('error' in result && result.error) {
-      setError(result.error);
-    } else {
-      router.refresh();
-    }
-    setScheduling(false);
-  }
-
   async function handleGenerateNextSwissRound() {
     setGeneratingSwissRound(true);
     setError(null);
@@ -192,36 +170,14 @@ export function DrawSection({
                 {matches.length} match{matches.length !== 1 ? 'es' : ''}
               </span>
 
-              {/* Auto-schedule courts + optional time inputs */}
-              {categoryStatus === 'draw_generated' && unscheduledCount > 0 && !showRegenConfirm && (
-                <>
-                  <input
-                    type="datetime-local"
-                    value={startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
-                    title="Optional start time for first match"
-                    className="rounded-lg border border-slate-700 bg-surface-card px-2 py-1.5 text-xs text-slate-300 focus:border-brand-500 focus:outline-none"
-                  />
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min={5}
-                      max={180}
-                      value={matchDuration}
-                      onChange={(e) => setMatchDuration(Number(e.target.value))}
-                      title="Match duration in minutes"
-                      className="w-14 rounded-lg border border-slate-700 bg-surface-card px-2 py-1.5 text-center text-xs text-slate-300 focus:border-brand-500 focus:outline-none"
-                    />
-                    <span className="text-xs text-slate-500">min</span>
-                  </div>
-                  <button
-                    onClick={handleSchedule}
-                    disabled={scheduling}
-                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-brand-500 hover:text-brand-400 transition-colors disabled:opacity-50"
-                  >
-                    {scheduling ? 'Scheduling…' : `Assign courts (${unscheduledCount})`}
-                  </button>
-                </>
+              {/* Link to schedule page */}
+              {!showRegenConfirm && (
+                <Link
+                  href={`/tournaments/${tournamentSlug}/schedule`}
+                  className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-brand-500 hover:text-brand-400 transition-colors"
+                >
+                  📅 Schedule
+                </Link>
               )}
 
               {/* Swiss: generate next round */}
