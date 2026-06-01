@@ -12,6 +12,7 @@ import {
 
 type RoleFilter = 'all' | 'admin' | 'player_only' | 'no_profile';
 type AccountFilter = 'all' | 'regular' | 'provisional';
+type ClubFilter = 'all' | 'none' | string; // string = club id
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -208,6 +209,20 @@ function UserRow({ user }: { user: UserRow }) {
             <span>Last login: {timeAgo(user.last_sign_in_at)}</span>
           </div>
 
+          {/* Club memberships */}
+          {user.clubs.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {user.clubs.map((c) => (
+                <span
+                  key={c.id}
+                  className="inline-flex items-center gap-1 rounded-full bg-slate-700/50 px-2 py-0.5 text-[10px] font-medium text-slate-300"
+                >
+                  🏟️ {c.name}
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* Expanded reset panel */}
           {expanded && <ResetPanel userId={user.id} email={user.email} />}
         </div>
@@ -239,8 +254,20 @@ export function UsersListClient({ users }: Props) {
   const [search, setSearch]     = useState('');
   const [role, setRole]         = useState<RoleFilter>('all');
   const [account, setAccount]   = useState<AccountFilter>('all');
+  const [clubFilter, setClubFilter] = useState<ClubFilter>('all');
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
   const [backfilling, startBackfill]  = useTransition();
+
+  // Derive unique clubs across all users for the filter dropdown
+  const allClubs = useMemo(() => {
+    const seen = new Map<string, string>(); // id → name
+    for (const u of users) {
+      for (const c of u.clubs) seen.set(c.id, c.name);
+    }
+    return Array.from(seen.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [users]);
 
   // Users whose role is not yet stored in JWT
   const needsBackfill = useMemo(() => users.filter((u) => u.roles.length === 0), [users]);
@@ -275,11 +302,15 @@ export function UsersListClient({ users }: Props) {
       if (account === 'regular'     &&  u.is_provisional) return false;
       if (account === 'provisional' && !u.is_provisional) return false;
 
+      // Club filter
+      if (clubFilter === 'none' && u.clubs.length > 0) return false;
+      if (clubFilter !== 'all' && clubFilter !== 'none' && !u.clubs.some((c) => c.id === clubFilter)) return false;
+
       return true;
     });
-  }, [users, search, role, account]);
+  }, [users, search, role, account, clubFilter]);
 
-  const hasFilters = search || role !== 'all' || account !== 'all';
+  const hasFilters = search || role !== 'all' || account !== 'all' || clubFilter !== 'all';
 
   return (
     <div>
@@ -360,13 +391,28 @@ export function UsersListClient({ users }: Props) {
           <option value="provisional">Provisional</option>
         </select>
 
+        {/* Club filter */}
+        {allClubs.length > 0 && (
+          <select
+            value={clubFilter}
+            onChange={(e) => setClubFilter(e.target.value as ClubFilter)}
+            className="rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm text-white outline-none focus:border-brand-500"
+          >
+            <option value="all">All clubs</option>
+            <option value="none">No club</option>
+            {allClubs.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        )}
+
         {/* Count + clear */}
         <p className="text-xs text-slate-500 whitespace-nowrap">
           {filtered.length} of {users.length}
         </p>
         {hasFilters && (
           <button
-            onClick={() => { setSearch(''); setRole('all'); setAccount('all'); }}
+            onClick={() => { setSearch(''); setRole('all'); setAccount('all'); setClubFilter('all'); }}
             className="text-xs text-brand-400 hover:text-brand-300 transition-colors whitespace-nowrap"
           >
             Clear filters
@@ -387,7 +433,7 @@ export function UsersListClient({ users }: Props) {
             </p>
             {hasFilters && (
               <button
-                onClick={() => { setSearch(''); setRole('all'); setAccount('all'); }}
+                onClick={() => { setSearch(''); setRole('all'); setAccount('all'); setClubFilter('all'); }}
                 className="mt-3 text-xs text-brand-400 hover:text-brand-300 transition-colors"
               >
                 Clear filters

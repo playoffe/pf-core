@@ -86,12 +86,24 @@ export async function getAllUsersForSuperAdminAction() {
     (u) => u.app_metadata?.role !== 'super_admin',
   );
 
-  // Fetch all player profiles for a joined view
-  const { data: players } = await admin
-    .from('players')
-    .select('id, username, full_name, is_provisional');
+  // Fetch all player profiles + club memberships in parallel
+  const [{ data: players }, { data: managers }] = await Promise.all([
+    admin.from('players').select('id, username, full_name, is_provisional'),
+    admin.from('club_managers').select('player_id, clubs(id, name, slug)'),
+  ]);
 
   const playerMap = new Map((players ?? []).map((p) => [p.id, p]));
+
+  // Build player_id → clubs[] map
+  type ClubRef = { id: string; name: string; slug: string };
+  const clubsByPlayer = new Map<string, ClubRef[]>();
+  for (const m of managers ?? []) {
+    const club = m.clubs as ClubRef | null;
+    if (!club) continue;
+    const list = clubsByPlayer.get(m.player_id) ?? [];
+    list.push(club);
+    clubsByPlayer.set(m.player_id, list);
+  }
 
   return users.map((u) => {
     const player = playerMap.get(u.id);
@@ -104,6 +116,7 @@ export async function getAllUsersForSuperAdminAction() {
       username: player?.username ?? null,
       full_name: player?.full_name ?? null,
       is_provisional: player?.is_provisional ?? false,
+      clubs: clubsByPlayer.get(u.id) ?? [],
     };
   });
 }
