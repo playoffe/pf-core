@@ -369,6 +369,7 @@ export async function addPlayerByEmailAction(
   tournamentId: string,
   categoryId: string,
   email: string,
+  partnerEmail?: string,   // required for doubles / mixed doubles categories
 ) {
   const supabase = await createClient();
   const {
@@ -381,27 +382,59 @@ export async function addPlayerByEmailAction(
 
   const admin = createAdminClient();
 
+  // ── Look up main player ──────────────────────────────────────────────────
   const { data: player } = await admin
     .from('players')
     .select('id')
     .eq('email', email.toLowerCase().trim())
     .maybeSingle();
 
-  if (!player) return { error: 'No PLAYOFFE account found with that email' };
+  if (!player) return { error: 'No PLAYOFFE account found with that email address' };
 
+  // ── Look up partner (doubles) ────────────────────────────────────────────
+  let partnerId: string | null = null;
+  if (partnerEmail) {
+    const normPartner = partnerEmail.toLowerCase().trim();
+    if (normPartner === email.toLowerCase().trim()) {
+      return { error: 'Player 1 and Player 2 must be different accounts' };
+    }
+    const { data: partner } = await admin
+      .from('players')
+      .select('id')
+      .eq('email', normPartner)
+      .maybeSingle();
+
+    if (!partner) return { error: 'No PLAYOFFE account found for the partner email address' };
+
+    // Check partner not already in the category (as main player or as partner)
+    const { data: partnerEntry } = await admin
+      .from('tournament_entries')
+      .select('id')
+      .eq('category_id', categoryId)
+      .or(`player_id.eq.${partner.id},partner_id.eq.${partner.id}`)
+      .maybeSingle();
+
+    if (partnerEntry) return { error: 'Partner is already entered in this category' };
+
+    partnerId = partner.id;
+  }
+
+  // ── Check main player not already in category ────────────────────────────
   const { data: existing } = await admin
     .from('tournament_entries')
     .select('id')
     .eq('category_id', categoryId)
-    .eq('player_id', player.id)
+    .or(`player_id.eq.${player.id},partner_id.eq.${player.id}`)
     .maybeSingle();
 
   if (existing) return { error: 'Player is already entered in this category' };
 
+  // ── Insert entry ─────────────────────────────────────────────────────────
   const { error } = await admin.from('tournament_entries').insert({
     tournament_id: tournamentId,
     category_id: categoryId,
     player_id: player.id,
+    ...(partnerId ? { partner_id: partnerId } : {}),
     status: 'active',
   });
 

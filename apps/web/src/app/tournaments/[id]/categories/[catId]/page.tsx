@@ -247,7 +247,11 @@ export default async function CategoryPage({ params }: Props) {
         {categoryStatus === 'pending' || categoryStatus === 'registration' ? (
           <>
             <section className="mb-6">
-              <AddPlayerByEmail tournamentId={tournament.id} categoryId={categoryId} />
+              <AddPlayerByEmail
+                tournamentId={tournament.id}
+                categoryId={categoryId}
+                playFormat={(category as { play_format: string }).play_format as 'singles' | 'doubles' | 'mixed_doubles'}
+              />
             </section>
             <section className="mb-10">
               <ImportPlayersPanel tournamentId={tournament.id} categoryId={categoryId} />

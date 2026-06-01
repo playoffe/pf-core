@@ -7,6 +7,8 @@ import { addPlayerByEmailAction, searchPlayersForCategoryAction } from '@/lib/ac
 interface Props {
   tournamentId: string;
   categoryId: string;
+  /** Used to decide whether to show 1 or 2 search fields */
+  playFormat?: 'singles' | 'doubles' | 'mixed_doubles';
 }
 
 interface PlayerResult {
@@ -16,35 +18,40 @@ interface PlayerResult {
   email: string;
 }
 
-export function AddPlayerByEmail({ tournamentId, categoryId }: Props) {
-  const router = useRouter();
-  const [query, setQuery]           = useState('');
-  const [results, setResults]       = useState<PlayerResult[]>([]);
-  const [searching, setSearching]   = useState(false);
-  const [showDrop, setShowDrop]     = useState(false);
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState<string | null>(null);
-  const [success, setSuccess]       = useState<string | null>(null);
-  const containerRef                = useRef<HTMLDivElement>(null);
+// ── Shared typeahead input ────────────────────────────────────────────────────
+
+interface SearchFieldProps {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  onClear: () => void;
+  disabled?: boolean;
+}
+
+function SearchField({ label, value, onChange, onClear, disabled }: SearchFieldProps) {
+  const [results, setResults]     = useState<PlayerResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showDrop, setShowDrop]   = useState(false);
+  const containerRef              = useRef<HTMLDivElement>(null);
 
   // Debounced search
   useEffect(() => {
-    if (query.trim().length < 2) {
+    if (value.trim().length < 2) {
       setResults([]);
       setShowDrop(false);
       return;
     }
     const t = setTimeout(async () => {
       setSearching(true);
-      const data = await searchPlayersForCategoryAction(query);
+      const data = await searchPlayersForCategoryAction(value);
       setResults(data);
       setShowDrop(data.length > 0);
       setSearching(false);
     }, 300);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [value]);
 
-  // Close dropdown on outside click
+  // Close on outside click
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -55,93 +62,161 @@ export function AddPlayerByEmail({ tournamentId, categoryId }: Props) {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  function handleSelect(player: PlayerResult) {
-    setQuery(player.email);
+  function handleSelect(p: PlayerResult) {
+    onChange(p.email);
     setResults([]);
     setShowDrop(false);
-    setError(null);
-    setSuccess(null);
   }
+
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-slate-400">{label}</p>
+      <div ref={containerRef} className="relative">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => { onChange(e.target.value); }}
+          onFocus={() => results.length > 0 && setShowDrop(true)}
+          placeholder="Search by name, email or username…"
+          autoComplete="off"
+          disabled={disabled}
+          className="w-full rounded-lg border border-slate-600 bg-surface px-3 py-2 pr-8 text-sm text-white outline-none placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 transition disabled:opacity-50"
+        />
+
+        {/* Clear button */}
+        {value && !disabled && (
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); onChange(''); onClear(); }}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+            aria-label="Clear"
+          >
+            ✕
+          </button>
+        )}
+
+        {/* Searching indicator */}
+        {searching && !value && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">
+            Searching…
+          </span>
+        )}
+
+        {/* Dropdown */}
+        {showDrop && results.length > 0 && (
+          <ul className="absolute z-50 mt-1 w-full rounded-lg border border-surface-border bg-surface-card shadow-xl overflow-hidden">
+            {results.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); handleSelect(p); }}
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-surface transition-colors"
+                >
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-900 text-xs font-bold text-brand-300">
+                    {(p.full_name?.[0] ?? p.email[0]).toUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{p.full_name}</p>
+                    <p className="text-xs text-slate-500 truncate">
+                      @{p.username} · {p.email}
+                    </p>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export function AddPlayerByEmail({ tournamentId, categoryId, playFormat = 'singles' }: Props) {
+  const router  = useRouter();
+  const isDoubles = playFormat === 'doubles' || playFormat === 'mixed_doubles';
+
+  const [player1, setPlayer1]   = useState('');
+  const [player2, setPlayer2]   = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+  const [success, setSuccess]   = useState<string | null>(null);
+
+  const canSubmit = isDoubles
+    ? player1.trim() !== '' && player2.trim() !== ''
+    : player1.trim() !== '';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!query.trim()) return;
+    if (!canSubmit) return;
     setError(null);
     setSuccess(null);
     setLoading(true);
 
-    const result = await addPlayerByEmailAction(tournamentId, categoryId, query.trim());
+    const result = await addPlayerByEmailAction(
+      tournamentId,
+      categoryId,
+      player1.trim(),
+      isDoubles ? player2.trim() : undefined,
+    );
 
     if (result.error) {
       setError(result.error);
     } else {
-      setSuccess('Player added successfully.');
-      setQuery('');
+      setSuccess(isDoubles ? 'Pair added successfully.' : 'Player added successfully.');
+      setPlayer1('');
+      setPlayer2('');
       router.refresh();
     }
     setLoading(false);
   }
 
+  const formatLabel = playFormat === 'mixed_doubles'
+    ? 'mixed doubles'
+    : playFormat === 'doubles'
+    ? 'doubles'
+    : 'singles';
+
   return (
     <div className="rounded-xl bg-surface-card p-5 ring-1 ring-surface-border">
-      <h3 className="mb-3 text-sm font-semibold text-white">Add player by email</h3>
+      <h3 className="mb-1 text-sm font-semibold text-white">
+        Add {isDoubles ? 'pair' : 'player'}
+      </h3>
       <p className="mb-4 text-xs text-slate-500">
-        Search by name, username or email. For new players, use CSV import below.
+        {isDoubles
+          ? `This is a ${formatLabel} category — search and select both players.`
+          : 'Search by name, username or email. For new players, use CSV import below.'}
       </p>
 
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <div ref={containerRef} className="relative flex-1">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setError(null); setSuccess(null); }}
-            onFocus={() => results.length > 0 && setShowDrop(true)}
-            placeholder="Search by name, email or username…"
-            autoComplete="off"
-            className="w-full rounded-lg border border-slate-600 bg-surface px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 transition"
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <SearchField
+          label={isDoubles ? 'Player 1 (main)' : 'Player'}
+          value={player1}
+          onChange={setPlayer1}
+          onClear={() => setError(null)}
+          disabled={loading}
+        />
+
+        {isDoubles && (
+          <SearchField
+            label="Player 2 (partner)"
+            value={player2}
+            onChange={setPlayer2}
+            onClear={() => setError(null)}
+            disabled={loading}
           />
+        )}
 
-          {/* Searching indicator */}
-          {searching && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">
-              Searching…
-            </span>
-          )}
-
-          {/* Dropdown */}
-          {showDrop && results.length > 0 && (
-            <ul className="absolute z-50 mt-1 w-full rounded-lg border border-surface-border bg-surface-card shadow-xl overflow-hidden">
-              {results.map((p) => (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => { e.preventDefault(); handleSelect(p); }}
-                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-surface transition-colors"
-                  >
-                    {/* Avatar initial */}
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-900 text-xs font-bold text-brand-300">
-                      {(p.full_name?.[0] ?? p.email[0]).toUpperCase()}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-white truncate">{p.full_name}</p>
-                      <p className="text-xs text-slate-500 truncate">
-                        @{p.username} · {p.email}
-                      </p>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+        <div className="flex justify-end pt-1">
+          <button
+            type="submit"
+            disabled={loading || !canSubmit}
+            className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Adding…' : isDoubles ? 'Add pair' : 'Add player'}
+          </button>
         </div>
-
-        <button
-          type="submit"
-          disabled={loading || !query.trim()}
-          className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
-        >
-          {loading ? 'Adding…' : 'Add'}
-        </button>
       </form>
 
       {error   && <p className="mt-2 text-xs text-red-400">{error}</p>}

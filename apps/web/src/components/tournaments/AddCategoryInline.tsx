@@ -92,6 +92,14 @@ export function AddCategoryInline({
       setError(result.error);
       setLoading(false);
     } else {
+      // Reset all transient state before closing so the form is fresh next time
+      setLoading(false);
+      setError(null);
+      setScoringOverride(false);
+      setScoringFormat(tournamentScoringFormat);
+      setNumSets(tournamentNumSets);
+      setWinBy(tournamentWinBy);
+      setDeuceCap(tournamentDeuceCap != null ? String(tournamentDeuceCap) : '');
       setOpen(false);
       router.refresh();
     }
@@ -113,7 +121,7 @@ export function AddCategoryInline({
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">New category</h3>
         <button
-          onClick={() => { setOpen(false); setError(null); }}
+          onClick={() => { setOpen(false); setError(null); setLoading(false); }}
           className="text-slate-500 hover:text-slate-300 transition-colors text-sm"
         >
           ✕ Cancel
