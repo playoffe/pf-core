@@ -48,19 +48,28 @@ function MatchCard({ match, tournamentSlug, readOnly }: { match: MatchWithPlayer
           <span className="w-4 shrink-0" />
         )}
 
-        {/* Name */}
-        <span
-          className={`flex-1 truncate text-xs ${
-            isBye
-              ? 'italic text-slate-600'
-              : isWinner
-                ? 'font-semibold text-white'
-                : isCompleted
-                  ? 'text-slate-500'
-                  : 'text-slate-300'
-          }`}
-        >
-          {isBye ? 'BYE' : entry.partner_name ? `${entry.player_name} / ${entry.partner_name}` : entry.player_name}
+        {/* Name(s) — stacked for doubles so neither name is truncated */}
+        <span className="flex-1 min-w-0">
+          <span
+            className={`block text-xs leading-tight ${
+              isBye
+                ? 'italic text-slate-600'
+                : isWinner
+                  ? 'font-semibold text-white'
+                  : isCompleted
+                    ? 'text-slate-500'
+                    : 'text-slate-300'
+            }`}
+          >
+            {isBye ? 'BYE' : entry.player_name}
+          </span>
+          {!isBye && entry.partner_name && (
+            <span className={`block text-[10px] leading-tight mt-0.5 ${
+              isWinner ? 'text-slate-300' : 'text-slate-500'
+            }`}>
+              {entry.partner_name}
+            </span>
+          )}
         </span>
 
         {/* Per-set scores next to name */}
@@ -89,7 +98,8 @@ function MatchCard({ match, tournamentSlug, readOnly }: { match: MatchWithPlayer
     </>
   );
 
-  const cardClass = `w-44 overflow-hidden rounded-lg ring-1 ${
+  const isDoubles = !!(match.entry_a?.partner_name || match.entry_b?.partner_name);
+  const cardClass = `${isDoubles ? 'w-56' : 'w-44'} overflow-hidden rounded-lg ring-1 ${
     isByeMatch
       ? 'opacity-40 ring-surface-border'
       : match.status === 'in_progress'
@@ -495,7 +505,6 @@ function GroupSection({
         {/* Participant list */}
         <div className="space-y-1.5">
           {participants.map((p, i) => {
-            const displayName = p.partnerName ? `${p.playerName} / ${p.partnerName}` : p.playerName;
             return (
               <div key={p.id} className="flex items-center gap-2.5">
                 {/* Standing position (only meaningful once games played) */}
@@ -510,10 +519,17 @@ function GroupSection({
                 {p.seed && (
                   <span className="text-[10px] font-bold text-brand-400 w-4 shrink-0">[{p.seed}]</span>
                 )}
-                <span className={`flex-1 truncate text-xs ${
-                  anyResultsIn && i === 0 ? 'font-semibold text-white' : 'text-slate-300'
-                }`}>
-                  {displayName}
+                <span className="flex flex-col flex-1 min-w-0">
+                  <span className={`text-xs leading-tight ${
+                    anyResultsIn && i === 0 ? 'font-semibold text-white' : 'text-slate-300'
+                  }`}>
+                    {p.playerName}
+                  </span>
+                  {p.partnerName && (
+                    <span className="text-[10px] leading-tight text-slate-500 mt-0.5">
+                      {p.partnerName}
+                    </span>
+                  )}
                 </span>
                 {/* W/L record */}
                 {anyResultsIn && (
@@ -663,24 +679,34 @@ function PlayerChip({
   setScores?: number[];
 }) {
   const isWinner = entry !== null && winnerId === entry.id;
+  const nameClass = entry === null
+    ? 'italic text-slate-600'
+    : isWinner
+      ? 'font-semibold text-white'
+      : winnerId
+        ? 'text-slate-500'
+        : 'text-slate-300';
+
   return (
-    <span className="flex flex-1 items-center gap-1.5 min-w-0">
-      <span
-        className={`flex-1 truncate text-sm ${
-          entry === null
-            ? 'italic text-slate-600'
-            : isWinner
-              ? 'font-semibold text-white'
-              : winnerId
-                ? 'text-slate-500'
-                : 'text-slate-300'
-        }`}
-      >
-        {entry?.seed ? <span className="mr-1 text-xs text-brand-400">[{entry.seed}]</span> : null}
-        {entry ? (entry.partner_name ? `${entry.player_name} / ${entry.partner_name}` : entry.player_name) : 'TBD'}
+    <span className="flex flex-1 items-start gap-1.5 min-w-0">
+      {/* Names — stacked for doubles */}
+      <span className="flex flex-col flex-1 min-w-0">
+        <span className={`text-sm leading-tight ${nameClass}`}>
+          {entry?.seed ? <span className="mr-1 text-xs text-brand-400">[{entry.seed}]</span> : null}
+          {entry ? entry.player_name : 'TBD'}
+        </span>
+        {entry?.partner_name && (
+          <span className={`text-xs leading-tight mt-0.5 ${
+            isWinner ? 'text-slate-300' : 'text-slate-500'
+          }`}>
+            {entry.partner_name}
+          </span>
+        )}
       </span>
+
+      {/* Per-set scores */}
       {setScores && setScores.length > 0 && (
-        <span className={`shrink-0 flex gap-1 font-mono text-xs tabular-nums ${
+        <span className={`shrink-0 flex gap-1 font-mono text-xs tabular-nums self-center ${
           isWinner ? 'font-semibold text-white' : 'text-slate-500'
         }`}>
           {setScores.map((s, i) => <span key={i}>{s}</span>)}
