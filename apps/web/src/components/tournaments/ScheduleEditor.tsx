@@ -29,14 +29,12 @@ function pad(n: number) {
   return String(n).padStart(2, '0');
 }
 
-/** UTC ISO → datetime-local string (browser local time) */
 function toLocalInput(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** datetime-local string → UTC ISO (or null if empty) */
 function fromLocalInput(local: string): string | null {
   if (!local) return null;
   return new Date(local).toISOString();
@@ -57,51 +55,73 @@ export function ScheduleEditor({ tournamentSlug, startDate, matches }: Props) {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ ok?: string; err?: string } | null>(null);
 
-  // Auto-fill controls
-  const [fillDatetime, setFillDatetime] = useState(`${startDate}T09:00`);
-  const [fillInterval, setFillInterval] = useState(30);
+  // ── Derive category list (ordered by first appearance in matches array) ────────
+  const categories = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string }>();
+    for (const m of matches) {
+      if (!seen.has(m.category_id)) {
+        seen.set(m.category_id, { id: m.category_id, name: m.category_name });
+      }
+    }
+    return Array.from(seen.values());
+  }, [matches]);
+
+  const [activeCatId, setActiveCatId] = useState<string>(categories[0]?.id ?? '');
+
+  // Per-category auto-fill controls
+  const [fillDatetime, setFillDatetime] = useState<Record<string, string>>({});
+  const [fillInterval, setFillInterval] = useState<Record<string, number>>({});
+
+  function getFillDatetime(catId: string) {
+    return fillDatetime[catId] ?? `${startDate}T09:00`;
+  }
+  function getFillInterval(catId: string) {
+    return fillInterval[catId] ?? 30;
+  }
 
   function updateTime(id: string, value: string) {
     setEdits((prev) => ({ ...prev, [id]: { time: value } }));
     setSaveMsg(null);
   }
 
-  // ── Auto-fill unscheduled matches ────────────────────────────────────────────
-  function handleAutoFill() {
+  // ── Auto-fill for a single category ──────────────────────────────────────────
+  function handleAutoFill(catId: string) {
     const unscheduled = matches.filter(
-      (m) => m.status === 'scheduled' && !edits[m.id]?.time,
+      (m) => m.category_id === catId && m.status === 'scheduled' && !edits[m.id]?.time,
     );
     if (unscheduled.length === 0) {
-      setSaveMsg({ err: 'No unscheduled matches to fill.' });
+      setSaveMsg({ err: 'No unscheduled matches to fill in this category.' });
       return;
     }
 
-    // Sort: category first, then round
     const sorted = [...unscheduled].sort((a, b) => {
-      if (a.category_id !== b.category_id) return a.category_id.localeCompare(b.category_id);
+      if ((a.group_name ?? '') !== (b.group_name ?? '')) {
+        return (a.group_name ?? '').localeCompare(b.group_name ?? '');
+      }
       return a.round - b.round;
     });
 
-    const base = new Date(fillDatetime);
+    const base = new Date(getFillDatetime(catId));
     if (isNaN(base.getTime())) {
       setSaveMsg({ err: 'Invalid start date/time.' });
       return;
     }
 
+    const interval = getFillInterval(catId);
     setEdits((prev) => {
       const next = { ...prev };
       sorted.forEach((m, i) => {
-        const minuteOffset = i * fillInterval;
-        const matchTime = new Date(base.getTime() + minuteOffset * 60_000);
-        const timeStr = `${matchTime.getFullYear()}-${pad(matchTime.getMonth() + 1)}-${pad(matchTime.getDate())}T${pad(matchTime.getHours())}:${pad(matchTime.getMinutes())}`;
-        next[m.id] = { time: timeStr };
+        const matchTime = new Date(base.getTime() + i * interval * 60_000);
+        next[m.id] = {
+          time: `${matchTime.getFullYear()}-${pad(matchTime.getMonth() + 1)}-${pad(matchTime.getDate())}T${pad(matchTime.getHours())}:${pad(matchTime.getMinutes())}`,
+        };
       });
       return next;
     });
     setSaveMsg(null);
   }
 
-  // ── Save all editable matches ─────────────────────────────────────────────────
+  // ── Save all changes across all categories ─────────────────────────────────────
   async function handleSave() {
     setSaving(true);
     setSaveMsg(null);
@@ -111,7 +131,7 @@ export function ScheduleEditor({ tournamentSlug, startDate, matches }: Props) {
       .map((m) => ({
         matchId: m.id,
         scheduledTime: fromLocalInput(edits[m.id]?.time ?? ''),
-        court: null, // court assignment handled separately on the scoring page
+        court: null,
       }));
 
     const result = await batchScheduleMatchesAction(tournamentSlug, updates);
@@ -124,46 +144,80 @@ export function ScheduleEditor({ tournamentSlug, startDate, matches }: Props) {
     setSaving(false);
   }
 
-  // ── Dirty-count (time differs from DB value) ──────────────────────────────────
-  const dirtyCount = useMemo(
-    () =>
-      matches.filter((m) => {
-        if (m.status !== 'scheduled') return false;
-        const origTime = toLocalInput(m.scheduled_time);
-        const currTime = edits[m.id]?.time ?? origTime;
-        return currTime !== origTime;
-      }).length,
-    [matches, edits],
-  );
-
-  // ── Group by category ─────────────────────────────────────────────────────────
-  const groups = useMemo(() => {
-    const map = new Map<string, { name: string; matches: MatchForScheduling[] }>();
+  // ── Dirty counts ──────────────────────────────────────────────────────────────
+  const dirtyCountByCat = useMemo(() => {
+    const counts: Record<string, number> = {};
     for (const m of matches) {
-      if (!map.has(m.category_id)) map.set(m.category_id, { name: m.category_name, matches: [] });
-      map.get(m.category_id)!.matches.push(m);
+      if (m.status !== 'scheduled') continue;
+      const origTime = toLocalInput(m.scheduled_time);
+      const currTime = edits[m.id]?.time ?? origTime;
+      if (currTime !== origTime) {
+        counts[m.category_id] = (counts[m.category_id] ?? 0) + 1;
+      }
     }
-    return Array.from(map.values());
-  }, [matches]);
+    return counts;
+  }, [matches, edits]);
+
+  const totalDirty = Object.values(dirtyCountByCat).reduce((a, b) => a + b, 0);
 
   const inputCls =
     'block w-full rounded border border-slate-700 bg-surface px-2 py-1.5 text-xs text-white outline-none focus:border-brand-500 disabled:opacity-40';
 
+  const activeMatches = matches.filter((m) => m.category_id === activeCatId);
+
+  if (matches.length === 0) {
+    return (
+      <div className="rounded-xl bg-surface-card p-10 text-center ring-1 ring-surface-border">
+        <p className="text-2xl mb-2">📅</p>
+        <p className="text-sm font-medium text-white mb-1">No matches to schedule yet</p>
+        <p className="text-xs text-slate-500">Generate a draw for at least one category first.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6 pb-28">
-      {/* ── Auto-fill panel ─────────────────────────────────────────────────── */}
+    <div className="space-y-5 pb-28">
+      {/* ── Category tabs ─────────────────────────────────────────────────────── */}
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {categories.map((cat) => {
+          const dirty = dirtyCountByCat[cat.id] ?? 0;
+          const isActive = cat.id === activeCatId;
+          return (
+            <button
+              key={cat.id}
+              onClick={() => { setActiveCatId(cat.id); setSaveMsg(null); }}
+              className={`relative shrink-0 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                isActive
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-surface-card text-slate-400 ring-1 ring-surface-border hover:text-white'
+              }`}
+            >
+              {cat.name}
+              {dirty > 0 && (
+                <span className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                  {dirty}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Auto-schedule for active category ────────────────────────────────── */}
       <div className="rounded-xl bg-surface-card p-5 ring-1 ring-surface-border">
         <h2 className="mb-1 text-sm font-semibold text-white">Auto-schedule</h2>
         <p className="mb-4 text-xs text-slate-500">
-          Assign times to all currently unscheduled matches starting from a chosen date &amp; time.
+          Assign times to all unscheduled matches in this category starting from the chosen time.
         </p>
         <div className="flex flex-wrap items-end gap-4">
           <label className="space-y-1">
             <span className="text-xs text-slate-400">Start date &amp; time</span>
             <input
               type="datetime-local"
-              value={fillDatetime}
-              onChange={(e) => setFillDatetime(e.target.value)}
+              value={getFillDatetime(activeCatId)}
+              onChange={(e) =>
+                setFillDatetime((prev) => ({ ...prev, [activeCatId]: e.target.value }))
+              }
               className="block rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white outline-none focus:border-brand-500"
             />
           </label>
@@ -174,14 +228,19 @@ export function ScheduleEditor({ tournamentSlug, startDate, matches }: Props) {
               type="number"
               min={5}
               max={180}
-              value={fillInterval}
-              onChange={(e) => setFillInterval(parseInt(e.target.value) || 30)}
+              value={getFillInterval(activeCatId)}
+              onChange={(e) =>
+                setFillInterval((prev) => ({
+                  ...prev,
+                  [activeCatId]: parseInt(e.target.value) || 30,
+                }))
+              }
               className="block w-24 rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white outline-none focus:border-brand-500"
             />
           </label>
 
           <button
-            onClick={handleAutoFill}
+            onClick={() => handleAutoFill(activeCatId)}
             className="rounded-lg border border-brand-600/50 bg-brand-600/20 px-4 py-2 text-sm font-semibold text-brand-300 hover:bg-brand-600/30 transition-colors"
           >
             ⚡ Auto-fill
@@ -189,100 +248,86 @@ export function ScheduleEditor({ tournamentSlug, startDate, matches }: Props) {
         </div>
       </div>
 
-      {/* ── Match tables grouped by category ────────────────────────────────── */}
-      {groups.map((group) => (
-        <div
-          key={group.name}
-          className="rounded-xl bg-surface-card ring-1 ring-surface-border overflow-hidden"
-        >
-          <div className="border-b border-surface-border px-5 py-3">
-            <h3 className="text-sm font-semibold text-white">{group.name}</h3>
-          </div>
+      {/* ── Match table for active category ──────────────────────────────────── */}
+      <div className="rounded-xl bg-surface-card ring-1 ring-surface-border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-surface-border text-left">
+                <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-28">Round</th>
+                <th className="px-4 py-2.5 text-xs font-medium text-slate-500">Match</th>
+                <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-52">
+                  Date &amp; time
+                </th>
+                <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-24 text-center">
+                  Status
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-border">
+              {activeMatches.map((m) => {
+                const edit = edits[m.id] ?? { time: '' };
+                const origTime = toLocalInput(m.scheduled_time);
+                const isDirty = m.status === 'scheduled' && edit.time !== origTime;
+                const isLocked = m.status !== 'scheduled';
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-surface-border text-left">
-                  <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-24">Round</th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-slate-500">Match</th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-52">
-                    Date &amp; time
-                  </th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-slate-500 w-24 text-center">
-                    Status
-                  </th>
+                return (
+                  <tr key={m.id} className={isDirty ? 'bg-brand-900/20' : ''}>
+                    <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                      {m.round_name ?? `Round ${m.round}`}
+                      {m.group_name ? (
+                        <span className="ml-1 text-slate-600">· {m.group_name}</span>
+                      ) : null}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-white whitespace-nowrap">
+                        {m.player_a}
+                        <span className="mx-2 text-slate-600">vs</span>
+                        {m.player_b}
+                      </p>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <input
+                        type="datetime-local"
+                        value={edit.time}
+                        onChange={(e) => updateTime(m.id, e.target.value)}
+                        disabled={isLocked}
+                        className={inputCls}
+                      />
+                    </td>
+
+                    <td className="px-4 py-3 text-center">
+                      {isLocked ? (
+                        <span className="rounded-full bg-slate-700/50 px-2 py-0.5 text-[10px] font-medium text-slate-400 capitalize">
+                          {m.status}
+                        </span>
+                      ) : isDirty ? (
+                        <span className="text-xs text-brand-400">unsaved</span>
+                      ) : edit.time ? (
+                        <span className="text-xs text-accent-500">✓</span>
+                      ) : (
+                        <span className="text-xs text-slate-700">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {activeMatches.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-500">
+                    No matches for this category yet.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-border">
-                {group.matches.map((m) => {
-                  const edit = edits[m.id] ?? { time: '' };
-                  const origTime = toLocalInput(m.scheduled_time);
-                  const isDirty = m.status === 'scheduled' && edit.time !== origTime;
-                  const isLocked = m.status !== 'scheduled';
-
-                  return (
-                    <tr
-                      key={m.id}
-                      className={isDirty ? 'bg-brand-900/20' : ''}
-                    >
-                      <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
-                        {m.round_name ?? `Round ${m.round}`}
-                        {m.group_name ? (
-                          <span className="ml-1 text-slate-600">· {m.group_name}</span>
-                        ) : null}
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <p className="text-sm text-white whitespace-nowrap">
-                          {m.player_a}
-                          <span className="mx-2 text-slate-600">vs</span>
-                          {m.player_b}
-                        </p>
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <input
-                          type="datetime-local"
-                          value={edit.time}
-                          onChange={(e) => updateTime(m.id, e.target.value)}
-                          disabled={isLocked}
-                          className={inputCls}
-                        />
-                      </td>
-
-                      <td className="px-4 py-3 text-center">
-                        {isLocked ? (
-                          <span className="rounded-full bg-slate-700/50 px-2 py-0.5 text-[10px] font-medium text-slate-400 capitalize">
-                            {m.status}
-                          </span>
-                        ) : isDirty ? (
-                          <span className="text-xs text-brand-400">unsaved</span>
-                        ) : edit.time ? (
-                          <span className="text-xs text-accent-500">✓</span>
-                        ) : (
-                          <span className="text-xs text-slate-700">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+              )}
+            </tbody>
+          </table>
         </div>
-      ))}
+      </div>
 
-      {matches.length === 0 && (
-        <div className="rounded-xl bg-surface-card p-10 text-center ring-1 ring-surface-border">
-          <p className="text-2xl mb-2">📅</p>
-          <p className="text-sm font-medium text-white mb-1">No matches to schedule yet</p>
-          <p className="text-xs text-slate-500">
-            Generate a draw for at least one category first.
-          </p>
-        </div>
-      )}
-
-      {/* ── Sticky save bar ──────────────────────────────────────────────────── */}
+      {/* ── Sticky save bar ───────────────────────────────────────────────────── */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4">
         <div className="flex items-center gap-4 rounded-xl border border-surface-border bg-surface-card px-5 py-4 shadow-2xl shadow-black/60 ring-1 ring-surface-border">
           <div className="flex-1 min-w-0">
@@ -290,10 +335,10 @@ export function ScheduleEditor({ tournamentSlug, startDate, matches }: Props) {
               <p className="text-sm text-red-400 truncate">{saveMsg.err}</p>
             ) : saveMsg?.ok ? (
               <p className="text-sm text-accent-400">{saveMsg.ok}</p>
-            ) : dirtyCount > 0 ? (
+            ) : totalDirty > 0 ? (
               <p className="text-sm text-slate-300">
-                <span className="font-bold text-white">{dirtyCount}</span> unsaved change
-                {dirtyCount !== 1 ? 's' : ''}
+                <span className="font-bold text-white">{totalDirty}</span> unsaved change
+                {totalDirty !== 1 ? 's' : ''} across all categories
               </p>
             ) : (
               <p className="text-sm text-slate-600">Schedule is up to date</p>
@@ -302,7 +347,7 @@ export function ScheduleEditor({ tournamentSlug, startDate, matches }: Props) {
 
           <button
             onClick={handleSave}
-            disabled={saving || (dirtyCount === 0 && !saveMsg?.err)}
+            disabled={saving || (totalDirty === 0 && !saveMsg?.err)}
             className="shrink-0 rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save schedule'}
