@@ -250,7 +250,6 @@ export default async function CategoryPage({ params }: Props) {
           categoryStatus={categoryStatus}
           entryCount={entryCount}
           initialMatches={matches}
-          readOnly={true}
           showStandings={false}
         />
       </main>

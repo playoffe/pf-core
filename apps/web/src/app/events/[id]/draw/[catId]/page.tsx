@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { createAdminClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { BracketView } from '@/components/tournaments/BracketView';
 import { StandingsTable } from '@/components/tournaments/StandingsTable';
@@ -31,14 +31,29 @@ export default async function PublicDrawPage({ params }: Props) {
 
   const admin = createAdminClient();
 
-  // Look up tournament by slug
+  // Look up tournament by slug (include club_id for manager check)
   const { data: tournament } = await admin
     .from('tournaments')
-    .select('id, name, slug')
+    .select('id, name, slug, club_id')
     .eq('slug', tournamentSlug)
     .single();
 
   if (!tournament) notFound();
+
+  // Check if the current user is a club manager for this tournament
+  // Managers get clickable match tiles; everyone else gets read-only view
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  let isManager = false;
+  if (user) {
+    const { data: mgr } = await admin
+      .from('club_managers')
+      .select('role')
+      .eq('club_id', (tournament as { club_id: string }).club_id)
+      .eq('player_id', user.id)
+      .maybeSingle();
+    isManager = !!mgr;
+  }
 
   // Look up category by slug + tournament_id
   const { data: cat } = await admin
@@ -129,7 +144,7 @@ export default async function PublicDrawPage({ params }: Props) {
               <h2 className="mb-4 text-sm font-semibold uppercase tracking-widest text-slate-500">
                 {cat.draw_format === 'group_stage_knockout' ? 'Bracket' : 'Draw'}
               </h2>
-              <BracketView matches={matches} format={cat.draw_format} tournamentSlug={tournamentSlug} />
+              <BracketView matches={matches} format={cat.draw_format} tournamentSlug={tournamentSlug} readOnly={!isManager} />
             </div>
           </>
         )}

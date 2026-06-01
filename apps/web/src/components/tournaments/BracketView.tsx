@@ -15,17 +15,27 @@ interface Props {
 function MatchCard({ match, tournamentSlug, readOnly }: { match: MatchWithPlayers; tournamentSlug: string; readOnly?: boolean }) {
   const isCompleted = match.status === 'completed' || match.status === 'walkover';
 
+  const sets = Array.isArray(match.sets)
+    ? (match.sets as { score_a: number; score_b: number }[])
+    : [];
+
+  // Per-player set scores — only shown once the match is done
+  const aScores = isCompleted ? sets.map((s) => s.score_a) : [];
+  const bScores = isCompleted ? sets.map((s) => s.score_b) : [];
+
   function PlayerRow({
     entry,
     isWinner,
+    setScores,
   }: {
     entry: MatchWithPlayers['entry_a'];
     isWinner: boolean;
+    setScores: number[];
   }) {
     const isBye = entry === null;
     return (
       <div
-        className={`flex items-center gap-2 px-3 py-1.5 ${
+        className={`flex items-center gap-1.5 px-3 py-1.5 ${
           isWinner ? 'bg-brand-600/20' : ''
         }`}
       >
@@ -40,7 +50,7 @@ function MatchCard({ match, tournamentSlug, readOnly }: { match: MatchWithPlayer
 
         {/* Name */}
         <span
-          className={`truncate text-xs ${
+          className={`flex-1 truncate text-xs ${
             isBye
               ? 'italic text-slate-600'
               : isWinner
@@ -53,8 +63,17 @@ function MatchCard({ match, tournamentSlug, readOnly }: { match: MatchWithPlayer
           {isBye ? 'BYE' : entry.partner_name ? `${entry.player_name} / ${entry.partner_name}` : entry.player_name}
         </span>
 
+        {/* Per-set scores next to name */}
+        {setScores.length > 0 && (
+          <span className={`shrink-0 flex gap-1 font-mono text-[11px] tabular-nums ${
+            isWinner ? 'font-semibold text-white' : 'text-slate-500'
+          }`}>
+            {setScores.map((s, i) => <span key={i}>{s}</span>)}
+          </span>
+        )}
+
         {/* Winner tick */}
-        {isWinner && <span className="ml-auto shrink-0 text-xs text-brand-400">✓</span>}
+        {isWinner && <span className="shrink-0 text-[10px] text-brand-400 ml-0.5">✓</span>}
       </div>
     );
   }
@@ -65,23 +84,11 @@ function MatchCard({ match, tournamentSlug, readOnly }: { match: MatchWithPlayer
   // Auto-advance byes
   const isByeMatch = match.entry_a === null || match.entry_b === null;
 
-  const sets = Array.isArray(match.sets)
-    ? (match.sets as { score_a: number; score_b: number }[])
-    : [];
-
   const inner = (
     <>
-      <PlayerRow entry={match.entry_a} isWinner={aWins} />
+      <PlayerRow entry={match.entry_a} isWinner={aWins} setScores={aScores} />
       <div className="border-t border-surface-border" />
-      <PlayerRow entry={match.entry_b} isWinner={bWins} />
-      {/* Score footer — only visible once the match is done */}
-      {isCompleted && sets.length > 0 && (
-        <div className="border-t border-surface-border bg-black/20 px-3 py-1">
-          <p className="text-[10px] font-mono text-center text-slate-500">
-            {sets.map((s) => `${s.score_a}–${s.score_b}`).join('  ')}
-          </p>
-        </div>
-      )}
+      <PlayerRow entry={match.entry_b} isWinner={bWins} setScores={bScores} />
     </>
   );
 
@@ -392,20 +399,17 @@ function RoundRobinMatchList({
             ? (m.sets as { score_a: number; score_b: number }[])
             : [];
           const isDone = m.status === 'completed' || m.status === 'walkover';
-          const scoreLabel = isDone && matchSets.length > 0
-            ? matchSets.map((s) => `${s.score_a}–${s.score_b}`).join('  ')
-            : null;
+
+          // Per-player scores shown inline next to each name
+          const aScores = isDone ? matchSets.map((s) => s.score_a) : undefined;
+          const bScores = isDone ? matchSets.map((s) => s.score_b) : undefined;
 
           const rowContent = (
             <>
-              <PlayerChip entry={m.entry_a} winnerId={m.winner_entry_id} />
+              <PlayerChip entry={m.entry_a} winnerId={m.winner_entry_id} setScores={aScores} />
               <span className="shrink-0 text-xs font-bold text-slate-600">vs</span>
-              <PlayerChip entry={m.entry_b} winnerId={m.winner_entry_id} />
-              {scoreLabel ? (
-                <span className="shrink-0 text-xs font-mono text-slate-400">{scoreLabel}</span>
-              ) : (
-                <StatusBadge status={m.status} />
-              )}
+              <PlayerChip entry={m.entry_b} winnerId={m.winner_entry_id} setScores={bScores} />
+              {!isDone && <StatusBadge status={m.status} />}
             </>
           );
 
@@ -495,25 +499,37 @@ function RoundRobinBracket({ matches, tournamentSlug, readOnly, format }: { matc
 function PlayerChip({
   entry,
   winnerId,
+  setScores,
 }: {
   entry: MatchWithPlayers['entry_a'];
   winnerId: string | null;
+  setScores?: number[];
 }) {
   const isWinner = entry !== null && winnerId === entry.id;
   return (
-    <span
-      className={`flex-1 truncate text-sm ${
-        entry === null
-          ? 'italic text-slate-600'
-          : isWinner
-            ? 'font-semibold text-white'
-            : winnerId
-              ? 'text-slate-500'
-              : 'text-slate-300'
-      }`}
-    >
-      {entry?.seed ? <span className="mr-1 text-xs text-brand-400">[{entry.seed}]</span> : null}
-      {entry ? (entry.partner_name ? `${entry.player_name} / ${entry.partner_name}` : entry.player_name) : 'TBD'}
+    <span className="flex flex-1 items-center gap-1.5 min-w-0">
+      <span
+        className={`flex-1 truncate text-sm ${
+          entry === null
+            ? 'italic text-slate-600'
+            : isWinner
+              ? 'font-semibold text-white'
+              : winnerId
+                ? 'text-slate-500'
+                : 'text-slate-300'
+        }`}
+      >
+        {entry?.seed ? <span className="mr-1 text-xs text-brand-400">[{entry.seed}]</span> : null}
+        {entry ? (entry.partner_name ? `${entry.player_name} / ${entry.partner_name}` : entry.player_name) : 'TBD'}
+      </span>
+      {setScores && setScores.length > 0 && (
+        <span className={`shrink-0 flex gap-1 font-mono text-xs tabular-nums ${
+          isWinner ? 'font-semibold text-white' : 'text-slate-500'
+        }`}>
+          {setScores.map((s, i) => <span key={i}>{s}</span>)}
+        </span>
+      )}
+      {isWinner && <span className="shrink-0 text-[10px] text-brand-400">✓</span>}
     </span>
   );
 }
