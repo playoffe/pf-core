@@ -3,17 +3,32 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-const TABS = [
+interface Tab {
+  label: string;
+  href: string;
+  /** If true, only shown when showSocialTab is enabled */
+  socialOnly?: boolean;
+}
+
+const TABS: Tab[] = [
   { label: 'Profile',       href: '/settings/profile' },
   { label: 'Notifications', href: '/settings/notifications' },
+  { label: 'Social media',  href: '/settings/social', socialOnly: true },
   { label: 'Account',       href: '/settings/account' },
 ];
 
-export function SettingsTabNav() {
+interface Props {
+  /** Controlled by the social_media feature flag — false hides the Social media tab */
+  showSocialTab?: boolean;
+}
+
+export function SettingsTabNav({ showSocialTab = true }: Props) {
   const pathname = usePathname();
+  const visibleTabs = TABS.filter((t) => !t.socialOnly || showSocialTab);
+
   return (
-    <div className="mb-8 flex gap-2 text-sm">
-      {TABS.map((tab) => (
+    <div className="mb-8 flex flex-wrap gap-2 text-sm">
+      {visibleTabs.map((tab) => (
         <Link
           key={tab.href}
           href={tab.href}
