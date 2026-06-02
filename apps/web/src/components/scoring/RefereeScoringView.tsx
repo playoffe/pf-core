@@ -171,6 +171,8 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
   const [manualWinnerId, setManualWinnerId] = useState<string | null>(null);
   /** Entry ID selected as first server for the currently open match */
   const [servingEntryId, setServingEntryId] = useState<string | null>(null);
+  // Keep a ref so the debounced auto-save closure always reads the latest serve
+  const servingEntryIdRef = useRef<string | null>(null);
 
   // ── Per-match score cache: persists the last saved score so closed tiles
   //    and paused cards still show it (keyed by matchId)
@@ -225,6 +227,7 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
     setAutoSaveStatus('idle');
     setManualWinnerId(null);
     setServingEntryId(null); // reset serving selection for new match
+    servingEntryIdRef.current = null;
     setActiveMatchId(matchId);
     setEditingSets(bestSets.length > 0 ? bestSets : [{ score_a: 0, score_b: 0 }]);
     setError(null);
@@ -257,7 +260,8 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
       setAutoSaveStatus('pending');
       autoSaveTimer.current = setTimeout(async () => {
         setAutoSaveStatus('saving');
-        const result = await saveScoreAsRefereeAction(matchId, pin, pendingSets.current);
+        // Pass the latest serving team so the display screen always sees the correct server
+        const result = await saveScoreAsRefereeAction(matchId, pin, pendingSets.current, servingEntryIdRef.current);
         if (result?.error) {
           setAutoSaveStatus('error');
         } else {
@@ -370,13 +374,18 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
     const winBy = match.win_by ?? 2;
     const isRally = match.scoring_format === 'rally';
 
-    /** Increment score AND auto-switch serve in rally mode. */
+    /** Increment score AND auto-switch serve in rally mode.
+     *  The new server is immediately written to the DB so the display screen
+     *  reflects it on the very next Realtime event — no waiting for the debounce. */
     function handlePlusClick(setIndex: number, field: 'score_a' | 'score_b') {
       updateSet(setIndex, field, editingSets[setIndex][field] + 1);
       if (isRally && servingEntryId !== null) {
         const scoringEntryId = field === 'score_a' ? match.entry_a?.id : match.entry_b?.id;
         if (scoringEntryId && scoringEntryId !== servingEntryId) {
           setServingEntryId(scoringEntryId);
+          servingEntryIdRef.current = scoringEntryId;
+          // Save immediately — don't wait for the 1500 ms debounce
+          void saveScoreAsRefereeAction(match.id, pin, editingSets, scoringEntryId);
         }
       }
     }
@@ -532,7 +541,11 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
                 return (
                   <button
                     key={entry.id}
-                    onClick={() => setServingEntryId(isSelected ? null : entry.id)}
+                    onClick={() => {
+                      const next = isSelected ? null : entry.id;
+                      setServingEntryId(next);
+                      servingEntryIdRef.current = next;
+                    }}
                     className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-colors ${
                       isSelected
                         ? 'bg-amber-500/20 text-amber-300 ring-2 ring-amber-500/40'

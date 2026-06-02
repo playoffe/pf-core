@@ -86,6 +86,8 @@ export function MatchScoreCard({
   const [winnerEntryId, setWinnerEntryId] = useState<string | null>(initialWinner);
   const [manualWinner, setManualWinner] = useState<string | null>(null);
   const [servingEntryId, setServingEntryId] = useState<string | null>(initialServingEntryId);
+  // Keep a ref so the debounced auto-save closure always reads the latest serve
+  const servingEntryIdRef = useRef<string | null>(initialServingEntryId);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -105,7 +107,8 @@ export function MatchScoreCard({
     setAutoSaveStatus('pending');
     autoSaveTimer.current = setTimeout(async () => {
       setAutoSaveStatus('saving');
-      const result = await saveScoreAction(matchId, pendingSets.current);
+      // Pass the latest serving team so the display screen always sees the correct server
+      const result = await saveScoreAction(matchId, pendingSets.current, servingEntryIdRef.current);
       if (result?.error) {
         setAutoSaveStatus('error');
       } else {
@@ -166,17 +169,21 @@ export function MatchScoreCard({
   /**
    * Handles a + button click: increments the score AND, in rally scoring,
    * automatically switches the serve when the non-serving team wins the point.
+   * The new serving team is immediately persisted to the DB so the display
+   * screen reflects it as soon as the next Realtime event fires.
    */
   function handleScoreIncrement(index: number, field: 'score_a' | 'score_b') {
     updateSet(index, field, sets[index][field] + 1);
 
     if (scoringFormat === 'rally' && status === 'in_progress' && servingEntryId !== null) {
       const scoringEntryId = field === 'score_a' ? entryA?.id : entryB?.id;
-      // Non-serving team won the point → serve passes to them
       if (scoringEntryId && scoringEntryId !== servingEntryId) {
+        // Non-serving team won the point → serve passes to them
         setServingEntryId(scoringEntryId);
+        servingEntryIdRef.current = scoringEntryId;
+        // Save immediately — don't wait for the 1500 ms debounce
+        void saveScoreAction(matchId, sets, scoringEntryId);
       }
-      // Serving team won the point → serve stays, no change needed
     }
   }
 
@@ -615,7 +622,11 @@ export function MatchScoreCard({
               return (
                 <button
                   key={entry.id}
-                  onClick={() => setServingEntryId(isSelected ? null : entry.id)}
+                  onClick={() => {
+                    const next = isSelected ? null : entry.id;
+                    setServingEntryId(next);
+                    servingEntryIdRef.current = next;
+                  }}
                   className={`flex-1 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold transition-colors ${
                     isSelected
                       ? 'bg-amber-500/20 text-amber-300 ring-2 ring-amber-500/50'

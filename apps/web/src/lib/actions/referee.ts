@@ -500,6 +500,7 @@ export async function saveScoreAsRefereeAction(
   matchId: string,
   pin: string,
   sets: { score_a: number; score_b: number }[],
+  servingEntryId?: string | null,
 ) {
   const validated = await validateRefereePinAction(pin);
   if (!validated.success) return { error: validated.error ?? 'Invalid PIN' };
@@ -516,12 +517,13 @@ export async function saveScoreAsRefereeAction(
   if (!match) return { error: 'Match not found' };
   if (match.status !== 'in_progress') return { error: 'Match is not in progress' };
 
-  const { error } = await admin
-    .from('matches')
-    .update({
-      sets: sets.map((s, i) => ({ set_number: i + 1, score_a: s.score_a, score_b: s.score_b })),
-    })
-    .eq('id', matchId);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const patch: Record<string, any> = {
+    sets: sets.map((s, i) => ({ set_number: i + 1, score_a: s.score_a, score_b: s.score_b })),
+  };
+  if (servingEntryId !== undefined) patch.serving_entry_id = servingEntryId;
+
+  const { error } = await admin.from('matches').update(patch).eq('id', matchId);
 
   if (error) return { error: 'Failed to save score' };
 
