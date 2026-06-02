@@ -270,11 +270,11 @@ function LiveScoresSlide({ matches, entryLabel, entryPlayers, parseSets, catName
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1.5vh' }}>
                 {/* Team A row */}
                 <div className="flex items-center justify-between">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6vw', flex: 1, minWidth: 0 }}>
-                    {m.serving_entry_id === m.entry_a_id && (
-                      <span title="Serving" style={{ width: '0.75vw', height: '0.75vw', borderRadius: '50%', background: '#f59e0b', flexShrink: 0, boxShadow: '0 0 0.4vw rgba(245,158,11,0.5)' }} />
-                    )}
+                  <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
                     <PlayerNameCell id={m.entry_a_id} isWinner={aWins > bWins} entryPlayers={entryPlayers} />
+                    {/* Dot always occupies the same space — transparent when not serving so
+                        neither the name nor the scores ever shift position */}
+                    <span title={m.serving_entry_id === m.entry_a_id ? 'Serving' : undefined} style={{ marginLeft: '0.6vw', flexShrink: 0, width: '0.75vw', height: '0.75vw', borderRadius: '50%', background: m.serving_entry_id === m.entry_a_id ? '#f59e0b' : 'transparent', boxShadow: m.serving_entry_id === m.entry_a_id ? '0 0 0.4vw rgba(245,158,11,0.5)' : 'none' }} />
                   </div>
                   <div className="flex items-center gap-[1vw]">
                     {sets.map((s, i) => <span key={i} style={{ fontSize: '2.5vw', fontWeight: 700, color: s.score_a > s.score_b ? '#ffffff' : '#64748b', minWidth: '2vw', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{s.score_a}</span>)}
@@ -284,11 +284,9 @@ function LiveScoresSlide({ matches, entryLabel, entryPlayers, parseSets, catName
                 <div style={{ height: '1px', background: '#1e293b' }} />
                 {/* Team B row */}
                 <div className="flex items-center justify-between">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6vw', flex: 1, minWidth: 0 }}>
-                    {m.serving_entry_id === m.entry_b_id && (
-                      <span title="Serving" style={{ width: '0.75vw', height: '0.75vw', borderRadius: '50%', background: '#f59e0b', flexShrink: 0, boxShadow: '0 0 0.4vw rgba(245,158,11,0.5)' }} />
-                    )}
+                  <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
                     <PlayerNameCell id={m.entry_b_id} isWinner={bWins > aWins} entryPlayers={entryPlayers} />
+                    <span title={m.serving_entry_id === m.entry_b_id ? 'Serving' : undefined} style={{ marginLeft: '0.6vw', flexShrink: 0, width: '0.75vw', height: '0.75vw', borderRadius: '50%', background: m.serving_entry_id === m.entry_b_id ? '#f59e0b' : 'transparent', boxShadow: m.serving_entry_id === m.entry_b_id ? '0 0 0.4vw rgba(245,158,11,0.5)' : 'none' }} />
                   </div>
                   <div className="flex items-center gap-[1vw]">
                     {sets.map((s, i) => <span key={i} style={{ fontSize: '2.5vw', fontWeight: 700, color: s.score_b > s.score_a ? '#ffffff' : '#64748b', minWidth: '2vw', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{s.score_b}</span>)}
