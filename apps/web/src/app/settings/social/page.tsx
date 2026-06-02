@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { isFeatureEnabled } from '@/lib/features';
 import {
   getSocialConnectionsAction,
   getSocialPostPrefsAction,
@@ -20,6 +21,10 @@ interface Props {
 }
 
 export default async function SocialSettingsPage({ searchParams }: Props) {
+  // Hard gate — defence in depth even if the tab is hidden
+  const socialEnabled = await isFeatureEnabled('social_media');
+  if (!socialEnabled) redirect('/settings/profile');
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login?return=/settings/social');
