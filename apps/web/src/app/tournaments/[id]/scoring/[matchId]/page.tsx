@@ -137,12 +137,20 @@ export default async function MatchScoringPage({ params }: Props) {
           <h1 className="text-xl font-bold text-white truncate">
             {[tc?.name, match.round_name, match.group_name].filter(Boolean).join(' · ')}
           </h1>
-          {/* Court / referee assignment info — updates live via Realtime */}
-          <MatchAssignmentBadges
-            matchId={matchId}
-            initialCourt={match.court}
-            initialRefereeName={(match as any).assigned_referee_name ?? null}
-          />
+          {/* Court/referee badges (left) + back link (right) — same row */}
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <MatchAssignmentBadges
+              matchId={matchId}
+              initialCourt={match.court}
+              initialRefereeName={(match as any).assigned_referee_name ?? null}
+            />
+            <Link
+              href={`/tournaments/${slug}/scoring`}
+              className="shrink-0 text-xs text-slate-400 hover:text-white transition-colors"
+            >
+              ← Back to scoring hub
+            </Link>
+          </div>
         </div>
 
         {/* Player self-report link — only for unscored matches */}

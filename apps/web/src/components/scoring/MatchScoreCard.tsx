@@ -989,15 +989,6 @@ export function MatchScoreCard({
         </div>
       )}
 
-      {/* Back link */}
-      <div className="pt-2">
-        <a
-          href={`/tournaments/${tournamentSlug}/scoring`}
-          className="text-xs text-slate-400 hover:text-white transition-colors"
-        >
-          ← Back to scoring hub
-        </a>
-      </div>
     </div>
   );
 }
