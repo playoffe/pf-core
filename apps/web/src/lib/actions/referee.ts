@@ -269,10 +269,19 @@ export async function getRefereeMatchesAction(pin: string, refereeName?: string)
   const SELECT = `
     id, round, round_name, group_name, court, status, sets, winner_entry_id,
     assigned_referee_name, paused_for_reassignment, restart_requested, restart_requested_reason,
-    assigned_at, completed_at,
+    assigned_at, completed_at, serving_entry_id, server_number,
     ea:tournament_entries!entry_a_id(id, seed, players!player_id(full_name, username), partner:players!partner_id(full_name)),
-    eb:tournament_entries!entry_b_id(id, seed, players!player_id(full_name, username), partner:players!partner_id(full_name))
+    eb:tournament_entries!entry_b_id(id, seed, players!player_id(full_name, username), partner:players!partner_id(full_name)),
+    tc:tournament_categories!category_id(scoring_override, scoring_format, points_per_set, win_by)
   `;
+
+  // Fetch tournament-level scoring defaults as a fallback
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: tScoring } = await (admin as any)
+    .from('tournaments')
+    .select('scoring_format, points_per_set, win_by')
+    .eq('id', validated.tournament.id)
+    .single() as { data: { scoring_format: string | null; points_per_set: number | null; win_by: number | null } | null };
 
   // Build active and completed queries in parallel
   let activeQ = admin
@@ -336,6 +345,11 @@ export async function getRefereeMatchesAction(pin: string, refereeName?: string)
   function formatMatch(m: Record<string, unknown>) {
     const ea = m.ea as EntryRaw;
     const eb = m.eb as EntryRaw;
+    const tc = m.tc as { scoring_override: boolean; scoring_format: string | null; points_per_set: number | null; win_by: number | null } | null;
+    // Resolve effective scoring: category override → tournament default → built-in default
+    const pointsPerSet = (tc?.scoring_override ? tc?.points_per_set : null) ?? tScoring?.points_per_set ?? 11;
+    const winBy = (tc?.scoring_override ? tc?.win_by : null) ?? tScoring?.win_by ?? 2;
+    const scoringFormat = ((tc?.scoring_override ? tc?.scoring_format : null) ?? tScoring?.scoring_format ?? 'traditional') as 'rally' | 'traditional';
     return {
       id: m.id as string,
       round: m.round as number,
@@ -363,13 +377,20 @@ export async function getRefereeMatchesAction(pin: string, refereeName?: string)
         player_name: eb.players?.full_name ?? 'Unknown',
         partner_name: eb.partner?.full_name ?? null,
       } : null,
+      points_per_set: pointsPerSet,
+      win_by: winBy,
+      scoring_format: scoringFormat,
+      serving_entry_id: (m.serving_entry_id ?? null) as string | null,
+      server_number: (m.server_number ?? null) as number | null,
     };
   }
 
   return {
     success: true,
-    matches: (activeRaw ?? []).map(formatMatch),
-    completedMatches: (completedRaw ?? []).map(formatMatch),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    matches: ((activeRaw ?? []) as any[]).map(formatMatch),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    completedMatches: ((completedRaw ?? []) as any[]).map(formatMatch),
     tournament: validated.tournament,
   };
 }
@@ -443,7 +464,7 @@ export async function pauseMatchAsRefereeAction(matchId: string, pin: string) {
 }
 
 // ── Start a match as referee (PIN-authenticated) ───────────────────────────────
-export async function startMatchAsRefereeAction(matchId: string, pin: string) {
+export async function startMatchAsRefereeAction(matchId: string, pin: string, servingEntryId?: string | null, serverNumber?: 1 | 2 | null) {
   const validated = await validateRefereePinAction(pin);
   if (!validated.success || !validated.tournament) {
     return { error: validated.error ?? 'Invalid PIN' };
@@ -461,14 +482,16 @@ export async function startMatchAsRefereeAction(matchId: string, pin: string) {
   if (!match) return { error: 'Match not found' };
   if (match.status !== 'scheduled') return { error: 'Match is not in scheduled state' };
 
-  const { error } = await admin
-    .from('matches')
-    .update({
-      status: 'in_progress',
-      started_at: new Date().toISOString(),
-      paused_for_reassignment: false,
-    })
-    .eq('id', matchId);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const patch: Record<string, any> = {
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+    paused_for_reassignment: false,
+  };
+  if (servingEntryId) patch.serving_entry_id = servingEntryId;
+  if (serverNumber !== undefined) patch.server_number = serverNumber;
+
+  const { error } = await admin.from('matches').update(patch).eq('id', matchId);
 
   if (error) return { error: 'Failed to start match' };
 
@@ -482,6 +505,8 @@ export async function saveScoreAsRefereeAction(
   matchId: string,
   pin: string,
   sets: { score_a: number; score_b: number }[],
+  servingEntryId?: string | null,
+  serverNumber?: number | null,
 ) {
   const validated = await validateRefereePinAction(pin);
   if (!validated.success) return { error: validated.error ?? 'Invalid PIN' };
@@ -498,12 +523,14 @@ export async function saveScoreAsRefereeAction(
   if (!match) return { error: 'Match not found' };
   if (match.status !== 'in_progress') return { error: 'Match is not in progress' };
 
-  const { error } = await admin
-    .from('matches')
-    .update({
-      sets: sets.map((s, i) => ({ set_number: i + 1, score_a: s.score_a, score_b: s.score_b })),
-    })
-    .eq('id', matchId);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const patch: Record<string, any> = {
+    sets: sets.map((s, i) => ({ set_number: i + 1, score_a: s.score_a, score_b: s.score_b })),
+  };
+  if (servingEntryId !== undefined) patch.serving_entry_id = servingEntryId;
+  if (serverNumber !== undefined) patch.server_number = serverNumber;
+
+  const { error } = await admin.from('matches').update(patch).eq('id', matchId);
 
   if (error) return { error: 'Failed to save score' };
 

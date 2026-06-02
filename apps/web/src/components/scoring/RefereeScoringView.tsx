@@ -37,6 +37,16 @@ interface Match {
   completed_at: string | null;
   entry_a: Entry | null;
   entry_b: Entry | null;
+  /** Points to win a set (from category/tournament config) */
+  points_per_set: number;
+  /** Lead required to win a set (win-by) */
+  win_by: number;
+  /** 'rally' = serve switches when non-serving team wins a point */
+  scoring_format: 'rally' | 'traditional';
+  /** Current server number within the serving team (1 or 2). Traditional only. */
+  server_number: number | null;
+  /** Entry ID of the currently assigned server (may be pre-set from DB) */
+  serving_entry_id: string | null;
 }
 
 type AutoSaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
@@ -163,6 +173,12 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
     { score_a: 0, score_b: 0 },
   ]);
   const [manualWinnerId, setManualWinnerId] = useState<string | null>(null);
+  /** Entry ID selected as first server for the currently open match */
+  const [servingEntryId, setServingEntryId] = useState<string | null>(null);
+  const servingEntryIdRef = useRef<string | null>(null);
+  /** Server number within the serving team (1 or 2). Traditional scoring only. */
+  const [serverNumber, setServerNumber] = useState<number | null>(null);
+  const serverNumberRef = useRef<number | null>(null);
 
   // ── Per-match score cache: persists the last saved score so closed tiles
   //    and paused cards still show it (keyed by matchId)
@@ -209,13 +225,29 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
 
   // ── Score entry helpers ───────────────────────────────────────────────────
 
-  function openMatch(matchId: string, serverSets: { score_a: number; score_b: number }[]) {
+  function openMatch(
+    matchId: string,
+    serverSets: { score_a: number; score_b: number }[],
+    /** Override the serving team — required right after handleStart because
+     *  the matches prop is still stale (router.refresh hasn't resolved yet). */
+    servingIdOverride?: string | null,
+    /** Override the server number — same reason. */
+    serverNumOverride?: number | null,
+  ) {
     // savedScores may be more up-to-date than the server prop if this session
     // has already auto-saved some scores for this match
     const bestSets = savedScores.get(matchId) ?? serverSets;
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     setAutoSaveStatus('idle');
     setManualWinnerId(null);
+    // Prefer caller-supplied overrides; fall back to DB values from the matches prop.
+    const openedMatch = matches.find((m) => m.id === matchId);
+    const seedServing = servingIdOverride !== undefined ? servingIdOverride : (openedMatch?.serving_entry_id ?? null);
+    const seedServerNum = serverNumOverride !== undefined ? serverNumOverride : (openedMatch?.server_number ?? null);
+    setServingEntryId(seedServing);
+    servingEntryIdRef.current = seedServing;
+    setServerNumber(seedServerNum);
+    serverNumberRef.current = seedServerNum;
     setActiveMatchId(matchId);
     setEditingSets(bestSets.length > 0 ? bestSets : [{ score_a: 0, score_b: 0 }]);
     setError(null);
@@ -248,7 +280,8 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
       setAutoSaveStatus('pending');
       autoSaveTimer.current = setTimeout(async () => {
         setAutoSaveStatus('saving');
-        const result = await saveScoreAsRefereeAction(matchId, pin, pendingSets.current);
+        // Pass the latest serving team so the display screen always sees the correct server
+        const result = await saveScoreAsRefereeAction(matchId, pin, pendingSets.current, servingEntryIdRef.current, serverNumberRef.current);
         if (result?.error) {
           setAutoSaveStatus('error');
         } else {
@@ -283,14 +316,23 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
   async function handleStart(matchId: string) {
     setStartingMatch(matchId);
     setError(null);
-    const result = await startMatchAsRefereeAction(matchId, pin);
+    // Traditional: first serve always starts at server 2
+    const openedMatch = matches.find((m) => m.id === matchId);
+    const isTraditional = openedMatch?.scoring_format === 'traditional';
+    const startingServerNum: 1 | 2 | null = isTraditional ? 2 : null;
+    const result = await startMatchAsRefereeAction(matchId, pin, servingEntryId, startingServerNum);
     if (result?.error) {
       setError(result.error);
     } else {
       setLocallyStarted((prev) => new Set([...prev, matchId]));
-      // Open the scoring panel immediately
+      // Open the scoring panel immediately.
+      // Pass serving state as overrides — the matches prop is stale at this
+      // point (router.refresh hasn't resolved yet) so openMatch must not read
+      // from it. Without overrides it would reset servingEntryId → null and
+      // hide the Second Serve / Side-out button and the X–Y–Z score badge.
       const match = matches.find((m) => m.id === matchId);
-      openMatch(matchId, match?.sets ?? []);
+      const startingServerNum = isTraditional ? 2 : null;
+      openMatch(matchId, match?.sets ?? [], servingEntryId, startingServerNum);
       router.refresh();
     }
     setStartingMatch(null);
@@ -357,59 +399,263 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
     const isInProgress =
       locallyStarted.has(match.id) || match.status === 'in_progress';
 
+    const pointsPerSet = match.points_per_set ?? 11;
+    const winBy = match.win_by ?? 2;
+    const isRally = match.scoring_format === 'rally';
+
+    /** Increment score AND auto-switch serve in rally mode.
+     *  Traditional: only the serving team's + increments score.
+     *  Side-out is handled by the dedicated ↩ button. */
+    function handlePlusClick(setIndex: number, field: 'score_a' | 'score_b') {
+      // Traditional: block receiving team from scoring via +
+      if (!isRally && servingEntryId !== null) {
+        const servingField = servingEntryId === match.entry_a?.id ? 'score_a' : 'score_b';
+        if (field !== servingField) return;
+      }
+
+      updateSet(setIndex, field, editingSets[setIndex][field] + 1);
+
+      if (isRally && servingEntryId !== null) {
+        const scoringEntryId = field === 'score_a' ? match.entry_a?.id : match.entry_b?.id;
+        if (scoringEntryId && scoringEntryId !== servingEntryId) {
+          setServingEntryId(scoringEntryId);
+          servingEntryIdRef.current = scoringEntryId;
+          void saveScoreAsRefereeAction(match.id, pin, editingSets, scoringEntryId, serverNumberRef.current);
+        }
+      }
+    }
+
+    /** Side-out for traditional scoring. */
+    function handleSideOut() {
+      if (isRally || servingEntryId === null) return;
+
+      let newServingId: string | null = servingEntryId;
+      let newServerNum: number;
+
+      if (serverNumber === 1) {
+        newServerNum = 2; // same team, server 2
+      } else {
+        // server 2 faulted → pass to opponent at server 1
+        newServingId = servingEntryId === match.entry_a?.id
+          ? (match.entry_b?.id ?? null)
+          : (match.entry_a?.id ?? null);
+        newServerNum = 1;
+      }
+
+      setServingEntryId(newServingId);
+      servingEntryIdRef.current = newServingId;
+      setServerNumber(newServerNum);
+      serverNumberRef.current = newServerNum;
+      void saveScoreAsRefereeAction(match.id, pin, editingSets, newServingId, newServerNum);
+    }
+
+    /** Reset server number to 2 when a new set begins (traditional). */
+    function handleAddSetTraditional() {
+      addSet();
+      if (!isRally) {
+        setServerNumber(2);
+        serverNumberRef.current = 2;
+        void saveScoreAsRefereeAction(match.id, pin, editingSets, servingEntryIdRef.current, 2);
+      }
+    }
+
     return (
       <div className="border-t border-surface-border px-5 pb-5 pt-4 space-y-4">
-        {/* Set rows */}
-        <div className="space-y-3">
-          {editingSets.map((set, i) => (
-            <div key={i} className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-slate-500">Set {i + 1}</p>
-                {editingSets.length > 1 && (
+
+        {/* Serving Team picker — first so referee selects server before anything else */}
+        {!isInProgress && match.entry_a && match.entry_b && (
+          <div className="rounded-xl bg-surface ring-1 ring-surface-border p-3 space-y-2">
+            <p className="text-xs font-medium text-slate-400">Serving Team</p>
+            <div className="flex gap-2">
+              {[match.entry_a, match.entry_b].map((entry) => {
+                const isSelected = servingEntryId === entry.id;
+                return (
                   <button
-                    onClick={() => removeSet(i)}
-                    className="text-[10px] text-slate-600 hover:text-red-400 transition-colors"
+                    key={entry.id}
+                    onClick={() => {
+                      const next = isSelected ? null : entry.id;
+                      setServingEntryId(next);
+                      servingEntryIdRef.current = next;
+                    }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-colors ${
+                      isSelected
+                        ? 'bg-amber-500/20 text-amber-300 ring-2 ring-amber-500/40'
+                        : 'bg-surface-card text-slate-400 hover:text-white ring-1 ring-surface-border'
+                    }`}
                   >
-                    ✕
+                    {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />}
+                    {entryLabel(entry)}
                   </button>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex-1">
-                  <p className="text-[10px] text-slate-600 mb-1 truncate">{entryLabel(match.entry_a)}</p>
-                  <input
-                    type="number"
-                    min={0}
-                    max={99}
-                    value={set.score_a}
-                    onChange={(e) => updateSet(i, 'score_a', parseInt(e.target.value) || 0)}
-                    className="w-full rounded-lg border border-slate-700 bg-surface px-3 py-3 text-center text-lg font-bold text-white focus:border-brand-500 focus:outline-none"
-                  />
-                </div>
-                <span className="text-slate-600 font-bold text-sm">–</span>
-                <div className="flex-1">
-                  <p className="text-[10px] text-slate-600 mb-1 truncate">{entryLabel(match.entry_b)}</p>
-                  <input
-                    type="number"
-                    min={0}
-                    max={99}
-                    value={set.score_b}
-                    onChange={(e) => updateSet(i, 'score_b', parseInt(e.target.value) || 0)}
-                    className="w-full rounded-lg border border-slate-700 bg-surface px-3 py-3 text-center text-lg font-bold text-white focus:border-brand-500 focus:outline-none"
-                  />
-                </div>
-              </div>
+                );
+              })}
             </div>
-          ))}
+            {!servingEntryId && (
+              <p className="text-[10px] text-slate-600">Optional — tap to mark the first server</p>
+            )}
+          </div>
+        )}
+
+        {/* Target score indicator + announcement format for traditional */}
+        <div className="text-center space-y-1">
+          <p className="text-[11px] text-slate-600">
+            First to <span className="text-slate-400 font-semibold">{pointsPerSet}</span> pts · win by {winBy}
+          </p>
+          {isRally && servingEntryId !== null && (
+            <p className="text-[10px] text-amber-500/80">Rally scoring — serve switches automatically</p>
+          )}
+          {!isRally && servingEntryId !== null && serverNumber !== null && (
+            <div className="inline-flex items-center gap-1 rounded-lg bg-amber-500/10 ring-1 ring-amber-500/30 px-3 py-1">
+              <span className="text-sm font-black tabular-nums text-white">
+                {servingEntryId === match.entry_a?.id
+                  ? editingSets[editingSets.length - 1]?.score_a ?? 0
+                  : editingSets[editingSets.length - 1]?.score_b ?? 0}
+                <span className="text-slate-500 mx-1">–</span>
+                {servingEntryId === match.entry_a?.id
+                  ? editingSets[editingSets.length - 1]?.score_b ?? 0
+                  : editingSets[editingSets.length - 1]?.score_a ?? 0}
+                <span className="text-slate-500 mx-1">–</span>
+                <span className="text-amber-400">{serverNumber}</span>
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Set rows — large +/− touch buttons */}
+        <div className="space-y-4">
+          {editingSets.map((set, i) => {
+            const aLeads = set.score_a - set.score_b;
+            const bLeads = set.score_b - set.score_a;
+            const aWonSet = set.score_a >= pointsPerSet && aLeads >= winBy;
+            const bWonSet = set.score_b >= pointsPerSet && bLeads >= winBy;
+
+            return (
+              <div key={i} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-slate-500">Set {i + 1}</p>
+                  {editingSets.length > 1 && (
+                    <button
+                      onClick={() => removeSet(i)}
+                      className="text-[10px] text-slate-600 hover:text-red-400 transition-colors"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  {/* Team A */}
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center justify-center gap-1">
+                      {isInProgress && servingEntryId === match.entry_a?.id && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
+                      )}
+                      <p className="text-[10px] text-slate-600 text-center truncate">{entryLabel(match.entry_a)}</p>
+                      {isInProgress && !isRally && servingEntryId === match.entry_a?.id && serverNumber !== null && (
+                        <span className="text-[9px] font-bold text-amber-400 shrink-0">S{serverNumber}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => updateSet(i, 'score_a', set.score_a - 1)}
+                        disabled={set.score_a <= 0}
+                        className="h-11 w-11 shrink-0 rounded-xl bg-surface ring-1 ring-surface-border text-slate-400 hover:text-white hover:ring-slate-500 disabled:opacity-25 transition-colors text-xl font-bold"
+                      >
+                        −
+                      </button>
+                      <input
+                        type="number"
+                        min={0}
+                        max={99}
+                        value={set.score_a}
+                        onChange={(e) => updateSet(i, 'score_a', parseInt(e.target.value) || 0)}
+                        className={`flex-1 min-w-0 rounded-xl border px-2 py-2.5 text-center text-xl font-bold outline-none transition ${
+                          aWonSet ? 'border-accent-500/60 bg-accent-500/10 text-accent-300'
+                          : bWonSet ? 'border-red-900/30 bg-red-950/20 text-slate-500'
+                          : 'border-slate-700 bg-surface text-white focus:border-brand-500'
+                        }`}
+                      />
+                      <button
+                        onClick={() => handlePlusClick(i, 'score_a')}
+                        className="h-11 w-11 shrink-0 rounded-xl bg-brand-600 text-white hover:bg-brand-500 transition-colors text-xl font-bold"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <span className="text-slate-600 font-bold text-sm shrink-0">–</span>
+
+                  {/* Team B */}
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center justify-center gap-1">
+                      {isInProgress && servingEntryId === match.entry_b?.id && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
+                      )}
+                      <p className="text-[10px] text-slate-600 text-center truncate">{entryLabel(match.entry_b)}</p>
+                      {isInProgress && !isRally && servingEntryId === match.entry_b?.id && serverNumber !== null && (
+                        <span className="text-[9px] font-bold text-amber-400 shrink-0">S{serverNumber}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => updateSet(i, 'score_b', set.score_b - 1)}
+                        disabled={set.score_b <= 0}
+                        className="h-11 w-11 shrink-0 rounded-xl bg-surface ring-1 ring-surface-border text-slate-400 hover:text-white hover:ring-slate-500 disabled:opacity-25 transition-colors text-xl font-bold"
+                      >
+                        −
+                      </button>
+                      <input
+                        type="number"
+                        min={0}
+                        max={99}
+                        value={set.score_b}
+                        onChange={(e) => updateSet(i, 'score_b', parseInt(e.target.value) || 0)}
+                        className={`flex-1 min-w-0 rounded-xl border px-2 py-2.5 text-center text-xl font-bold outline-none transition ${
+                          bWonSet ? 'border-accent-500/60 bg-accent-500/10 text-accent-300'
+                          : aWonSet ? 'border-red-900/30 bg-red-950/20 text-slate-500'
+                          : 'border-slate-700 bg-surface text-white focus:border-brand-500'
+                        }`}
+                      />
+                      <button
+                        onClick={() => handlePlusClick(i, 'score_b')}
+                        className="h-11 w-11 shrink-0 rounded-xl bg-brand-600 text-white hover:bg-brand-500 transition-colors text-xl font-bold"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Add set */}
         <button
-          onClick={addSet}
+          onClick={isRally ? addSet : handleAddSetTraditional}
           className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
         >
           + Add set
         </button>
+
+        {/* Second Serve / Side-out button — traditional scoring only */}
+        {!isRally && servingEntryId !== null && (
+          <div className="rounded-xl bg-amber-950/20 ring-1 ring-amber-700/30 px-4 py-3 space-y-1.5">
+            <p className="text-[10px] font-semibold text-amber-400">
+              {serverNumber === 1 ? 'Second Serve' : 'Side-out'}
+            </p>
+            <p className="text-[10px] text-slate-500">
+              {serverNumber === 1
+                ? `Server 1 → Server 2 · same team keeps serve`
+                : `Server 2 → Opponent serves at Server 1`}
+            </p>
+            <button
+              onClick={handleSideOut}
+              className="w-full rounded-lg border border-amber-700/50 bg-amber-950/40 py-2 text-sm font-semibold text-amber-400 hover:bg-amber-900/40 transition-colors"
+            >
+              {serverNumber === 1 ? '↩ Second Serve' : '↩ Side-out'}
+            </button>
+          </div>
+        )}
 
         {/* Winner selector */}
         <div>
@@ -452,13 +698,20 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
               {submitting ? 'Saving…' : '■ End match'}
             </button>
           ) : (
-            <button
-              onClick={() => handleStart(match.id)}
-              disabled={startingMatch === match.id}
-              className="flex-1 rounded-xl bg-accent-600 py-3 text-sm font-semibold text-white hover:bg-accent-700 transition-colors disabled:opacity-40"
-            >
-              {startingMatch === match.id ? 'Starting…' : '▶ Start match'}
-            </button>
+            <div className="flex-1 space-y-1.5">
+              <button
+                onClick={() => handleStart(match.id)}
+                disabled={startingMatch === match.id || !servingEntryId}
+                className="w-full rounded-xl bg-accent-600 py-3 text-sm font-semibold text-white hover:bg-accent-700 transition-colors disabled:opacity-40"
+              >
+                {startingMatch === match.id ? 'Starting…' : '▶ Start match'}
+              </button>
+              {!servingEntryId && (
+                <p className="text-center text-[10px] text-amber-500/80">
+                  Select a serving team above to start
+                </p>
+              )}
+            </div>
           )}
           <button
             onClick={closeMatch}
@@ -614,6 +867,16 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
 
     // savedScores is more up-to-date than match.sets (which is server-fetched at page load)
     const displaySets = savedScores.get(match.id) ?? match.sets;
+    const isTraditionalMatch = match.scoring_format === 'traditional';
+    const latestSet = displaySets[displaySets.length - 1];
+    // For traditional scoring: show the announcement format X-Y-Z in the status strip
+    const announcementScore =
+      isStarted && isTraditionalMatch && match.serving_entry_id && match.server_number != null && latestSet
+        ? (() => {
+            const servingIsA = match.serving_entry_id === match.entry_a?.id;
+            return `${servingIsA ? latestSet.score_a : latestSet.score_b}–${servingIsA ? latestSet.score_b : latestSet.score_a}–${match.server_number}`;
+          })()
+        : null;
     const liveScore =
       isStarted && displaySets.length > 0
         ? displaySets.map((s) => `${s.score_a}–${s.score_b}`).join('  ')
@@ -630,10 +893,17 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
           <div className="flex items-center gap-2 border-b border-surface-border/40 bg-accent-950/20 px-5 py-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-accent-400 animate-pulse shrink-0" />
             <span className="text-[11px] font-semibold text-accent-400">In progress</span>
-            {liveScore
-              ? <span className="ml-auto text-sm font-mono font-bold text-accent-300">{liveScore}</span>
-              : <span className="ml-auto text-[11px] text-slate-600">no score yet</span>
-            }
+            <div className="ml-auto flex items-center gap-2">
+              {announcementScore && (
+                <span className="text-sm font-mono font-bold text-amber-400">{announcementScore}</span>
+              )}
+              {liveScore && !announcementScore && (
+                <span className="text-sm font-mono font-bold text-accent-300">{liveScore}</span>
+              )}
+              {!liveScore && !announcementScore && (
+                <span className="text-[11px] text-slate-600">no score yet</span>
+              )}
+            </div>
           </div>
         )}
 
@@ -649,9 +919,31 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
                 {match.court ? ` · Court ${match.court}` : ''}
               </p>
               <div className="space-y-0.5">
-                <p className="text-sm font-semibold text-white truncate">{entryLabel(match.entry_a)}</p>
+                {/* Team A — amber dot + S1/S2 badge when this team is serving */}
+                <div className="flex items-center gap-1.5 truncate">
+                  <p className="text-sm font-semibold text-white truncate">{entryLabel(match.entry_a)}</p>
+                  {isStarted && match.serving_entry_id === match.entry_a?.id && (
+                    <>
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
+                      {isTraditionalMatch && match.server_number != null && (
+                        <span className="text-[10px] font-bold text-amber-400 shrink-0">S{match.server_number}</span>
+                      )}
+                    </>
+                  )}
+                </div>
                 <p className="text-xs text-slate-500">vs</p>
-                <p className="text-sm font-semibold text-white truncate">{entryLabel(match.entry_b)}</p>
+                {/* Team B — amber dot + S1/S2 badge when this team is serving */}
+                <div className="flex items-center gap-1.5 truncate">
+                  <p className="text-sm font-semibold text-white truncate">{entryLabel(match.entry_b)}</p>
+                  {isStarted && match.serving_entry_id === match.entry_b?.id && (
+                    <>
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
+                      {isTraditionalMatch && match.server_number != null && (
+                        <span className="text-[10px] font-bold text-amber-400 shrink-0">S{match.server_number}</span>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
             <div className="shrink-0 text-right">

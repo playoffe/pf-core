@@ -31,6 +31,14 @@ export default async function MatchScoringPage({ params }: Props) {
     .single();
   if (!t) notFound();
 
+  // Fetch tournament-level scoring defaults (new columns — bypass generated types)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: tScoring } = await (admin as any)
+    .from('tournaments')
+    .select('scoring_format, points_per_set, win_by')
+    .eq('slug', slug)
+    .single() as { data: { scoring_format: string | null; points_per_set: number | null; win_by: number | null } | null };
+
   const { data: mgr } = await admin
     .from('club_managers')
     .select('role')
@@ -50,12 +58,13 @@ export default async function MatchScoringPage({ params }: Props) {
     : isAdminRole ? 'admin' : 'player';
   if (activeMode === 'player') redirect(`/events/${slug}`);
 
-  const { data: match } = await admin
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: match } = await (admin as any)
     .from('matches')
     .select(`
       id, round, round_name, group_name, status, court, sets,
       assigned_referee_name, paused_for_reassignment,
-      started_at, completed_at, winner_entry_id,
+      started_at, completed_at, winner_entry_id, serving_entry_id, server_number,
       player_reported_winner_id, player_reported_sets,
       ea:tournament_entries!entry_a_id(
         id, seed,
@@ -67,10 +76,10 @@ export default async function MatchScoringPage({ params }: Props) {
         players!player_id(id, full_name, username, global_stats(current_rating)),
         partner:players!partner_id(id, full_name, username)
       ),
-      tc:tournament_categories!category_id(id, name, play_format)
+      tc:tournament_categories!category_id(id, name, play_format, scoring_override, scoring_format, points_per_set, win_by)
     `)
     .eq('id', matchId)
-    .single();
+    .single() as { data: Record<string, any> | null };
 
   if (!match) notFound();
 
@@ -88,8 +97,17 @@ export default async function MatchScoringPage({ params }: Props) {
 
   const ea = match.ea as unknown as EntryDetail | null;
   const eb = match.eb as unknown as EntryDetail | null;
-  const tc = match.tc as unknown as { id: string; name: string; play_format: string } | null;
+  const tc = match.tc as unknown as {
+    id: string; name: string; play_format: string;
+    scoring_override: boolean; scoring_format: string | null;
+    points_per_set: number | null; win_by: number | null;
+  } | null;
   const isDoubles = tc?.play_format === 'doubles' || tc?.play_format === 'mixed_doubles';
+
+  // Resolve effective scoring config: category overrides tournament defaults
+  const effectivePointsPerSet = (tc?.scoring_override ? tc?.points_per_set : null) ?? tScoring?.points_per_set ?? 11;
+  const effectiveWinBy = (tc?.scoring_override ? tc?.win_by : null) ?? tScoring?.win_by ?? 2;
+  const effectiveScoringFormat = ((tc?.scoring_override ? tc?.scoring_format : null) ?? tScoring?.scoring_format ?? 'traditional') as 'rally' | 'traditional';
 
   // Build team display names (e.g. "Alice / Bob" for doubles)
   function teamName(entry: EntryDetail | null): string {
@@ -112,29 +130,27 @@ export default async function MatchScoringPage({ params }: Props) {
           <Link href={`/tournaments/${slug}/scoring`} className="hover:text-slate-300 transition-colors">
             Scoring
           </Link>
-          <span>/</span>
-          <span className="text-slate-400">
-            {teamName(ea)} vs {teamName(eb)}
-          </span>
         </nav>
 
         <div className="mb-6">
-          <p className="text-xs text-slate-500 mb-1">
-            {tc?.name ?? ''}
-            {match.round_name ? ` · ${match.round_name}` : ''}
-            {match.group_name ? ` · ${match.group_name}` : ''}
-          </p>
-          <h1 className="text-xl font-bold text-white">
-            {teamName(ea)}
-            <span className="mx-3 text-slate-600 font-normal">vs</span>
-            {teamName(eb)}
+          {/* Category · Round · Group — bold single line, no player names (shown in the score card below) */}
+          <h1 className="text-xl font-bold text-white truncate">
+            {[tc?.name, match.round_name, match.group_name].filter(Boolean).join(' · ')}
           </h1>
-          {/* Court / referee assignment info — updates live via Realtime */}
-          <MatchAssignmentBadges
-            matchId={matchId}
-            initialCourt={match.court}
-            initialRefereeName={(match as any).assigned_referee_name ?? null}
-          />
+          {/* Court/referee badges (left) + back link (right) — same row */}
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <MatchAssignmentBadges
+              matchId={matchId}
+              initialCourt={match.court}
+              initialRefereeName={(match as any).assigned_referee_name ?? null}
+            />
+            <Link
+              href={`/tournaments/${slug}/scoring`}
+              className="shrink-0 text-xs text-slate-400 hover:text-white transition-colors"
+            >
+              ← Back to scoring hub
+            </Link>
+          </div>
         </div>
 
         {/* Player self-report link — only for unscored matches */}
@@ -161,6 +177,11 @@ export default async function MatchScoringPage({ params }: Props) {
           maxCourts={t.court_count}
           initialSets={(match.sets as { set_number: number; score_a: number; score_b: number }[]) ?? []}
           winnerEntryId={match.winner_entry_id}
+          initialServingEntryId={(match as any).serving_entry_id ?? null}
+          initialServerNumber={(match as any).server_number ?? null}
+          pointsPerSet={effectivePointsPerSet}
+          winBy={effectiveWinBy}
+          scoringFormat={effectiveScoringFormat}
           entryA={ea ? {
             id: ea.id,
             seed: ea.seed,

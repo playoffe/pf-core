@@ -31,6 +31,16 @@ interface Props {
   winnerEntryId: string | null;
   entryA: EntryInfo | null;
   entryB: EntryInfo | null;
+  /** Entry ID of the team that serves first (null = not set) */
+  initialServingEntryId?: string | null;
+  /** Current server number (1 or 2) within the serving team. Only used in traditional scoring. */
+  initialServerNumber?: number | null;
+  /** Points needed to win a set (from category/tournament config). Default 11. */
+  pointsPerSet?: number;
+  /** Points lead required to win a set (e.g. 2 for win-by-2). Default 2. */
+  winBy?: number;
+  /** Scoring format — in rally mode serve auto-switches when the non-serving team wins a point. */
+  scoringFormat?: 'rally' | 'traditional';
   // Player self-report (optional)
   playerReportedWinnerId?: string | null;
   playerReportedSets?: SetScore[] | null;
@@ -58,6 +68,11 @@ export function MatchScoreCard({
   winnerEntryId: initialWinner,
   entryA,
   entryB,
+  initialServingEntryId = null,
+  initialServerNumber = null,
+  pointsPerSet = 11,
+  winBy = 2,
+  scoringFormat = 'traditional',
   playerReportedWinnerId,
   playerReportedSets,
   pausedForReassignment = false,
@@ -73,6 +88,12 @@ export function MatchScoreCard({
   );
   const [winnerEntryId, setWinnerEntryId] = useState<string | null>(initialWinner);
   const [manualWinner, setManualWinner] = useState<string | null>(null);
+  const [servingEntryId, setServingEntryId] = useState<string | null>(initialServingEntryId);
+  // Keep a ref so the debounced auto-save closure always reads the latest serve
+  const servingEntryIdRef = useRef<string | null>(initialServingEntryId);
+  /** Server number within the serving team (1 or 2). Traditional scoring only. */
+  const [serverNumber, setServerNumber] = useState<number | null>(initialServerNumber);
+  const serverNumberRef = useRef<number | null>(initialServerNumber);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -92,7 +113,8 @@ export function MatchScoreCard({
     setAutoSaveStatus('pending');
     autoSaveTimer.current = setTimeout(async () => {
       setAutoSaveStatus('saving');
-      const result = await saveScoreAction(matchId, pendingSets.current);
+      // Pass the latest serving team so the display screen always sees the correct server
+      const result = await saveScoreAction(matchId, pendingSets.current, servingEntryIdRef.current, serverNumberRef.current);
       if (result?.error) {
         setAutoSaveStatus('error');
       } else {
@@ -150,11 +172,82 @@ export function MatchScoreCard({
     if (status === 'in_progress') triggerAutoSave(next);
   }
 
+  /**
+   * Handles a + button click.
+   * • Rally: increments score; auto-switches serve when non-serving team scores.
+   * • Traditional: only the serving team's + increments score; receiving team's +
+   *   is intentionally not wired to this (use the Side-out button instead).
+   */
+  function handleScoreIncrement(index: number, field: 'score_a' | 'score_b') {
+    // Traditional: only serving team can score — silently ignore if receiving team's + is clicked
+    if (scoringFormat === 'traditional' && servingEntryId !== null) {
+      const servingField = servingEntryId === entryA?.id ? 'score_a' : 'score_b';
+      if (field !== servingField) return; // receiving team cannot score directly
+    }
+
+    updateSet(index, field, sets[index][field] + 1);
+
+    if (scoringFormat === 'rally' && status === 'in_progress' && servingEntryId !== null) {
+      const scoringEntryId = field === 'score_a' ? entryA?.id : entryB?.id;
+      if (scoringEntryId && scoringEntryId !== servingEntryId) {
+        // Non-serving team won the point → serve passes to them
+        setServingEntryId(scoringEntryId);
+        servingEntryIdRef.current = scoringEntryId;
+        // Save immediately — don't wait for the 1500 ms debounce
+        void saveScoreAction(matchId, sets, scoringEntryId, null);
+      }
+    }
+  }
+
+  /**
+   * Side-out (traditional scoring only): receiving team wins the rally.
+   * No score change. Serve rotation:
+   *   Server 1 → Server 2 (same team)
+   *   Server 2 → Side-out (opponent gets serve at Server 1)
+   * Each new set resets to Server 2.
+   */
+  function handleSideOut() {
+    if (scoringFormat !== 'traditional' || status !== 'in_progress') return;
+
+    let newServingId = servingEntryId;
+    let newServerNum: number;
+
+    if (serverNumber === 1) {
+      // Same team, move to server 2
+      newServerNum = 2;
+    } else {
+      // Server 2 faulted → side-out to the other team at server 1
+      newServingId = servingEntryId === entryA?.id ? (entryB?.id ?? null) : (entryA?.id ?? null);
+      newServerNum = 1;
+    }
+
+    setServingEntryId(newServingId);
+    servingEntryIdRef.current = newServingId;
+    setServerNumber(newServerNum);
+    serverNumberRef.current = newServerNum;
+    // Persist immediately so the display screen reflects the side-out
+    void saveScoreAction(matchId, sets, newServingId, newServerNum);
+  }
+
+  /**
+   * Reset server number to 2 when a new set begins (traditional scoring).
+   * Called from the addSet function.
+   */
+  function resetServerForNewSet() {
+    if (scoringFormat !== 'traditional') return;
+    setServerNumber(2);
+    serverNumberRef.current = 2;
+    // Persist
+    void saveScoreAction(matchId, sets, servingEntryIdRef.current, 2);
+  }
+
   function addSet() {
     setSets((prev) => [
       ...prev,
       { set_number: prev.length + 1, score_a: 0, score_b: 0 },
     ]);
+    // Traditional scoring: each new set starts at server 2
+    resetServerForNewSet();
   }
 
   function removeLastSet() {
@@ -165,10 +258,16 @@ export function MatchScoreCard({
   async function handleStart() {
     setLoading(true);
     setError(null);
-    const result = await startMatchAction(matchId, court);
+    // Traditional scoring: first serve always starts at server 2 (pickleball rule)
+    const startingServerNum = scoringFormat === 'traditional' ? 2 : null;
+    const result = await startMatchAction(matchId, court, undefined, servingEntryId, startingServerNum as 1 | 2 | null);
     if (result.error) {
       setError(result.error);
     } else {
+      if (scoringFormat === 'traditional') {
+        setServerNumber(2);
+        serverNumberRef.current = 2;
+      }
       setStatus('in_progress');
       router.refresh();
     }
@@ -299,9 +398,10 @@ export function MatchScoreCard({
   // ── Player header ──────────────────────────────────────────────────────────
   function PlayerHeader({ entry, isWinner }: { entry: EntryInfo | null; isWinner: boolean }) {
     if (!entry) return <div className="flex-1 text-slate-600 italic text-sm">TBD</div>;
+    const isServing = status === 'in_progress' && servingEntryId === entry.id;
     return (
       <div className={`flex-1 ${isWinner ? '' : isCompleted ? 'opacity-50' : ''}`}>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {entry.seed && (
             <span className="rounded bg-brand-900 px-1.5 py-0.5 text-xs font-bold text-brand-300">
               #{entry.seed}
@@ -312,9 +412,12 @@ export function MatchScoreCard({
           </p>
           {isWinner && <span className="text-accent-400 text-lg">🏆</span>}
         </div>
-        <p className="text-xs text-slate-500 mt-0.5">
-          @{entry.player_username} · {entry.rating.toFixed(2)}
-        </p>
+        {isServing && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-400 ring-1 ring-amber-500/30 mt-0.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+            Serving
+          </span>
+        )}
       </div>
     );
   }
@@ -544,7 +647,7 @@ export function MatchScoreCard({
         <PlayerHeader entry={entryB} isWinner={winnerEntryId === entryB?.id} />
       </div>
 
-      {/* Court selector (only before/during match) */}
+      {/* Court selector (only before match starts) */}
       {status === 'scheduled' && (
         <div className="rounded-xl bg-surface-card px-5 py-4 ring-1 ring-surface-border">
           <label className="mb-2 block text-xs font-medium text-slate-400">Court assignment</label>
@@ -563,6 +666,41 @@ export function MatchScoreCard({
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Serving team picker (only before match starts) */}
+      {status === 'scheduled' && entryA && entryB && (
+        <div className="rounded-xl bg-surface-card px-5 py-4 ring-1 ring-surface-border">
+          <p className="mb-3 text-xs font-medium text-slate-400">Serving Team</p>
+          <div className="flex gap-3">
+            {[entryA, entryB].map((entry) => {
+              const isSelected = servingEntryId === entry.id;
+              return (
+                <button
+                  key={entry.id}
+                  onClick={() => {
+                    const next = isSelected ? null : entry.id;
+                    setServingEntryId(next);
+                    servingEntryIdRef.current = next;
+                  }}
+                  className={`flex-1 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold transition-colors ${
+                    isSelected
+                      ? 'bg-amber-500/20 text-amber-300 ring-2 ring-amber-500/50'
+                      : 'bg-surface text-slate-400 hover:text-white ring-1 ring-surface-border'
+                  }`}
+                >
+                  {isSelected && (
+                    <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
+                  )}
+                  {entry.player_name}
+                </button>
+              );
+            })}
+          </div>
+          {!servingEntryId && (
+            <p className="mt-2 text-[11px] text-slate-600">Optional — tap a team to mark the first server</p>
+          )}
         </div>
       )}
 
@@ -585,51 +723,122 @@ export function MatchScoreCard({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 text-xs font-bold tabular-nums">
-            <span className="text-2xl text-white">{aWins}</span>
-            <span className="text-slate-500">—</span>
-            <span className="text-2xl text-white">{bWins}</span>
-            <span className="ml-2 text-slate-500">sets</span>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-slate-600">First to {pointsPerSet} · win by {winBy}</span>
+            {/* Traditional: show live announcement format X-Y-Z next to the sets counter */}
+            {scoringFormat === 'traditional' && servingEntryId !== null && serverNumber !== null && (
+              <div className="flex items-center gap-1 rounded-lg bg-amber-500/10 ring-1 ring-amber-500/30 px-3 py-1">
+                <span className="text-base font-black tabular-nums text-white">
+                  {servingEntryId === entryA?.id ? sets[sets.length - 1]?.score_a ?? 0 : sets[sets.length - 1]?.score_b ?? 0}
+                  <span className="text-slate-500 mx-1">–</span>
+                  {servingEntryId === entryA?.id ? sets[sets.length - 1]?.score_b ?? 0 : sets[sets.length - 1]?.score_a ?? 0}
+                  <span className="text-slate-500 mx-1">–</span>
+                  <span className="text-amber-400">{serverNumber}</span>
+                </span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-xs font-bold tabular-nums">
+              <span className="text-2xl text-white">{aWins}</span>
+              <span className="text-slate-500">—</span>
+              <span className="text-2xl text-white">{bWins}</span>
+              <span className="ml-1 text-slate-500">sets</span>
+            </div>
           </div>
         </div>
 
         {/* Set rows */}
         <div className="divide-y divide-surface-border">
-          {/* Header */}
-          <div className="grid grid-cols-[3rem_1fr_2rem_1fr] items-center gap-3 px-5 py-2">
+          {/* Column header */}
+          <div className="grid grid-cols-[2.5rem_1fr_2.5rem_1fr] items-center gap-2 px-5 py-2">
             <span className="text-xs text-slate-600">Set</span>
             <span className="text-xs text-slate-500 text-center">{entryA?.player_name ?? 'A'}</span>
             <span />
             <span className="text-xs text-slate-500 text-center">{entryB?.player_name ?? 'B'}</span>
           </div>
 
-          {sets.map((set, i) => (
-            <div key={i} className="grid grid-cols-[3rem_1fr_2rem_1fr] items-center gap-3 px-5 py-3">
-              <span className="text-xs font-bold text-slate-500">{set.set_number}</span>
+          {sets.map((set, i) => {
+            // Determine if this set has a winner (for coloring)
+            const aLeads = set.score_a - set.score_b;
+            const bLeads = set.score_b - set.score_a;
+            const aWonSet = set.score_a >= pointsPerSet && aLeads >= winBy;
+            const bWonSet = set.score_b >= pointsPerSet && bLeads >= winBy;
 
-              <input
-                type="number"
-                min={0}
-                max={99}
-                value={set.score_a}
-                onChange={(e) => updateSet(i, 'score_a', parseInt(e.target.value) || 0)}
-                disabled={!isEditable}
-                className="block w-full rounded-lg border border-slate-600 bg-surface px-3 py-2 text-center text-lg font-bold text-white outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-60 transition"
-              />
+            return (
+              <div key={i} className="grid grid-cols-[2.5rem_1fr_2.5rem_1fr] items-center gap-2 px-5 py-3">
+                <span className="text-xs font-bold text-slate-500">{set.set_number}</span>
 
-              <span className="text-center text-slate-600 font-bold">–</span>
+                {/* Team A score + buttons */}
+                <div className="flex items-center gap-1.5">
+                  {isEditable && (
+                    <button
+                      onClick={() => updateSet(i, 'score_a', set.score_a - 1)}
+                      disabled={set.score_a <= 0}
+                      className="h-9 w-9 shrink-0 rounded-lg bg-surface ring-1 ring-surface-border text-slate-400 hover:text-white hover:ring-slate-500 disabled:opacity-25 transition-colors text-base font-bold"
+                    >
+                      −
+                    </button>
+                  )}
+                  <input
+                    type="number"
+                    min={0}
+                    max={99}
+                    value={set.score_a}
+                    onChange={(e) => updateSet(i, 'score_a', parseInt(e.target.value) || 0)}
+                    disabled={!isEditable}
+                    className={`flex-1 min-w-0 block rounded-lg border px-2 py-2 text-center text-lg font-bold outline-none transition disabled:opacity-60 ${
+                      aWonSet ? 'border-accent-500/60 bg-accent-500/10 text-accent-300'
+                      : bWonSet ? 'border-red-900/30 bg-red-950/20 text-slate-500'
+                      : 'border-slate-600 bg-surface text-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30'
+                    }`}
+                  />
+                  {isEditable && (
+                    <button
+                      onClick={() => handleScoreIncrement(i, 'score_a')}
+                      className="h-9 w-9 shrink-0 rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors text-base font-bold"
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
 
-              <input
-                type="number"
-                min={0}
-                max={99}
-                value={set.score_b}
-                onChange={(e) => updateSet(i, 'score_b', parseInt(e.target.value) || 0)}
-                disabled={!isEditable}
-                className="block w-full rounded-lg border border-slate-600 bg-surface px-3 py-2 text-center text-lg font-bold text-white outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 disabled:opacity-60 transition"
-              />
-            </div>
-          ))}
+                <span className="text-center text-slate-600 font-bold text-sm">–</span>
+
+                {/* Team B score + buttons */}
+                <div className="flex items-center gap-1.5">
+                  {isEditable && (
+                    <button
+                      onClick={() => updateSet(i, 'score_b', set.score_b - 1)}
+                      disabled={set.score_b <= 0}
+                      className="h-9 w-9 shrink-0 rounded-lg bg-surface ring-1 ring-surface-border text-slate-400 hover:text-white hover:ring-slate-500 disabled:opacity-25 transition-colors text-base font-bold"
+                    >
+                      −
+                    </button>
+                  )}
+                  <input
+                    type="number"
+                    min={0}
+                    max={99}
+                    value={set.score_b}
+                    onChange={(e) => updateSet(i, 'score_b', parseInt(e.target.value) || 0)}
+                    disabled={!isEditable}
+                    className={`flex-1 min-w-0 block rounded-lg border px-2 py-2 text-center text-lg font-bold outline-none transition disabled:opacity-60 ${
+                      bWonSet ? 'border-accent-500/60 bg-accent-500/10 text-accent-300'
+                      : aWonSet ? 'border-red-900/30 bg-red-950/20 text-slate-500'
+                      : 'border-slate-600 bg-surface text-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30'
+                    }`}
+                  />
+                  {isEditable && (
+                    <button
+                      onClick={() => handleScoreIncrement(i, 'score_b')}
+                      className="h-9 w-9 shrink-0 rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors text-base font-bold"
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Add/remove set */}
@@ -652,6 +861,31 @@ export function MatchScoreCard({
           </div>
         )}
       </div>
+
+      {/* ── Second Serve / Side-out button (traditional scoring only) ────────── */}
+      {isEditable && scoringFormat === 'traditional' && servingEntryId !== null && (
+        <div className="rounded-xl bg-amber-950/20 ring-1 ring-amber-700/30 px-5 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold text-amber-400 mb-0.5">
+                {serverNumber === 1 ? 'Second Serve' : 'Side-out'}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {serverNumber === 1
+                  ? `Server 1 → Server 2 · serve stays with ${servingEntryId === entryA?.id ? entryA?.player_name : entryB?.player_name}`
+                  : `Server 2 → Side-out · serve passes to ${servingEntryId === entryA?.id ? entryB?.player_name : entryA?.player_name}`}
+              </p>
+            </div>
+            <button
+              onClick={handleSideOut}
+              disabled={!status || status !== 'in_progress'}
+              className="shrink-0 rounded-lg border border-amber-700/50 bg-amber-950/40 px-4 py-2 text-sm font-semibold text-amber-400 hover:bg-amber-900/40 hover:border-amber-600/60 transition-colors disabled:opacity-40"
+            >
+              {serverNumber === 1 ? '↩ Second Serve' : '↩ Side-out'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Winner selector (when tied or editable) */}
       {isEditable && (
@@ -696,13 +930,20 @@ export function MatchScoreCard({
       {!isCompleted && (
         <div className="flex flex-wrap gap-3">
           {status === 'scheduled' && (
-            <button
-              onClick={handleStart}
-              disabled={loading}
-              className="flex-1 rounded-lg bg-accent-600 px-5 py-3 text-sm font-semibold text-white hover:bg-accent-700 transition-colors disabled:opacity-50"
-            >
-              {loading ? 'Starting…' : '▶ Start match'}
-            </button>
+            <div className="flex-1 space-y-1.5">
+              <button
+                onClick={handleStart}
+                disabled={loading || !servingEntryId}
+                className="w-full rounded-lg bg-accent-600 px-5 py-3 text-sm font-semibold text-white hover:bg-accent-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Starting…' : '▶ Start match'}
+              </button>
+              {!servingEntryId && (
+                <p className="text-center text-[11px] text-amber-500/80">
+                  Select a serving team above before starting
+                </p>
+              )}
+            </div>
           )}
 
           {status === 'in_progress' && (
@@ -748,15 +989,6 @@ export function MatchScoreCard({
         </div>
       )}
 
-      {/* Back link */}
-      <div className="pt-2">
-        <a
-          href={`/tournaments/${tournamentSlug}/scoring`}
-          className="text-xs text-slate-400 hover:text-white transition-colors"
-        >
-          ← Back to scoring hub
-        </a>
-      </div>
     </div>
   );
 }

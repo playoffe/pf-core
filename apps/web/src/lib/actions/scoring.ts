@@ -154,6 +154,10 @@ export async function startMatchAction(
   matchId: string,
   court: number,
   refereeName?: string,
+  servingEntryId?: string | null,
+  /** For traditional scoring, pass 2 (first server starts at 2 per pickleball rules).
+   *  For rally scoring, pass null. */
+  serverNumber?: 1 | 2 | null,
 ) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -174,6 +178,8 @@ export async function startMatchAction(
     court,
   };
   if (refereeName) patch.assigned_referee_name = refereeName;
+  if (servingEntryId) patch.serving_entry_id = servingEntryId;
+  if (serverNumber !== undefined) patch.server_number = serverNumber;
 
   const { error } = await admin.from('matches').update(patch).eq('id', matchId);
   if (error) return { error: 'Failed to start match' };
@@ -184,11 +190,13 @@ export async function startMatchAction(
 }
 
 // ── Intermediate auto-save (no status change) ────────────────────────────────
-// Called on debounce as the admin enters scores. Persists to DB so the display
-// screen receives the Realtime event and shows live scores immediately.
+// Called on debounce as the admin enters scores. Persists sets (and current
+// serving team) to DB so the display screen receives the Realtime event.
 export async function saveScoreAction(
   matchId: string,
   sets: SetScore[],
+  servingEntryId?: string | null,
+  serverNumber?: number | null,
 ) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -200,12 +208,15 @@ export async function saveScoreAction(
   if (ctx.match.status !== 'in_progress') return { error: 'Match is not in progress' };
 
   const admin = createAdminClient();
-  const { error } = await admin
-    .from('matches')
-    .update({
-      sets: sets.map((s, i) => ({ set_number: i + 1, score_a: s.score_a, score_b: s.score_b })),
-    })
-    .eq('id', matchId);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const patch: Record<string, any> = {
+    sets: sets.map((s, i) => ({ set_number: i + 1, score_a: s.score_a, score_b: s.score_b })),
+  };
+  // Always persist serving state so the display screen stays in sync
+  if (servingEntryId !== undefined) patch.serving_entry_id = servingEntryId;
+  if (serverNumber !== undefined) patch.server_number = serverNumber;
+
+  const { error } = await admin.from('matches').update(patch).eq('id', matchId);
 
   if (error) return { error: 'Failed to save score' };
   return { success: true };
