@@ -579,10 +579,12 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
           + Add set
         </button>
 
-        {/* Side-out button — traditional scoring only */}
+        {/* Second Serve / Side-out button — traditional scoring only */}
         {!isRally && servingEntryId !== null && (
           <div className="rounded-xl bg-amber-950/20 ring-1 ring-amber-700/30 px-4 py-3 space-y-1.5">
-            <p className="text-[10px] font-semibold text-amber-400">Side-out</p>
+            <p className="text-[10px] font-semibold text-amber-400">
+              {serverNumber === 1 ? 'Second Serve' : 'Side-out'}
+            </p>
             <p className="text-[10px] text-slate-500">
               {serverNumber === 1
                 ? `Server 1 → Server 2 · same team keeps serve`
@@ -592,7 +594,7 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
               onClick={handleSideOut}
               className="w-full rounded-lg border border-amber-700/50 bg-amber-950/40 py-2 text-sm font-semibold text-amber-400 hover:bg-amber-900/40 transition-colors"
             >
-              ↩ Side-out
+              {serverNumber === 1 ? '↩ Second Serve' : '↩ Side-out'}
             </button>
           </div>
         )}

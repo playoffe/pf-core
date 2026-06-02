@@ -867,12 +867,14 @@ export function MatchScoreCard({
         )}
       </div>
 
-      {/* ── Side-out button (traditional scoring only) ─────────────────────── */}
+      {/* ── Second Serve / Side-out button (traditional scoring only) ────────── */}
       {isEditable && scoringFormat === 'traditional' && servingEntryId !== null && (
         <div className="rounded-xl bg-amber-950/20 ring-1 ring-amber-700/30 px-5 py-4">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold text-amber-400 mb-0.5">Side-out</p>
+              <p className="text-xs font-semibold text-amber-400 mb-0.5">
+                {serverNumber === 1 ? 'Second Serve' : 'Side-out'}
+              </p>
               <p className="text-[11px] text-slate-500">
                 {serverNumber === 1
                   ? `Server 1 → Server 2 · serve stays with ${servingEntryId === entryA?.id ? entryA?.player_name : entryB?.player_name}`
@@ -884,7 +886,7 @@ export function MatchScoreCard({
               disabled={!status || status !== 'in_progress'}
               className="shrink-0 rounded-lg border border-amber-700/50 bg-amber-950/40 px-4 py-2 text-sm font-semibold text-amber-400 hover:bg-amber-900/40 hover:border-amber-600/60 transition-colors disabled:opacity-40"
             >
-              ↩ Side-out
+              {serverNumber === 1 ? '↩ Second Serve' : '↩ Side-out'}
             </button>
           </div>
         </div>
