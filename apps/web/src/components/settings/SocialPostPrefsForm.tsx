@@ -37,7 +37,7 @@ function Toggle({
   label?: string;
 }) {
   return (
-    <label className="flex items-center gap-2 cursor-pointer select-none">
+    <div className="flex items-center gap-2 cursor-pointer select-none">
       {label && <span className="text-sm text-slate-300">{label}</span>}
       <button
         type="button"
@@ -54,7 +54,7 @@ function Toggle({
           }`}
         />
       </button>
-    </label>
+    </div>
   );
 }
 
