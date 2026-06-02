@@ -35,9 +35,9 @@ export default async function MatchScoringPage({ params }: Props) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: tScoring } = await (admin as any)
     .from('tournaments')
-    .select('points_per_set, win_by')
+    .select('scoring_format, points_per_set, win_by')
     .eq('slug', slug)
-    .single() as { data: { points_per_set: number | null; win_by: number | null } | null };
+    .single() as { data: { scoring_format: string | null; points_per_set: number | null; win_by: number | null } | null };
 
   const { data: mgr } = await admin
     .from('club_managers')
@@ -76,7 +76,7 @@ export default async function MatchScoringPage({ params }: Props) {
         players!player_id(id, full_name, username, global_stats(current_rating)),
         partner:players!partner_id(id, full_name, username)
       ),
-      tc:tournament_categories!category_id(id, name, play_format, scoring_override, points_per_set, win_by)
+      tc:tournament_categories!category_id(id, name, play_format, scoring_override, scoring_format, points_per_set, win_by)
     `)
     .eq('id', matchId)
     .single() as { data: Record<string, any> | null };
@@ -99,13 +99,15 @@ export default async function MatchScoringPage({ params }: Props) {
   const eb = match.eb as unknown as EntryDetail | null;
   const tc = match.tc as unknown as {
     id: string; name: string; play_format: string;
-    scoring_override: boolean; points_per_set: number | null; win_by: number | null;
+    scoring_override: boolean; scoring_format: string | null;
+    points_per_set: number | null; win_by: number | null;
   } | null;
   const isDoubles = tc?.play_format === 'doubles' || tc?.play_format === 'mixed_doubles';
 
   // Resolve effective scoring config: category overrides tournament defaults
   const effectivePointsPerSet = (tc?.scoring_override ? tc?.points_per_set : null) ?? tScoring?.points_per_set ?? 11;
   const effectiveWinBy = (tc?.scoring_override ? tc?.win_by : null) ?? tScoring?.win_by ?? 2;
+  const effectiveScoringFormat = ((tc?.scoring_override ? tc?.scoring_format : null) ?? tScoring?.scoring_format ?? 'traditional') as 'rally' | 'traditional';
 
   // Build team display names (e.g. "Alice / Bob" for doubles)
   function teamName(entry: EntryDetail | null): string {
@@ -180,6 +182,7 @@ export default async function MatchScoringPage({ params }: Props) {
           initialServingEntryId={(match as any).serving_entry_id ?? null}
           pointsPerSet={effectivePointsPerSet}
           winBy={effectiveWinBy}
+          scoringFormat={effectiveScoringFormat}
           entryA={ea ? {
             id: ea.id,
             seed: ea.seed,

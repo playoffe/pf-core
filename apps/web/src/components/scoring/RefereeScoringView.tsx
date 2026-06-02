@@ -41,6 +41,8 @@ interface Match {
   points_per_set: number;
   /** Lead required to win a set (win-by) */
   win_by: number;
+  /** 'rally' = serve switches when non-serving team wins a point */
+  scoring_format: 'rally' | 'traditional';
 }
 
 type AutoSaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
@@ -366,13 +368,30 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
 
     const pointsPerSet = match.points_per_set ?? 11;
     const winBy = match.win_by ?? 2;
+    const isRally = match.scoring_format === 'rally';
+
+    /** Increment score AND auto-switch serve in rally mode. */
+    function handlePlusClick(setIndex: number, field: 'score_a' | 'score_b') {
+      updateSet(setIndex, field, editingSets[setIndex][field] + 1);
+      if (isRally && servingEntryId !== null) {
+        const scoringEntryId = field === 'score_a' ? match.entry_a?.id : match.entry_b?.id;
+        if (scoringEntryId && scoringEntryId !== servingEntryId) {
+          setServingEntryId(scoringEntryId);
+        }
+      }
+    }
 
     return (
       <div className="border-t border-surface-border px-5 pb-5 pt-4 space-y-4">
         {/* Target score indicator */}
-        <p className="text-[11px] text-slate-600 text-center">
-          First to <span className="text-slate-400 font-semibold">{pointsPerSet}</span> pts · win by {winBy}
-        </p>
+        <div className="text-center space-y-0.5">
+          <p className="text-[11px] text-slate-600">
+            First to <span className="text-slate-400 font-semibold">{pointsPerSet}</span> pts · win by {winBy}
+          </p>
+          {isRally && servingEntryId !== null && (
+            <p className="text-[10px] text-amber-500/80">Rally scoring — serve switches automatically</p>
+          )}
+        </div>
 
         {/* Set rows — large +/− touch buttons */}
         <div className="space-y-4">
@@ -420,7 +439,7 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
                         }`}
                       />
                       <button
-                        onClick={() => updateSet(i, 'score_a', set.score_a + 1)}
+                        onClick={() => handlePlusClick(i, 'score_a')}
                         className="h-11 w-11 shrink-0 rounded-xl bg-brand-600 text-white hover:bg-brand-500 transition-colors text-xl font-bold"
                       >
                         +
@@ -454,7 +473,7 @@ export function RefereeScoringView({ matches, completedMatches = [], pin, refere
                         }`}
                       />
                       <button
-                        onClick={() => updateSet(i, 'score_b', set.score_b + 1)}
+                        onClick={() => handlePlusClick(i, 'score_b')}
                         className="h-11 w-11 shrink-0 rounded-xl bg-brand-600 text-white hover:bg-brand-500 transition-colors text-xl font-bold"
                       >
                         +

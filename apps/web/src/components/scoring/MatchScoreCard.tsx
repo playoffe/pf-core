@@ -37,6 +37,8 @@ interface Props {
   pointsPerSet?: number;
   /** Points lead required to win a set (e.g. 2 for win-by-2). Default 2. */
   winBy?: number;
+  /** Scoring format — in rally mode serve auto-switches when the non-serving team wins a point. */
+  scoringFormat?: 'rally' | 'traditional';
   // Player self-report (optional)
   playerReportedWinnerId?: string | null;
   playerReportedSets?: SetScore[] | null;
@@ -67,6 +69,7 @@ export function MatchScoreCard({
   initialServingEntryId = null,
   pointsPerSet = 11,
   winBy = 2,
+  scoringFormat = 'traditional',
   playerReportedWinnerId,
   playerReportedSets,
   pausedForReassignment = false,
@@ -158,6 +161,23 @@ export function MatchScoreCard({
     setManualWinner(null);
     // Auto-save to DB so the display screen gets a live Realtime update
     if (status === 'in_progress') triggerAutoSave(next);
+  }
+
+  /**
+   * Handles a + button click: increments the score AND, in rally scoring,
+   * automatically switches the serve when the non-serving team wins the point.
+   */
+  function handleScoreIncrement(index: number, field: 'score_a' | 'score_b') {
+    updateSet(index, field, sets[index][field] + 1);
+
+    if (scoringFormat === 'rally' && status === 'in_progress' && servingEntryId !== null) {
+      const scoringEntryId = field === 'score_a' ? entryA?.id : entryB?.id;
+      // Non-serving team won the point → serve passes to them
+      if (scoringEntryId && scoringEntryId !== servingEntryId) {
+        setServingEntryId(scoringEntryId);
+      }
+      // Serving team won the point → serve stays, no change needed
+    }
   }
 
   function addSet() {
@@ -693,7 +713,7 @@ export function MatchScoreCard({
                   />
                   {isEditable && (
                     <button
-                      onClick={() => updateSet(i, 'score_a', set.score_a + 1)}
+                      onClick={() => handleScoreIncrement(i, 'score_a')}
                       className="h-9 w-9 shrink-0 rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors text-base font-bold"
                     >
                       +
@@ -729,7 +749,7 @@ export function MatchScoreCard({
                   />
                   {isEditable && (
                     <button
-                      onClick={() => updateSet(i, 'score_b', set.score_b + 1)}
+                      onClick={() => handleScoreIncrement(i, 'score_b')}
                       className="h-9 w-9 shrink-0 rounded-lg bg-brand-600 text-white hover:bg-brand-500 transition-colors text-base font-bold"
                     >
                       +

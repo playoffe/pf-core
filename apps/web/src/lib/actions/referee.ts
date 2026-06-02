@@ -272,16 +272,16 @@ export async function getRefereeMatchesAction(pin: string, refereeName?: string)
     assigned_at, completed_at,
     ea:tournament_entries!entry_a_id(id, seed, players!player_id(full_name, username), partner:players!partner_id(full_name)),
     eb:tournament_entries!entry_b_id(id, seed, players!player_id(full_name, username), partner:players!partner_id(full_name)),
-    tc:tournament_categories!category_id(scoring_override, points_per_set, win_by)
+    tc:tournament_categories!category_id(scoring_override, scoring_format, points_per_set, win_by)
   `;
 
   // Fetch tournament-level scoring defaults as a fallback
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: tScoring } = await (admin as any)
     .from('tournaments')
-    .select('points_per_set, win_by')
+    .select('scoring_format, points_per_set, win_by')
     .eq('id', validated.tournament.id)
-    .single() as { data: { points_per_set: number | null; win_by: number | null } | null };
+    .single() as { data: { scoring_format: string | null; points_per_set: number | null; win_by: number | null } | null };
 
   // Build active and completed queries in parallel
   let activeQ = admin
@@ -345,10 +345,11 @@ export async function getRefereeMatchesAction(pin: string, refereeName?: string)
   function formatMatch(m: Record<string, unknown>) {
     const ea = m.ea as EntryRaw;
     const eb = m.eb as EntryRaw;
-    const tc = m.tc as { scoring_override: boolean; points_per_set: number | null; win_by: number | null } | null;
+    const tc = m.tc as { scoring_override: boolean; scoring_format: string | null; points_per_set: number | null; win_by: number | null } | null;
     // Resolve effective scoring: category override → tournament default → built-in default
     const pointsPerSet = (tc?.scoring_override ? tc?.points_per_set : null) ?? tScoring?.points_per_set ?? 11;
     const winBy = (tc?.scoring_override ? tc?.win_by : null) ?? tScoring?.win_by ?? 2;
+    const scoringFormat = ((tc?.scoring_override ? tc?.scoring_format : null) ?? tScoring?.scoring_format ?? 'traditional') as 'rally' | 'traditional';
     return {
       id: m.id as string,
       round: m.round as number,
@@ -378,6 +379,7 @@ export async function getRefereeMatchesAction(pin: string, refereeName?: string)
       } : null,
       points_per_set: pointsPerSet,
       win_by: winBy,
+      scoring_format: scoringFormat,
     };
   }
 
