@@ -132,20 +132,14 @@ export default async function MatchScoringPage({ params }: Props) {
           </Link>
           <span>/</span>
           <span className="text-slate-400">
-            {teamName(ea)} vs {teamName(eb)}
+            {[tc?.name, match.round_name, match.group_name].filter(Boolean).join(' · ') || 'Match'}
           </span>
         </nav>
 
         <div className="mb-6">
-          <p className="text-xs text-slate-500 mb-1">
-            {tc?.name ?? ''}
-            {match.round_name ? ` · ${match.round_name}` : ''}
-            {match.group_name ? ` · ${match.group_name}` : ''}
-          </p>
-          <h1 className="text-xl font-bold text-white">
-            {teamName(ea)}
-            <span className="mx-3 text-slate-600 font-normal">vs</span>
-            {teamName(eb)}
+          {/* Category · Round · Group — bold single line, no player names (shown in the score card below) */}
+          <h1 className="text-xl font-bold text-white truncate">
+            {[tc?.name, match.round_name, match.group_name].filter(Boolean).join(' · ')}
           </h1>
           {/* Court / referee assignment info — updates live via Realtime */}
           <MatchAssignmentBadges
