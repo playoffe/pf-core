@@ -1,13 +1,14 @@
-// Web-app side BullMQ producer for the social posting pipeline.
+// Web-app side BullMQ producers for the social posting pipeline.
 //
 // Imports ONLY from bullmq — BullMQ owns its own IORedis connection internally.
 // This avoids the ioredis version conflict that can arise when the web app and
 // workers resolve different patch versions of ioredis.
 //
-// Uses a module-level singleton Queue so the Redis connection is not
+// Uses module-level singleton Queues so the Redis connection is not
 // re-created on every server action invocation.
 
 import { Queue } from 'bullmq';
+import { createAdminClient } from '@/lib/supabase/server';
 
 // ── Job data types (mirrored from workers/src/queue.ts) ───────────────────────
 export type TriggerType = 'match_win' | 'category_complete' | 'tournament_complete';
@@ -21,6 +22,15 @@ export interface GraphicJobData {
   tournamentId: string;
 }
 
+export interface PostJobData {
+  postLogId: string;
+  playerId: string;
+  platform: 'instagram' | 'facebook' | 'x';
+  graphicUrl: string;
+  caption: string;
+  triggerType: TriggerType;
+}
+
 // ── Parse a Redis URL into BullMQ-compatible connection options ───────────────
 function parseRedisConnection(url: string) {
   try {
@@ -31,7 +41,6 @@ function parseRedisConnection(url: string) {
       password: u.password || undefined,
       username: u.username || undefined,
       tls: u.protocol === 'rediss:' ? ({} as object) : undefined,
-      // Required by BullMQ for blocking commands
       maxRetriesPerRequest: null as null,
     };
   } catch {
@@ -39,32 +48,55 @@ function parseRedisConnection(url: string) {
   }
 }
 
-// ── Singleton Queue ───────────────────────────────────────────────────────────
-// Stored on globalThis so Next.js HMR does not create a new connection on
-// every hot-reload cycle during development.
+// ── Singleton Queues ──────────────────────────────────────────────────────────
 const g = globalThis as typeof globalThis & {
   __graphicQueue?: Queue;
+  __postQueue?: Queue;
 };
 
-function getGraphicQueue(): Queue {
+export function getGraphicQueue(): Queue {
   if (!g.__graphicQueue) {
-    const connection = parseRedisConnection(
-      process.env.REDIS_URL ?? 'redis://localhost:6379',
-    );
+    const connection = parseRedisConnection(process.env.REDIS_URL ?? 'redis://localhost:6379');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     g.__graphicQueue = new Queue('social.graphic', { connection: connection as any });
   }
   return g.__graphicQueue;
 }
 
+export function getPostQueue(): Queue {
+  if (!g.__postQueue) {
+    const connection = parseRedisConnection(process.env.REDIS_URL ?? 'redis://localhost:6379');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    g.__postQueue = new Queue('social.post', { connection: connection as any });
+  }
+  return g.__postQueue;
+}
+
+// ── Shared enqueue helper ────────────────────────────────────────────────────
+
+async function enqueueGraphicJob(
+  jobName: string,
+  jobId: string,
+  data: GraphicJobData,
+): Promise<void> {
+  if (!process.env.REDIS_URL) return;
+  try {
+    const queue = getGraphicQueue();
+    await queue.add(jobName, data, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 3000 },
+      jobId,
+    });
+  } catch (err) {
+    console.error(`[social-queue] Failed to enqueue ${data.triggerType} job:`, err);
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Enqueue a social graphic job for the winner of a completed match.
+ * Enqueue a match_win graphic job for the winner of a completed match.
  * Fire-and-forget — caller should NOT await this.
- *
- * If Redis is unavailable or REDIS_URL is not set, the error is caught
- * and logged; it never propagates to the scoring action.
  */
 export async function enqueueMatchWinGraphic(params: {
   winnerPlayerId: string;
@@ -73,28 +105,84 @@ export async function enqueueMatchWinGraphic(params: {
   categoryId: string;
   tournamentId: string;
 }): Promise<void> {
-  // Social posting is opt-in — skip if Redis is not configured
+  await enqueueGraphicJob(
+    `match-win-${params.matchId}`,
+    `match-win-${params.matchId}-${params.winnerPlayerId}`,
+    {
+      triggerType:  'match_win',
+      playerId:     params.winnerPlayerId,
+      entryId:      params.winnerEntryId,
+      matchId:      params.matchId,
+      categoryId:   params.categoryId,
+      tournamentId: params.tournamentId,
+    },
+  );
+}
+
+/**
+ * Enqueue a category_complete graphic job for a single player.
+ * Fire-and-forget — caller should NOT await this.
+ */
+export async function enqueueCategoryCompleteGraphic(params: {
+  playerId: string;
+  entryId: string;
+  categoryId: string;
+  tournamentId: string;
+}): Promise<void> {
+  await enqueueGraphicJob(
+    `cat-complete-${params.categoryId}-${params.playerId}`,
+    `cat-complete-${params.categoryId}-${params.playerId}`,
+    {
+      triggerType:  'category_complete',
+      playerId:     params.playerId,
+      entryId:      params.entryId,
+      categoryId:   params.categoryId,
+      tournamentId: params.tournamentId,
+    },
+  );
+}
+
+/**
+ * Enqueue tournament_complete graphic jobs for ALL active participants
+ * in a tournament. One job per player, fire-and-forget.
+ */
+export async function enqueueTournamentCompleteGraphics(params: {
+  tournamentId: string;
+}): Promise<void> {
   if (!process.env.REDIS_URL) return;
 
   try {
-    const queue = getGraphicQueue();
-    const jobData: GraphicJobData = {
-      triggerType: 'match_win',
-      playerId: params.winnerPlayerId,
-      entryId:  params.winnerEntryId,
-      matchId:  params.matchId,
-      categoryId:   params.categoryId,
-      tournamentId: params.tournamentId,
-    };
+    const admin = createAdminClient();
+    // Fetch all active entries for the tournament
+    const { data: entries } = await admin
+      .from('tournament_entries')
+      .select('id, player_id, category_id')
+      .eq('tournament_id', params.tournamentId)
+      .eq('status', 'active');
 
-    await queue.add(`match-win-${params.matchId}`, jobData, {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 3000 },
-      // Deduplicate: identical jobId means "already queued, skip"
-      jobId: `match-win-${params.matchId}-${params.winnerPlayerId}`,
-    });
+    if (!entries || entries.length === 0) return;
+
+    // Enqueue one job per (player, category) pair — avoids multiple jobs
+    // for doubles players who appear in more than one category
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      const key = `${entry.player_id}-${entry.category_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      void enqueueGraphicJob(
+        `tournament-complete-${params.tournamentId}-${entry.player_id}`,
+        `tournament-complete-${params.tournamentId}-${entry.player_id}`,
+        {
+          triggerType:  'tournament_complete',
+          playerId:     entry.player_id,
+          entryId:      entry.id,
+          categoryId:   entry.category_id,
+          tournamentId: params.tournamentId,
+        },
+      );
+    }
   } catch (err) {
-    // Non-critical: log but never block the scoring action
-    console.error('[social-queue] Failed to enqueue match-win graphic job:', err);
+    console.error('[social-queue] Failed to enqueue tournament_complete jobs:', err);
   }
 }

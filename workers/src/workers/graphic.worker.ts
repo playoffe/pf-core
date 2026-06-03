@@ -18,6 +18,7 @@ import { supabase, uploadGraphic } from '../lib/supabase.js';
 import { renderMatchWin, renderCategoryComplete } from '../lib/graphic.js';
 import { generateCaption } from '../lib/caption.js';
 import type { CaptionStyle, CaptionContext } from '../lib/caption.js';
+import { sendPushToPlayer } from '../lib/push.js';
 
 const CONCURRENCY = parseInt(process.env.GRAPHIC_WORKER_CONCURRENCY ?? '5', 10);
 
@@ -138,16 +139,50 @@ export async function processGraphicJob(
   const autoPostLogIds: { id: string; platform: string }[] = [];
 
   const captionCtx: CaptionContext = {
-    triggerType: triggerType as TriggerType,
+    triggerType:    triggerType as TriggerType,
     playerName:     ctx.playerName,
     opponentName:   ctx.opponentName,
     score:          ctx.score,
     tournamentName: ctx.tournamentName,
     categoryName:   ctx.categoryName,
+    playerRank:     ctx.currentRank,
+    winStreak:      ctx.winStreak,
   };
 
   for (const { platform, cfg } of platformsToPost) {
-    if (platform === 'whatsapp') continue; // share-link only — no server-side post
+    // ── WhatsApp: generate share URL, log as 'posted', no API call needed ──
+    if (platform === 'whatsapp') {
+      let waCaption: string;
+      try {
+        const captionStyle = (cfg.caption_style ?? 'humble') as CaptionStyle;
+        waCaption = await generateCaption(captionStyle, {
+          ...captionCtx,
+          ...(captionStyle === 'custom' && cfg.custom_template
+            ? { customTemplate: cfg.custom_template }
+            : {}),
+        });
+      } catch {
+        waCaption = `${triggerType === 'match_win' ? '🏆 Match win' : '🎯 Complete'} at ${ctx.tournamentName}! #pickleball`;
+      }
+      const shareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(waCaption)}`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await supabase.from('social_post_log' as any).insert({
+        player_id:        playerId,
+        platform:         'whatsapp',
+        trigger_type:     triggerType,
+        trigger_id:       matchId ?? categoryId ?? tournamentId,
+        tournament_id:    tournamentId,
+        caption:          waCaption,
+        caption_style:    (cfg.caption_style ?? 'humble'),
+        graphic_url:      graphicUrl,
+        status:           'posted',                  // no API — immediately done
+        platform_post_id: shareUrl,                  // reused as the share URL
+        generated_at:     new Date().toISOString(),
+        posted_at:        new Date().toISOString(),
+      });
+      console.log(`[graphic] Job ${jobId}: WhatsApp share URL created`);
+      continue;
+    }
 
     const captionStyle = (cfg.caption_style ?? 'humble') as CaptionStyle;
     let caption: string;
@@ -188,7 +223,13 @@ export async function processGraphicJob(
     const postLogId = (logRow as { id: string }).id;
 
     if (isPreview) {
-      // TODO (Phase 11C): send preview push notification via web-push / SNS
+      // Send push notification so the player can review and approve
+      void sendPushToPlayer(
+        playerId,
+        '📸 New post ready to review',
+        `Your ${triggerType.replace(/_/g, ' ')} graphic is ready. Tap to approve or decline.`,
+        '/settings/social',
+      );
       console.log(`[graphic] Job ${jobId}: preview pending for ${platform}, log ${postLogId}`);
     } else if (!skipEnqueue) {
       const postJobData: PostJobData = {
@@ -244,6 +285,8 @@ interface RenderContext {
   tournamentName: string;
   categoryName: string;
   position?: number;
+  currentRank?: number;
+  winStreak?: number;
 }
 
 async function fetchRenderContext(params: {
@@ -255,20 +298,45 @@ async function fetchRenderContext(params: {
 }): Promise<RenderContext | null> {
   const { triggerType, matchId, categoryId, tournamentId, playerId } = params;
 
-  const [{ data: tournament }, { data: category }] = await Promise.all([
+  // Fetch core data + rank + recent match history in parallel
+  const [
+    { data: tournament },
+    { data: category },
+    { data: player },
+    { data: rankData },
+    { data: recentHistory },
+  ] = await Promise.all([
     supabase.from('tournaments').select('name').eq('id', tournamentId).maybeSingle(),
     supabase.from('tournament_categories').select('name').eq('id', categoryId).maybeSingle(),
+    supabase.from('players').select('full_name').eq('id', playerId).maybeSingle(),
+    // Best (lowest) rank across all ranking categories
+    supabase
+      .from('global_rankings')
+      .select('rank')
+      .eq('player_id', playerId)
+      .order('rank', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    // Last 20 results for win-streak calculation
+    supabase
+      .from('match_history')
+      .select('result')
+      .eq('player_id', playerId)
+      .order('played_at', { ascending: false })
+      .limit(20),
   ]);
 
   const tournamentName = (tournament as { name: string } | null)?.name ?? 'Tournament';
   const categoryName   = (category as { name: string } | null)?.name ?? 'Category';
+  const playerName     = (player as { full_name: string } | null)?.full_name ?? 'Player';
+  const currentRank    = (rankData as { rank: number } | null)?.rank ?? undefined;
 
-  const { data: player } = await supabase
-    .from('players')
-    .select('full_name')
-    .eq('id', playerId)
-    .maybeSingle();
-  const playerName = (player as { full_name: string } | null)?.full_name ?? 'Player';
+  // Count consecutive wins/walkover_wins from most recent match
+  let winStreak = 0;
+  for (const h of (recentHistory ?? []) as { result: string }[]) {
+    if (h.result === 'win' || h.result === 'walkover_win') winStreak++;
+    else break;
+  }
 
   if (triggerType === 'match_win' && matchId) {
     const { data: match } = await supabase
@@ -277,7 +345,7 @@ async function fetchRenderContext(params: {
       .eq('id', matchId)
       .maybeSingle();
 
-    if (!match) return { playerName, tournamentName, categoryName };
+    if (!match) return { playerName, tournamentName, categoryName, currentRank, winStreak };
 
     const m = match as { sets: unknown; entry_a_id: string; entry_b_id: string; winner_entry_id: string };
     const opponentEntryId = m.winner_entry_id === m.entry_a_id ? m.entry_b_id : m.entry_a_id;
@@ -301,8 +369,8 @@ async function fetchRenderContext(params: {
     const sets = Array.isArray(m.sets) ? m.sets as { score_a: number; score_b: number }[] : [];
     const score = sets.map((s) => `${s.score_a}-${s.score_b}`).join(', ');
 
-    return { playerName, opponentName, score, tournamentName, categoryName };
+    return { playerName, opponentName, score, tournamentName, categoryName, currentRank, winStreak };
   }
 
-  return { playerName, tournamentName, categoryName };
+  return { playerName, tournamentName, categoryName, currentRank, winStreak };
 }

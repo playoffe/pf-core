@@ -1,14 +1,13 @@
 // Podium Worker — processes social:podium queue jobs.
 // Renders organiser posting graphics: per-category podium and full-tournament wrap-up.
-//
-// Phase 11B: implements the rendering + upload pipeline.
-// TODO: Fetch organiser's club social connections and post to club pages.
+// Posts to club social pages using club_social_connections.
 
 import { Worker } from 'bullmq';
 import { connection, QUEUE_NAMES } from '../queue.js';
 import type { PodiumJobData } from '../queue.js';
 import { supabase, uploadGraphic } from '../lib/supabase.js';
 import { renderPodium } from '../lib/graphic.js';
+import { postToPlatform } from '../platforms/index.js';
 
 const CONCURRENCY = parseInt(process.env.PODIUM_WORKER_CONCURRENCY ?? '2', 10);
 
@@ -109,9 +108,33 @@ export function startPodiumWorker() {
       const graphicUrl = await uploadGraphic(fileName, pngBuffer);
       console.log(`[podium] Job ${job.id}: graphic uploaded → ${graphicUrl}`);
 
-      // TODO: Fetch club social connections and enqueue post jobs for each platform
-      // For Phase 11B this is logged but not yet posted — club social OAuth is Phase 11C scope
-      console.log(`[podium] Job ${job.id}: graphic ready for organiser review at ${graphicUrl}`);
+      // Fetch club social connections and post to each active platform
+      const { data: clubConns } = await supabase
+        .from('club_social_connections' as any)
+        .select('platform, access_token, platform_username')
+        .eq('club_id', clubId)
+        .eq('is_active', true);
+
+      if (clubConns && (clubConns as any[]).length > 0) {
+        for (const conn of clubConns as { platform: string; access_token: string; platform_username: string | null }[]) {
+          const caption = type === 'podium'
+            ? `🏆 ${categoryName ?? 'Category'} Complete — ${winnerName} wins at ${tournamentName}! #pickleball`
+            : `🎾 ${tournamentName} — Tournament wrap-up. Congratulations to all participants! #pickleball`;
+
+          const result = await postToPlatform({
+            platform:        conn.platform as 'instagram' | 'facebook' | 'x',
+            playerId:        clubId,          // unused when accessToken is provided
+            graphicUrl,
+            caption,
+            accessToken:     conn.access_token,
+            platformUsername: conn.platform_username ?? '',
+          });
+
+          console.log(`[podium] Job ${job.id}: ${conn.platform} → ${result.success ? `posted (${result.platformPostId})` : `failed (${result.error})`}`);
+        }
+      } else {
+        console.log(`[podium] Job ${job.id}: no club social connections — graphic available at ${graphicUrl}`);
+      }
 
       return { done: true, graphicUrl };
     },

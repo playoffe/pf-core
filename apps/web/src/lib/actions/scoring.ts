@@ -6,7 +6,7 @@ import { calculateRatingChange } from '@pickleball/rating';
 import { createNotificationsForPlayers } from './notifications';
 import { sendMatchResultNotification } from '@/lib/email/notifications';
 import { awardBadgesForPlayer } from './badges';
-import { enqueueMatchWinGraphic } from '@/lib/social-queue';
+import { enqueueMatchWinGraphic, enqueueCategoryCompleteGraphic } from '@/lib/social-queue';
 
 interface SetScore {
   set_number: number;
@@ -422,6 +422,30 @@ export async function submitResultAction(
     categoryId: match.category_id,
     tournamentId: match.tournament_id,
   });
+
+  // ── Check if the category is now fully complete ───────────────────────────
+  // If no scheduled / in-progress matches remain, fire category_complete for
+  // both players (fire-and-forget; each player's prefs control if they post).
+  const { count: remainingMatches } = await admin
+    .from('matches')
+    .select('id', { count: 'exact', head: true })
+    .eq('category_id', match.category_id)
+    .not('status', 'in', '(completed,walkover,retired)');
+
+  if (remainingMatches === 0) {
+    void enqueueCategoryCompleteGraphic({
+      playerId:     entryA.player_id,
+      entryId:      match.entry_a_id!,
+      categoryId:   match.category_id,
+      tournamentId: match.tournament_id,
+    });
+    void enqueueCategoryCompleteGraphic({
+      playerId:     entryB.player_id,
+      entryId:      match.entry_b_id!,
+      categoryId:   match.category_id,
+      tournamentId: match.tournament_id,
+    });
+  }
 
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring/${matchId}`);
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/categories/${catSlugRow?.slug ?? match.category_id}`);

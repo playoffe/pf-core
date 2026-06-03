@@ -8,6 +8,33 @@ import type {
   OAuthPlatform,
 } from '@/lib/social-types';
 import { DEFAULT_SOCIAL_POST_PREFS } from '@/lib/social-types';
+import { getPostQueue } from '@/lib/social-queue';
+
+// ── Shared post log row type ──────────────────────────────────────────────────
+
+export interface PostLogRow {
+  id: string;
+  platform: string;
+  trigger_type: string;
+  status: string;
+  graphic_url: string | null;
+  caption: string | null;
+  caption_style: string | null;
+  platform_post_id: string | null; // also used as WhatsApp share URL
+  error_message: string | null;
+  queued_at: string;
+  posted_at: string | null;
+}
+
+// ── Club connection type (safe for client — no tokens) ────────────────────────
+
+export interface ClubConnectionPublic {
+  platform: OAuthPlatform;
+  platform_username: string | null;
+  platform_display_name: string | null;
+  is_active: boolean;
+  connected_at: string;
+}
 
 // ── Read ──────────────────────────────────────────────────────────────────────
 
@@ -171,3 +198,214 @@ export async function getPlayerSocialConfigAction(playerId: string): Promise<{
 }
 
 // getEnabledPlatformsForTrigger is a pure utility — see @/lib/social-types
+
+// ── Post log: pending previews ────────────────────────────────────────────────
+
+/** Returns all posts waiting for the current player to approve or decline. */
+export async function getPendingPreviewsAction(): Promise<PostLogRow[]> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const admin = createAdminClient();
+  const { data } = await (admin as any)
+    .from('social_post_log')
+    .select('id, platform, trigger_type, status, graphic_url, caption, caption_style, platform_post_id, error_message, queued_at, posted_at')
+    .eq('player_id', user.id)
+    .eq('status', 'pending_preview')
+    .order('queued_at', { ascending: false });
+
+  return (data ?? []) as PostLogRow[];
+}
+
+/**
+ * Approves a pending preview — enqueues a post job so the worker can publish it.
+ * Updates post_log status to 'posting' immediately.
+ */
+export async function approvePreviewAction(
+  postLogId: string,
+): Promise<{ success?: true; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  // Fetch the log row — verify ownership + correct status
+  const { data: logRow } = await (admin as any)
+    .from('social_post_log')
+    .select('id, player_id, platform, graphic_url, caption, trigger_type, status')
+    .eq('id', postLogId)
+    .maybeSingle();
+
+  if (!logRow) return { error: 'Post not found' };
+  if ((logRow as any).player_id !== user.id) return { error: 'Permission denied' };
+  if ((logRow as any).status !== 'pending_preview') return { error: 'Post is not pending preview' };
+
+  const row = logRow as { id: string; platform: string; graphic_url: string; caption: string; trigger_type: string };
+
+  // Mark as 'posting' in DB
+  await (admin as any)
+    .from('social_post_log')
+    .update({ status: 'posting' })
+    .eq('id', postLogId);
+
+  // Enqueue the post job (fire-and-forget — non-critical)
+  try {
+    const postQueue = getPostQueue();
+    await postQueue.add(`approved-${postLogId}`, {
+      postLogId: row.id,
+      playerId: user.id,
+      platform: row.platform as 'instagram' | 'facebook' | 'x',
+      graphicUrl: row.graphic_url,
+      caption: row.caption,
+      triggerType: row.trigger_type,
+    }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+      jobId: `approved-${postLogId}`,
+    });
+  } catch (err) {
+    console.error('[social] Failed to enqueue approved post job:', err);
+    // Reset status back to pending_preview if enqueue fails
+    await (admin as any)
+      .from('social_post_log')
+      .update({ status: 'pending_preview' })
+      .eq('id', postLogId);
+    return { error: 'Failed to queue post — please try again' };
+  }
+
+  revalidatePath('/settings/social');
+  return { success: true };
+}
+
+/** Declines a pending preview — sets status to 'preview_declined'. */
+export async function declinePreviewAction(
+  postLogId: string,
+): Promise<{ success?: true; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  const { data: logRow } = await (admin as any)
+    .from('social_post_log')
+    .select('player_id, status')
+    .eq('id', postLogId)
+    .maybeSingle();
+
+  if (!logRow) return { error: 'Post not found' };
+  if ((logRow as any).player_id !== user.id) return { error: 'Permission denied' };
+
+  await (admin as any)
+    .from('social_post_log')
+    .update({ status: 'preview_declined' })
+    .eq('id', postLogId);
+
+  revalidatePath('/settings/social');
+  return { success: true };
+}
+
+/** Returns the last 50 post log entries for the current player (all statuses). */
+export async function getPostHistoryAction(): Promise<PostLogRow[]> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const admin = createAdminClient();
+  const { data } = await (admin as any)
+    .from('social_post_log')
+    .select('id, platform, trigger_type, status, graphic_url, caption, caption_style, platform_post_id, error_message, queued_at, posted_at')
+    .eq('player_id', user.id)
+    .order('queued_at', { ascending: false })
+    .limit(50);
+
+  return (data ?? []) as PostLogRow[];
+}
+
+// ── Club social connections ────────────────────────────────────────────────────
+
+/** Returns active club-level social connections (no tokens). */
+export async function getClubSocialConnectionsAction(
+  clubId: string,
+): Promise<ClubConnectionPublic[]> {
+  const admin = createAdminClient();
+  const { data } = await (admin as any)
+    .from('club_social_connections')
+    .select('platform, platform_username, platform_display_name, is_active, connected_at')
+    .eq('club_id', clubId)
+    .eq('is_active', true)
+    .order('connected_at', { ascending: true });
+
+  return (data ?? []) as ClubConnectionPublic[];
+}
+
+/**
+ * Upserts a club social connection after OAuth token exchange.
+ * Called from /api/social/club/callback/[platform].
+ */
+export async function upsertClubSocialConnectionAction(params: {
+  clubId: string;
+  platform: OAuthPlatform;
+  platformUserId: string;
+  platformUsername: string | null;
+  platformDisplayName: string | null;
+  accessToken: string;
+  refreshToken: string | null;
+  tokenExpiresAt: Date | null;
+  scopes: string[];
+}): Promise<{ success?: true; error?: string }> {
+  const admin = createAdminClient();
+  const { error } = await (admin as any)
+    .from('club_social_connections')
+    .upsert(
+      {
+        club_id:               params.clubId,
+        platform:              params.platform,
+        platform_user_id:      params.platformUserId,
+        platform_username:     params.platformUsername,
+        platform_display_name: params.platformDisplayName,
+        access_token:          params.accessToken,
+        refresh_token:         params.refreshToken,
+        token_expires_at:      params.tokenExpiresAt?.toISOString() ?? null,
+        scopes:                params.scopes,
+        is_active:             true,
+        connected_at:          new Date().toISOString(),
+        updated_at:            new Date().toISOString(),
+      },
+      { onConflict: 'club_id,platform' },
+    );
+
+  if (error) return { error: error.message };
+  return { success: true };
+}
+
+/** Marks a club social connection as inactive (soft-disconnect). */
+export async function disconnectClubSocialAccountAction(
+  clubId: string,
+  platform: OAuthPlatform,
+): Promise<{ success?: true; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  // Verify user is a manager of this club
+  const admin = createAdminClient();
+  const { data: mgr } = await admin
+    .from('club_managers')
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('player_id', user.id)
+    .maybeSingle();
+  if (!mgr) return { error: 'Permission denied' };
+
+  const { error } = await (admin as any)
+    .from('club_social_connections')
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq('club_id', clubId)
+    .eq('platform', platform);
+
+  if (error) return { error: error.message };
+  return { success: true };
+}

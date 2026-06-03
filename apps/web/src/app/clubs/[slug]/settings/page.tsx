@@ -4,15 +4,19 @@ import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { ClubAdminNav } from '@/components/clubs/ClubAdminNav';
 import { ClubSettingsForm } from '@/components/clubs/ClubSettingsForm';
+import { ClubSocialPanel } from '@/components/clubs/ClubSocialPanel';
+import { getClubSocialConnectionsAction } from '@/lib/actions/social';
 
 export const metadata: Metadata = { title: 'Club Settings' };
 
 interface Props {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ connected?: string; error?: string }>;
 }
 
-export default async function ClubSettingsPage({ params }: Props) {
+export default async function ClubSettingsPage({ params, searchParams }: Props) {
   const { slug } = await params;
+  const sp       = await searchParams;
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -34,6 +38,19 @@ export default async function ClubSettingsPage({ params }: Props) {
 
   // Redirect non-owners away
   if (!isOwner) redirect(`/clubs/${slug}`);
+
+  // Fetch club social connections for the social panel
+  const clubConnections = await getClubSocialConnectionsAction(club.id);
+
+  // Flash from OAuth redirect
+  type FlashMsg = { type: 'success' | 'error'; message: string } | null;
+  let socialFlash: FlashMsg = null;
+  if (sp.connected) {
+    const label = sp.connected.charAt(0).toUpperCase() + sp.connected.slice(1);
+    socialFlash = { type: 'success', message: `✓ ${label} connected successfully.` };
+  } else if (sp.error) {
+    socialFlash = { type: 'error', message: `Connection error: ${sp.error}` };
+  }
 
   return (
     <div className="min-h-screen bg-surface">
@@ -74,6 +91,16 @@ export default async function ClubSettingsPage({ params }: Props) {
             logo_url: club.logo_url ?? null,
           }}
         />
+
+        {/* Club social media connections — for organiser posting */}
+        <div className="mt-8 rounded-xl bg-surface-card p-6 ring-1 ring-surface-border">
+          <ClubSocialPanel
+            clubId={club.id}
+            clubSlug={slug}
+            connections={clubConnections}
+            flashMessage={socialFlash}
+          />
+        </div>
       </main>
     </div>
   );

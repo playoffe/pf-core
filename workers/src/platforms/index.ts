@@ -20,6 +20,12 @@ export interface PostParams {
   /** PNG buffer — only needed for X (fetches image to re-upload to Twitter CDN) */
   imageBuffer?: Buffer;
   caption: string;
+  /**
+   * Override the access token instead of querying the DB.
+   * Used for club-level connections (club_social_connections table).
+   */
+  accessToken?: string;
+  platformUsername?: string;
 }
 
 /**
@@ -28,24 +34,33 @@ export interface PostParams {
  * Returns a result object (never throws) so the caller can log per-platform outcomes.
  */
 export async function postToPlatform(params: PostParams): Promise<PlatformPostResult> {
-  const { platform, playerId, graphicUrl, imageBuffer, caption } = params;
+  const { platform, playerId, graphicUrl, imageBuffer, caption, accessToken: tokenOverride, platformUsername: usernameOverride } = params;
 
   try {
-    // Fetch stored access token for this player + platform
-    const { data: conn } = await supabase
-      .from('social_connections' as 'social_connections')
-      .select('access_token, platform_username')
-      .eq('player_id', playerId)
-      .eq('platform', platform)
-      .eq('is_active', true)
-      .maybeSingle();
+    let token: string;
+    let username: string;
 
-    if (!conn?.access_token) {
-      return { platform, success: false, error: 'No active connection found' };
+    if (tokenOverride) {
+      // Direct token provided (club connections)
+      token    = tokenOverride;
+      username = usernameOverride ?? '';
+    } else {
+      // Fetch stored access token for this player + platform
+      const { data: conn } = await supabase
+        .from('social_connections' as 'social_connections')
+        .select('access_token, platform_username')
+        .eq('player_id', playerId)
+        .eq('platform', platform)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (!conn?.access_token) {
+        return { platform, success: false, error: 'No active connection found' };
+      }
+
+      token    = conn.access_token as string;
+      username = (conn.platform_username as string | null) ?? '';
     }
-
-    const token    = conn.access_token as string;
-    const username = (conn.platform_username as string | null) ?? '';
 
     switch (platform) {
       case 'instagram': {
