@@ -6,9 +6,13 @@ import { isFeatureEnabled } from '@/lib/features';
 import {
   getSocialConnectionsAction,
   getSocialPostPrefsAction,
+  getPendingPreviewsAction,
+  getPostHistoryAction,
 } from '@/lib/actions/social';
 import { SocialConnectionsPanel } from '@/components/settings/SocialConnectionsPanel';
 import { SocialPostPrefsForm } from '@/components/settings/SocialPostPrefsForm';
+import { PendingPreviewsPanel } from '@/components/settings/PendingPreviewsPanel';
+import { PostHistoryPanel } from '@/components/settings/PostHistoryPanel';
 
 export const metadata: Metadata = { title: 'Social media · PLAYOFFE' };
 
@@ -22,7 +26,7 @@ interface Props {
 
 export default async function SocialSettingsPage({ searchParams }: Props) {
   // Hard gate — defence in depth even if the tab is hidden
-  const socialEnabled = await isFeatureEnabled('social_media');
+  const socialEnabled = await isFeatureEnabled('social_media_player');
   if (!socialEnabled) redirect('/settings/profile');
 
   const supabase = await createClient();
@@ -61,9 +65,11 @@ export default async function SocialSettingsPage({ searchParams }: Props) {
     };
   }
 
-  const [connections, prefs] = await Promise.all([
+  const [connections, prefs, pendingPreviews, postHistory] = await Promise.all([
     getSocialConnectionsAction(),
     getSocialPostPrefsAction(),
+    getPendingPreviewsAction(),
+    getPostHistoryAction(),
   ]);
 
   return (
@@ -82,11 +88,17 @@ export default async function SocialSettingsPage({ searchParams }: Props) {
         and player milestones.
       </p>
 
+      {/* Pending previews — shown at the top when posts are waiting for approval */}
+      <PendingPreviewsPanel initialPreviews={pendingPreviews} />
+
       {/* Connected accounts */}
       <SocialConnectionsPanel connections={connections} flashMessage={flashMessage} />
 
       {/* Posting preferences */}
       <SocialPostPrefsForm initialPrefs={prefs} connections={connections} />
+
+      {/* Post history */}
+      <PostHistoryPanel history={postHistory} />
     </>
   );
 }

@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { createTournamentSchema, type CreateTournamentInput } from '@pickleball/shared';
+import { enqueueTournamentCompleteGraphics } from '@/lib/social-queue';
 
 export async function createTournamentAction(
   input: CreateTournamentInput & { club_id: string },
@@ -198,6 +199,13 @@ export async function updateTournamentStatusAction(
     .eq('id', tournamentId);
 
   if (error) return { error: 'Failed to update status' };
+
+  // ── Fire tournament_complete social posting jobs ──────────────────────────
+  // Non-critical: fire-and-forget, errors are swallowed inside the helper.
+  if (status === 'completed') {
+    void enqueueTournamentCompleteGraphics({ tournamentId });
+  }
+
   return { success: true };
 }
 

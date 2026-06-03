@@ -15,6 +15,7 @@ import { SeedingPanel } from '@/components/tournaments/SeedingPanel';
 import { getCategoryWithEntries, getStageScoringAction } from '@/lib/actions/categories';
 import { getTournamentStageScoringAction } from '@/lib/actions/tournaments';
 import { getMatchesForCategory } from '@/lib/actions/draws';
+import { isFeatureEnabled } from '@/lib/features';
 
 export const metadata: Metadata = { title: 'Category entries' };
 
@@ -99,12 +100,13 @@ export default async function CategoryPage({ params }: Props) {
 
   const categoryId = categoryRow.id;
 
-  // Fetch category + entries + matches + stage scoring in parallel
-  const [data, matches, stageRows, tournamentStageRows] = await Promise.all([
+  // Fetch category + entries + matches + stage scoring + social flag in parallel
+  const [data, matches, stageRows, tournamentStageRows, organiserSocialEnabled] = await Promise.all([
     getCategoryWithEntries(categoryId),
     getMatchesForCategory(categoryId),
     getStageScoringAction(categoryId),
     getTournamentStageScoringAction(tournament.id),
+    isFeatureEnabled('social_media_organiser'),
   ]);
   if (!data) notFound();
 
@@ -147,6 +149,54 @@ export default async function CategoryPage({ params }: Props) {
     categoryStatus === 'draw_generated' ||
     categoryStatus === 'in_progress' ||
     categoryStatus === 'completed';
+
+  // ── Organiser "share draw on social" button visibility ────────────────────
+  // Show only when the organiser flag is enabled AND the club has at least one
+  // active social connection (otherwise clicking the button is pointless).
+  let canShareOnSocial = false;
+  if (organiserSocialEnabled && isDrawn) {
+    const { data: clubConns } = await admin
+      .from('club_social_connections' as any)
+      .select('id')
+      .eq('club_id', tournament.club_id)
+      .eq('is_active', true)
+      .limit(1);
+    canShareOnSocial = (clubConns as any[] | null)?.length ? (clubConns as any[]).length > 0 : false;
+  }
+
+  // ── Draw staleness detection ───────────────────────────────────────────────
+  // Compare entries referenced in matches vs current active entries.
+  // No extra DB queries — both datasets are already fetched above.
+  type StalenessEntry = { id: string; name: string };
+  let withdrawnInDraw: StalenessEntry[] = [];
+  let unplacedActive: StalenessEntry[] = [];
+
+  if (isDrawn && matches.length > 0) {
+    // Collect every entry ID that appears in at least one match slot
+    const drawEntryIds = new Set<string>();
+    for (const m of matches) {
+      if (m.entry_a) drawEntryIds.add(m.entry_a.id);
+      if (m.entry_b) drawEntryIds.add(m.entry_b.id);
+    }
+
+    // Withdrawn entries that are still referenced in the bracket
+    const seenWithdrawn = new Set<string>();
+    for (const m of matches) {
+      if (m.entry_a?.entry_status === 'withdrawn' && !seenWithdrawn.has(m.entry_a.id)) {
+        seenWithdrawn.add(m.entry_a.id);
+        withdrawnInDraw.push({ id: m.entry_a.id, name: m.entry_a.player_name });
+      }
+      if (m.entry_b?.entry_status === 'withdrawn' && !seenWithdrawn.has(m.entry_b.id)) {
+        seenWithdrawn.add(m.entry_b.id);
+        withdrawnInDraw.push({ id: m.entry_b.id, name: m.entry_b.player_name });
+      }
+    }
+
+    // Active entries that have no match slot yet (added after draw was generated)
+    unplacedActive = typedEntries
+      .filter((e) => !drawEntryIds.has(e.id))
+      .map((e) => ({ id: e.id, name: e.players?.full_name ?? 'Unknown' }));
+  }
 
   // For formats where groups or standings are meaningful, show StandingsTable
   // instead of a flat entry list once the draw is generated.
@@ -304,6 +354,8 @@ export default async function CategoryPage({ params }: Props) {
           entryCount={entryCount}
           initialMatches={matches}
           showStandings={false}
+          stalenessInfo={{ withdrawnInDraw, unplacedActive }}
+          shareOnSocialEnabled={canShareOnSocial}
         />
 
         {/* Stage scoring overrides — shown for elimination-type formats */}
