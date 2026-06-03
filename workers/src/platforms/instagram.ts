@@ -85,3 +85,91 @@ async function waitForInstagramContainer(
 }
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
+
+// ── Carousel post (group-stage draw) ─────────────────────────────────────────
+// Each element in imageUrls becomes one swipeable slide.
+// Instagram carousel requires 2–10 images; each must be a public HTTPS URL.
+
+/** Post a carousel (2–10 slides) to Instagram. */
+export async function postCarouselToInstagram(
+  accessToken: string,
+  imageUrls: string[],   // 2–10 public HTTPS URLs — one per slide
+  caption: string,
+): Promise<InstagramPostResult> {
+  if (imageUrls.length < 2) {
+    // Degrade to single-image if only one URL was provided
+    return postToInstagram(accessToken, imageUrls[0], caption);
+  }
+
+  // Clamp to Instagram's 10-slide maximum
+  const urls = imageUrls.slice(0, 10);
+
+  // Step 1: Get IG user ID
+  const meRes = await fetch(`${BASE}/me?fields=id&access_token=${accessToken}`);
+  if (!meRes.ok) {
+    const err = await meRes.text();
+    throw new Error(`Instagram /me failed: ${err}`);
+  }
+  const { id: igUserId } = (await meRes.json()) as { id: string };
+
+  // Step 2: Create one CHILD media container per image
+  const childIds: string[] = [];
+  for (const url of urls) {
+    const res = await fetch(`${BASE}/${igUserId}/media`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image_url:        url,
+        is_carousel_item: true,
+        access_token:     accessToken,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Instagram carousel child container failed: ${err}`);
+    }
+    const { id } = (await res.json()) as { id: string };
+    childIds.push(id);
+  }
+
+  // Step 3: Wait for all child containers to finish processing
+  for (const childId of childIds) {
+    await waitForInstagramContainer(igUserId, childId, accessToken);
+  }
+
+  // Step 4: Create the CAROUSEL container that groups the children
+  const carouselRes = await fetch(`${BASE}/${igUserId}/media`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      media_type:   'CAROUSEL',
+      children:     childIds.join(','),
+      caption,
+      access_token: accessToken,
+    }),
+  });
+  if (!carouselRes.ok) {
+    const err = await carouselRes.text();
+    throw new Error(`Instagram carousel container failed: ${err}`);
+  }
+  const { id: carouselContainerId } = (await carouselRes.json()) as { id: string };
+
+  // Step 5: Wait for carousel container to finish
+  await waitForInstagramContainer(igUserId, carouselContainerId, accessToken);
+
+  // Step 6: Publish the carousel
+  const publishRes = await fetch(`${BASE}/${igUserId}/media_publish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      creation_id:  carouselContainerId,
+      access_token: accessToken,
+    }),
+  });
+  if (!publishRes.ok) {
+    const err = await publishRes.text();
+    throw new Error(`Instagram carousel publish failed: ${err}`);
+  }
+  const { id: mediaId } = (await publishRes.json()) as { id: string };
+  return { mediaId };
+}

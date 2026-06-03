@@ -8,6 +8,65 @@ export interface FacebookPostResult {
   postId: string;
 }
 
+// ── Multi-photo post (group-stage draw carousel) ──────────────────────────────
+// For Facebook Pages: upload each photo with published=false to get photo IDs,
+// then create one feed post with attached_media referencing all IDs.
+
+/** Post multiple images as one multi-photo post to a Facebook Page feed. */
+export async function postMultiPhotoToFacebook(
+  accessToken: string,
+  imageUrls: string[],   // 2–10 public HTTPS URLs
+  caption: string,
+): Promise<FacebookPostResult> {
+  if (imageUrls.length < 2) {
+    return postToFacebook(accessToken, imageUrls[0], caption);
+  }
+
+  // Clamp to 10 photos
+  const urls = imageUrls.slice(0, 10);
+
+  // Step 1: Upload each photo without publishing → get photo IDs
+  const photoIds: string[] = [];
+  for (const url of urls) {
+    const res = await fetch(`${BASE}/me/photos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        published:    false,   // don't create a standalone post yet
+        access_token: accessToken,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Facebook photo upload (unpublished) failed: ${err}`);
+    }
+    const data = (await res.json()) as { id?: string };
+    if (data.id) photoIds.push(data.id);
+  }
+
+  if (photoIds.length === 0) throw new Error('No Facebook photo IDs returned');
+
+  // Step 2: Create a single feed post that attaches all photos
+  const attachedMedia = photoIds.map((id) => ({ media_fbid: id }));
+
+  const feedRes = await fetch(`${BASE}/me/feed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message:        caption,
+      attached_media: attachedMedia,
+      access_token:   accessToken,
+    }),
+  });
+  if (!feedRes.ok) {
+    const err = await feedRes.text();
+    throw new Error(`Facebook multi-photo feed post failed: ${err}`);
+  }
+  const feedData = (await feedRes.json()) as { id?: string };
+  return { postId: feedData.id ?? 'unknown' };
+}
+
 /** Post an image to the user's Facebook feed. graphicUrl must be a public HTTPS URL. */
 export async function postToFacebook(
   accessToken: string,

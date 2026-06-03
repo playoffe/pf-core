@@ -1,8 +1,8 @@
 // Unified platform posting function.
 // The post worker calls this with the platform ID and resolved credentials.
 
-import { postToInstagram } from './instagram.js';
-import { postToFacebook }  from './facebook.js';
+import { postToInstagram, postCarouselToInstagram } from './instagram.js';
+import { postToFacebook, postMultiPhotoToFacebook } from './facebook.js';
 import { postToX }         from './x.js';
 import { supabase }        from '../lib/supabase.js';
 
@@ -26,6 +26,15 @@ export interface PostParams {
    */
   accessToken?: string;
   platformUsername?: string;
+  /**
+   * Carousel / multi-image extensions.
+   * When provided (length > 1), the post uses the carousel/multi-image path.
+   * For Instagram: true carousel (swipeable slides).
+   * For Facebook: multi-photo post with attached_media.
+   * For X: multiple media IDs in one tweet (max 4).
+   */
+  carouselUrls?: string[];     // all slide image URLs (including primary)
+  carouselBuffers?: Buffer[];  // all slide PNG buffers (for X, which re-uploads to CDN)
 }
 
 /**
@@ -34,18 +43,29 @@ export interface PostParams {
  * Returns a result object (never throws) so the caller can log per-platform outcomes.
  */
 export async function postToPlatform(params: PostParams): Promise<PlatformPostResult> {
-  const { platform, playerId, graphicUrl, imageBuffer, caption, accessToken: tokenOverride, platformUsername: usernameOverride } = params;
+  const {
+    platform,
+    playerId,
+    graphicUrl,
+    imageBuffer,
+    caption,
+    accessToken: tokenOverride,
+    platformUsername: usernameOverride,
+    carouselUrls,
+    carouselBuffers,
+  } = params;
+
+  // Carousel / multi-image mode: when carouselUrls has 2+ items
+  const isCarousel = carouselUrls && carouselUrls.length > 1;
 
   try {
     let token: string;
     let username: string;
 
     if (tokenOverride) {
-      // Direct token provided (club connections)
       token    = tokenOverride;
       username = usernameOverride ?? '';
     } else {
-      // Fetch stored access token for this player + platform
       const { data: conn } = await supabase
         .from('social_connections' as 'social_connections')
         .select('access_token, platform_username')
@@ -64,14 +84,27 @@ export async function postToPlatform(params: PostParams): Promise<PlatformPostRe
 
     switch (platform) {
       case 'instagram': {
+        if (isCarousel) {
+          const r = await postCarouselToInstagram(token, carouselUrls!, caption);
+          return { platform, success: true, platformPostId: r.mediaId };
+        }
         const r = await postToInstagram(token, graphicUrl, caption);
         return { platform, success: true, platformPostId: r.mediaId };
       }
       case 'facebook': {
+        if (isCarousel) {
+          const r = await postMultiPhotoToFacebook(token, carouselUrls!, caption);
+          return { platform, success: true, platformPostId: r.postId };
+        }
         const r = await postToFacebook(token, graphicUrl, caption);
         return { platform, success: true, platformPostId: r.postId };
       }
       case 'x': {
+        if (isCarousel && carouselBuffers && carouselBuffers.length > 0) {
+          const [primary, ...extras] = carouselBuffers;
+          const r = await postToX(token, primary, caption, username, extras);
+          return { platform, success: true, platformPostId: r.tweetId };
+        }
         if (!imageBuffer) throw new Error('imageBuffer required for X posting');
         const r = await postToX(token, imageBuffer, caption, username);
         return { platform, success: true, platformPostId: r.tweetId };

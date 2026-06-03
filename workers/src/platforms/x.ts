@@ -17,18 +17,29 @@ export interface XPostResult {
 /**
  * Post an image + caption to X.
  * accessToken: user access token from PKCE OAuth 2.0 flow.
- * imageBuffer: raw PNG/JPEG bytes (< 5 MB for simple upload).
+ * imageBuffer: primary PNG/JPEG bytes (< 5 MB).
+ * extraBuffers: additional images for multi-image tweet (max 3 extra = 4 total).
+ *   X supports up to 4 media items per tweet.
  */
 export async function postToX(
   accessToken: string,
   imageBuffer: Buffer,
   caption: string,
   username: string,   // for building the tweet URL
+  extraBuffers?: Buffer[],  // optional additional images (up to 3)
 ): Promise<XPostResult> {
-  // Step 1: Upload media
-  const mediaId = await uploadMedia(accessToken, imageBuffer);
+  // Upload primary image
+  const mediaIds: string[] = [await uploadMedia(accessToken, imageBuffer)];
 
-  // Step 2: Create tweet
+  // Upload additional images (capped at 3 so total ≤ 4)
+  if (extraBuffers && extraBuffers.length > 0) {
+    const extras = extraBuffers.slice(0, 3);
+    for (const buf of extras) {
+      mediaIds.push(await uploadMedia(accessToken, buf));
+    }
+  }
+
+  // Create tweet with all media IDs
   const res = await fetch(TWEET_URL, {
     method: 'POST',
     headers: {
@@ -36,8 +47,8 @@ export async function postToX(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      text: caption,
-      media: { media_ids: [mediaId] },
+      text:  caption,
+      media: { media_ids: mediaIds },
     }),
   });
 

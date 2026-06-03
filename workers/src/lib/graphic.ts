@@ -6,11 +6,13 @@ import type { CategoryCompleteTemplateData } from './templates/category-complete
 import type { PodiumTemplateData } from './templates/podium.js';
 import type { DrawAnnouncementTemplateData } from './templates/draw-announcement.js';
 import type { ScheduleAnnouncementTemplateData } from './templates/schedule-announcement.js';
+import type { GroupSlideTemplateData } from './templates/group-slide.js';
 import { buildMatchWinElement } from './templates/match-win.js';
 import { buildCategoryCompleteElement } from './templates/category-complete.js';
 import { buildPodiumElement } from './templates/podium.js';
 import { buildDrawAnnouncementElement } from './templates/draw-announcement.js';
 import { buildScheduleAnnouncementElement } from './templates/schedule-announcement.js';
+import { buildGroupSlideElement } from './templates/group-slide.js';
 
 // Graphic dimensions
 const SQUARE_W = 1080;
@@ -57,4 +59,8 @@ export async function renderDrawAnnouncement(data: DrawAnnouncementTemplateData)
 
 export async function renderScheduleAnnouncement(data: ScheduleAnnouncementTemplateData): Promise<Buffer> {
   return renderToPng(buildScheduleAnnouncementElement(data));
+}
+
+export async function renderGroupSlide(data: GroupSlideTemplateData): Promise<Buffer> {
+  return renderToPng(buildGroupSlideElement(data));
 }

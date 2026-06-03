@@ -16,8 +16,10 @@ import {
   renderPodium,
   renderDrawAnnouncement,
   renderScheduleAnnouncement,
+  renderGroupSlide,
 } from '../lib/graphic.js';
 import { postToPlatform } from '../platforms/index.js';
+import type { GroupSlideTemplateData } from '../lib/templates/group-slide.js';
 
 const CONCURRENCY = parseInt(process.env.PODIUM_WORKER_CONCURRENCY ?? '2', 10);
 
@@ -39,6 +41,63 @@ export function startPodiumWorker() {
       // ── Render the correct graphic per type ───────────────────────────────
       let pngBuffer: Buffer;
       let caption: string;
+
+      if (type === 'draw_published' && job.data.drawFormat === 'group_stage_knockout' && categoryId) {
+        // ── Group stage: render one slide per group → carousel post ───────────
+        console.log(`[podium] Job ${job.id}: group stage draw — building carousel`);
+        const groupSlides = await fetchGroupSlides(
+          categoryId,
+          tournamentName,
+          job.data.categoryName ?? 'Category',
+        );
+
+        if (groupSlides.length > 1) {
+          const carouselUrls: string[] = [];
+          const carouselBuffers: Buffer[] = [];
+
+          for (const slide of groupSlides) {
+            const png = await renderGroupSlide(slide);
+            const safeName = slide.groupName.replace(/\s+/g, '-').toLowerCase();
+            const url = await uploadGraphic(
+              `organiser/${clubId}/carousel-${safeName}-${Date.now()}.png`,
+              png,
+            );
+            carouselUrls.push(url);
+            carouselBuffers.push(png);
+          }
+
+          const carouselCaption = `The draw for ${job.data.categoryName ?? 'the category'} at ${tournamentName} is LIVE! 🎯 Swipe to see all ${groupSlides.length} groups 👉 #pickleball`;
+          console.log(`[podium] Job ${job.id}: ${groupSlides.length} group slides rendered`);
+
+          // Post carousel to each connected platform
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { data: clubConns } = await supabase
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .from('club_social_connections' as any)
+            .select('platform, access_token, platform_username')
+            .eq('club_id', clubId)
+            .eq('is_active', true);
+
+          if (clubConns && (clubConns as any[]).length > 0) {
+            for (const conn of clubConns as { platform: string; access_token: string; platform_username: string | null }[]) {
+              const result = await postToPlatform({
+                platform:         conn.platform as 'instagram' | 'facebook' | 'x',
+                playerId:         clubId,
+                graphicUrl:       carouselUrls[0],   // primary (fallback for single-image path)
+                caption:          carouselCaption,
+                accessToken:      conn.access_token,
+                platformUsername: conn.platform_username ?? '',
+                carouselUrls,
+                carouselBuffers,
+              });
+              console.log(`[podium] Job ${job.id}: carousel → ${conn.platform} ${result.success ? `✓ (${result.platformPostId})` : `✗ (${result.error})`}`);
+            }
+          }
+
+          return { done: true, graphicUrls: carouselUrls, slides: groupSlides.length };
+        }
+        // Only 1 group (very rare) → fall through to single-image path below
+      }
 
       if (type === 'draw_published') {
         pngBuffer = await renderDrawAnnouncement({
@@ -219,4 +278,96 @@ export function startPodiumWorker() {
 
   console.log(`[podium] Worker started (concurrency ${CONCURRENCY})`);
   return worker;
+}
+
+// ── Group slides helper ───────────────────────────────────────────────────────
+
+/**
+ * Fetches all group-stage matches for a category, groups them by `group_name`,
+ * deduplicates players per group, and returns one GroupSlideTemplateData per group.
+ * Groups are sorted alphabetically (Group A, Group B, …).
+ */
+async function fetchGroupSlides(
+  categoryId: string,
+  tournamentName: string,
+  categoryName: string,
+): Promise<GroupSlideTemplateData[]> {
+  // 1. Fetch all group-stage matches (where group_name is not null)
+  const { data: matches } = await supabase
+    .from('matches')
+    .select('group_name, entry_a_id, entry_b_id')
+    .eq('category_id', categoryId)
+    .not('group_name', 'is', null)
+    .order('group_name', { ascending: true });
+
+  if (!matches || matches.length === 0) return [];
+
+  // 2. Collect unique entry IDs per group
+  const groupEntries = new Map<string, Set<string>>();
+  for (const m of matches as { group_name: string; entry_a_id: string | null; entry_b_id: string | null }[]) {
+    const group = m.group_name;
+    if (!groupEntries.has(group)) groupEntries.set(group, new Set());
+    if (m.entry_a_id) groupEntries.get(group)!.add(m.entry_a_id);
+    if (m.entry_b_id) groupEntries.get(group)!.add(m.entry_b_id);
+  }
+
+  if (groupEntries.size === 0) return [];
+
+  // 3. Fetch all entry → player_id mappings
+  const allEntryIds = [...new Set([...groupEntries.values()].flatMap((s) => [...s]))];
+  const { data: entries } = await supabase
+    .from('tournament_entries')
+    .select('id, player_id, seed')
+    .in('id', allEntryIds);
+
+  const playerIdByEntry = new Map<string, string>();
+  const seedByEntry     = new Map<string, number | null>();
+  for (const e of (entries ?? []) as { id: string; player_id: string; seed: number | null }[]) {
+    playerIdByEntry.set(e.id, e.player_id);
+    seedByEntry.set(e.id, e.seed);
+  }
+
+  // 4. Fetch player names
+  const allPlayerIds = [...new Set([...playerIdByEntry.values()])];
+  const { data: players } = await supabase
+    .from('players')
+    .select('id, full_name')
+    .in('id', allPlayerIds);
+
+  const nameById = new Map<string, string>();
+  for (const p of (players ?? []) as { id: string; full_name: string }[]) {
+    nameById.set(p.id, p.full_name);
+  }
+
+  // 5. Build slide data for each group, sorted alphabetically
+  const sortedGroups = [...groupEntries.keys()].sort();
+  const totalSlides  = sortedGroups.length;
+
+  return sortedGroups.map((groupName, idx) => {
+    const entryIds = [...groupEntries.get(groupName)!];
+
+    // Sort by seed (nulls last), then alphabetically
+    const sortedEntries = entryIds.sort((a, b) => {
+      const sa = seedByEntry.get(a) ?? 999;
+      const sb = seedByEntry.get(b) ?? 999;
+      if (sa !== sb) return sa - sb;
+      const na = nameById.get(playerIdByEntry.get(a) ?? '') ?? '';
+      const nb = nameById.get(playerIdByEntry.get(b) ?? '') ?? '';
+      return na.localeCompare(nb);
+    });
+
+    const playerNames = sortedEntries
+      .map((eid) => nameById.get(playerIdByEntry.get(eid) ?? '') ?? 'Player')
+      .filter(Boolean);
+
+    return {
+      tournamentName,
+      categoryName,
+      groupName,
+      players:     playerNames,
+      slideIndex:  idx,
+      totalSlides,
+      platform:    'generic',
+    };
+  });
 }
