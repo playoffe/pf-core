@@ -8,6 +8,7 @@ import { ScheduleEditor } from '@/components/tournaments/ScheduleEditor';
 import { ShareScheduleButton } from '@/components/tournaments/ShareScheduleButton';
 import type { MatchForScheduling } from '@/components/tournaments/ScheduleEditor';
 import { isFeatureEnabled } from '@/lib/features';
+import { isSuperAdmin } from '@/lib/supabase/server';
 
 export const metadata: Metadata = { title: 'Schedule matches' };
 
@@ -141,8 +142,13 @@ export default async function SchedulePage({ params }: Props) {
 
   const courtCount    = (tData.court_count ?? 2);
   const aiConfigured  = !!process.env.ANTHROPIC_API_KEY;
-  // Always show the AI button; if no key, the panel shows setup instructions.
-  const aiEnabled     = true;
+
+  // AI assistant visibility:
+  // - Super admins always see it (bypass flag)
+  // - Other admins see it only when the ai_schedule_assistant flag is enabled
+  const userIsSuperAdmin = isSuperAdmin(user);
+  const aiAssistantFlagEnabled = await isFeatureEnabled('ai_schedule_assistant');
+  const aiEnabled = userIsSuperAdmin || aiAssistantFlagEnabled;
 
   // Show "Share schedule on social" button only when the organiser flag is enabled
   // and the club has at least one active social connection.
