@@ -6,6 +6,7 @@ import { calculateRatingChange } from '@pickleball/rating';
 import { createNotificationsForPlayers } from './notifications';
 import { sendMatchResultNotification } from '@/lib/email/notifications';
 import { awardBadgesForPlayer } from './badges';
+import { enqueueMatchWinGraphic } from '@/lib/social-queue';
 
 interface SetScore {
   set_number: number;
@@ -409,6 +410,18 @@ export async function submitResultAction(
   // Award any newly-earned badges to both players (fire-and-forget)
   void awardBadgesForPlayer(entryA.player_id);
   void awardBadgesForPlayer(entryB.player_id);
+
+  // ── Enqueue social posting job for the winner (fire-and-forget) ───────────
+  // Non-critical: errors are swallowed inside enqueueMatchWinGraphic so they
+  // never block the scoring action response.
+  const winnerPlayerId = aWins ? entryA.player_id : entryB.player_id;
+  void enqueueMatchWinGraphic({
+    winnerPlayerId,
+    winnerEntryId: winnerEntryId,
+    matchId,
+    categoryId: match.category_id,
+    tournamentId: match.tournament_id,
+  });
 
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/scoring/${matchId}`);
   revalidatePath(`/tournaments/${ctx.tournamentSlug}/categories/${catSlugRow?.slug ?? match.category_id}`);
