@@ -1,0 +1,27 @@
+name: Keep Supabase Staging Alive
+
+# Pings the staging Supabase project every Monday morning to prevent
+# the free-tier project from pausing after 7 days of inactivity.
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday at 9:00 AM UTC
+  workflow_dispatch:      # Allow manual trigger if needed
+
+jobs:
+  ping:
+    name: Ping Staging Supabase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${{ secrets.DEV_SUPABASE_URL }}/rest/v1/" \
+            -H "apikey: ${{ secrets.DEV_SUPABASE_ANON_KEY }}")
+          echo "Supabase staging responded: HTTP $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ]; then
+            echo "✓ Staging is alive"
+          else
+            echo "✗ Unexpected status — project may be paused"
+            exit 1
+          fi

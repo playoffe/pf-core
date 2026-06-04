@@ -1,7 +1,7 @@
 # PLAYOFFE — Daily Handoff
 **Date:** 4 June 2026
 **Branch:** `master`
-**Last Commit:** `d5cb787` — feat: add dev environment — Terraform config + CI/CD workflow
+**Last Commit:** `1e4c0c1` — chore: daily handoff (keep-alive workflow + cost decisions pending push)
 
 ---
 
@@ -30,190 +30,232 @@
 
 | Phase | Status |
 |---|---|
-| Phase 1 — Platform Layer & Auth | ✅ Complete |
-| Phase 2 — Tournament Management | ✅ Complete |
-| Phase 3 — Draw Generation | ✅ Complete |
-| Phase 4 — Live Scoring | ✅ Complete |
-| Phase 5 — Player Network & Profiles | ✅ Complete |
-| Phase 6 — Rankings | ✅ Complete |
-| Phase 7 — Venue Display Screen | ✅ Complete |
-| Phase 8 — Feed & Social | ✅ Complete |
-| Phase 9 — Notifications | ✅ Complete |
-| Phase 10 — Superadmin & RBAC | ✅ Complete |
-| Phase 11 — Social Media Pipeline + AI Scheduling | ✅ Complete |
-| Phase 12 — Infrastructure & Deployment | ✅ Code complete — **pending real-world provisioning** |
+| Phases 1–11 | ✅ Complete |
+| Phase 12 — Infrastructure code | ✅ Complete |
+| Phase 12 — Real-world provisioning | ⏳ Not started |
 
 ---
 
-## Session Summary (4 June 2026)
+## Infrastructure Decision (agreed this session)
 
-### What Was Done
-1. **Merged `feature/smart-scheduling` → `master`** — all Phases 1–11 now on master
-2. **Pre-Phase 12 bug fixes:**
-   - `workers/src/workers/podium.worker.ts` — fixed `social_post_log` missing `platform` field; now inserts one row per platform inside the `clubConns` loop (carousel path was also unlogged — fixed)
-   - `packages/db/src/database.types.ts` — regenerated from local schema; stripped CLI noise lines
-3. **Phase 12 — Infrastructure as Code (Terraform):**
-   - `infra/` package with 6 modules: ECR, ECS Fargate, ElastiCache Redis, Secrets Manager, CloudWatch (5 alarms + dashboard), CloudFront CDN
-   - Three environment stacks: `dev.tfvars`, `staging.tfvars`, `prod.tfvars`
-   - ECS auto-scaling on Redis queue depth, deployment circuit breaker + auto-rollback
-4. **Phase 12 — CI/CD (GitHub Actions):**
-   - `pr-checks.yml` — TS + tests + Vercel preview URL on every PR
-   - `dev-deploy.yml` — push to `develop` branch → full dev environment deploy
-   - `staging-deploy.yml` — push to `master` → full staging deploy (no approval)
-   - `prod-deploy.yml` — push `v*.*.*` tag → manual approval gate → prod deploy + GitHub Release
-5. **Phase 12 — Security:**
-   - `apps/web/next.config.mjs` — CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy
-   - `apps/web/src/middleware.ts` — sliding-window rate limiting (10/30/120 req/min by route type)
-   - `supabase/audit/rls-audit.sql` — detects unprotected tables, missing policies, overly permissive grants
-6. **Phase 12 — Load Tests (k6):**
-   - `tests/load/draw-generation.js` — 32-player draw gen, ramp to 20 concurrent, p95 < 3s threshold
-   - `tests/load/scoring-concurrency.js` — 15 simultaneous referees, zero-conflict threshold
-   - `tests/load/workers-throughput.js` — queue burst 50 concurrent, measures jobs/sec + auto-scale
+**Deploy staging only** until full manual + automated + load testing is complete. Add prod only when ready to launch. Skip dev AWS infrastructure — use local dev instead.
 
----
+### Cost Plan
 
-## Deployment Pipeline (how it works)
-
-```
-Local dev  ──────────────── supabase start + docker redis + pnpm dev
-    │
-PR opened  ──────────────── Vercel ephemeral preview URL (dev Supabase, no workers)
-    │
-push → develop  ─────────── dev.playoffe.com  (ECS workers, dev Supabase, t3.micro Redis)
-    │
-push → master  ──────────── staging.playoffe.com  (ECS workers, staging Supabase, t3.micro Redis)
-    │
-git tag v*.*.* + approve ── playoffe.com  (ECS 2 workers, prod Supabase, t3.small Redis)
-```
-
-Each environment has its own:
-- Supabase project (isolated DB, Auth, Storage)
-- ECS Fargate cluster + service
-- ElastiCache Redis
-- Secrets Manager path (`/playoffe/{env}/*`)
-
----
-
-## What Is NOT Done Yet (requires real-world provisioning)
-
-The code is all written and committed. The next session must complete the actual provisioning:
-
-### Phase A — External Accounts (~1 hour)
-- [ ] **AWS IAM user** — create `playoffe-deploy` user, attach `AdministratorAccess`, generate Access Key
-- [ ] **Supabase — 3 projects** — create `playoffe-dev`, `playoffe-staging`, `playoffe-prod`; save project refs, anon keys, service role keys, DB passwords
-- [ ] **Supabase Personal Access Token** — supabase.com/dashboard/account/tokens
-- [ ] **Vercel** — `cd apps/web && vercel login && vercel link`; create token at vercel.com/account/tokens
-- [ ] **Domain DNS** — add `dev.`, `staging.` subdomains in Vercel + DNS records at registrar
-
-### Phase B — Config Files (~20 minutes)
-- [ ] Fill VPC ID + subnet IDs into `infra/environments/dev.tfvars`, `staging.tfvars`, `prod.tfvars`
-- [ ] Fill `supabase_storage_url` in each tfvars (format: `https://<ref>.supabase.co/storage/v1/object/public/social-graphics`)
-
-### Phase C — Terraform Deploy (~30 minutes)
-- [ ] `terraform init` in `infra/`
-- [ ] `terraform apply -var-file="environments/dev.tfvars"` (set all `TF_VAR_*` env vars first)
-- [ ] `supabase db push --project-ref <dev-ref>`
-- [ ] Create `social-graphics` storage bucket on dev Supabase project (Dashboard → Storage)
-- [ ] Repeat for staging (`terraform apply -var-file="environments/staging.tfvars"`)
-- [ ] **Hold prod** — deploy prod only after staging is validated
-
-### Phase D — GitHub Secrets (~20 minutes)
-Add these to GitHub → repo → Settings → Secrets → Actions:
-```
-AWS_ACCESS_KEY_ID
-AWS_SECRET_ACCESS_KEY
-SUPABASE_ACCESS_TOKEN
-DEV_SUPABASE_PROJECT_REF
-DEV_SUPABASE_URL
-DEV_SUPABASE_SERVICE_ROLE_KEY
-STAGING_SUPABASE_PROJECT_REF
-PROD_SUPABASE_PROJECT_REF      ← add when ready for prod
-VERCEL_TOKEN
-```
-- [ ] GitHub → Settings → Environments → `production` → Required reviewers → add yourself
-
-### Phase E — Validate Pipelines (~1 hour)
-- [ ] `git checkout -b develop && git push origin develop` — creates develop branch
-- [ ] Trivial commit on develop → watch `dev-deploy.yml` run → verify `dev.playoffe.com` live
-- [ ] Merge develop → master → watch `staging-deploy.yml` → verify `staging.playoffe.com` live
-- [ ] `git tag v0.1.0-rc1 && git push origin v0.1.0-rc1` → approval gate appears → approve → verify deploy
-
-### Phase F — Validate & Load Test Staging
-- [ ] Run `supabase/audit/rls-audit.sql` — fix any unprotected tables
-- [ ] Verify headers: `curl -I https://staging.playoffe.com` — CSP + HSTS present
-- [ ] Run `tests/load/draw-generation.js` — all thresholds pass
-- [ ] Run `tests/load/scoring-concurrency.js` — zero conflicts
-- [ ] Run `tests/load/workers-throughput.js` — queue drains, ECS auto-scales
-
-### Phase G — First Launch
-- [ ] `terraform apply -var-file="environments/prod.tfvars"`
-- [ ] `supabase db push --project-ref <prod-ref>`
-- [ ] `git tag v1.0.0 && git push origin v1.0.0` → approve → prod live
-
----
-
-## Key File Locations
-
-| File | Role |
-|---|---|
-| `infra/README.md` | Complete provisioning guide with all commands |
-| `infra/environments/*.tfvars` | Environment configs — fill VPC/subnet IDs before deploying |
-| `infra/modules/*/` | Terraform modules (ECR, ECS, ElastiCache, Secrets, CloudWatch, CloudFront) |
-| `.github/workflows/` | 4 CI/CD workflows |
-| `workers/Dockerfile` | Multi-stage ECS-ready container |
-| `workers/src/index.ts` | Worker entry point (graceful shutdown, Redis health check) |
-| `apps/web/src/middleware.ts` | Auth guard + rate limiting |
-| `apps/web/next.config.mjs` | Security headers |
-| `supabase/migrations/` | 21 migration files — applied in order |
-| `supabase/audit/rls-audit.sql` | Run before prod to detect RLS gaps |
-| `tests/load/*.js` | k6 load tests — run against staging |
-| `packages/db/src/database.types.ts` | Generated Supabase types — regenerate with `supabase gen types typescript --local > packages/db/src/database.types.ts` |
-
----
-
-## Feature Flags (current state)
-
-| Flag | State | Notes |
+| Phase | Setup | Monthly |
 |---|---|---|
-| `social_media_organiser` | ✅ ON | Club owners: draw/schedule/podium sharing |
-| `social_media_player` | ❌ OFF | Player auto-posting — disabled for launch |
-| `ai_schedule_assistant` | ✅ ON | AI scheduling chat; super admins always bypass |
-| `rankings` | ✅ ON | Rankings nav link; super admins always bypass |
-| `player_network` | ✅ ON | Social feed, follow, messaging |
-| `ai_caption_generation` | ✅ ON | Claude AI captions for social posts |
-| `player_self_reporting` | ❌ OFF | Player self-reported scores |
+| **Now — testing** | Staging only, Supabase free tier | **~$64/month** |
+| **Launch** | Add prod + Supabase Pro for prod | **~$155/month** |
+| **Scale** | Add dev environment | **~$185/month** |
+
+### Staging cost breakdown
+
+| Service | Monthly |
+|---|---|
+| AWS ECS Fargate (0.5 vCPU, 1 GB, 1 task) | $21 |
+| AWS ElastiCache Redis (cache.t3.micro) | $13 |
+| AWS Secrets Manager (14 secrets) | $6 |
+| AWS CloudWatch (alarms + logs) | $3 |
+| AWS ECR (image registry) | $1 |
+| Supabase staging (free tier) | $0 |
+| Vercel Pro | $20 |
+| **Total** | **~$64/month** |
+
+### Supabase Free Tier — why it works for staging
+- 500 MB DB, 1 GB storage — test data won't come close
+- Only risk: projects **pause after 7 days of inactivity**
+- Mitigation: `keep-alive.yml` workflow pings staging every Monday → project stays active
+- Upgrade to Pro only when creating the prod project at launch
 
 ---
 
-## Dev Setup (local)
+## What Phase 12 Code Was Built (all on master)
 
+### Terraform (`infra/`)
+```
+infra/
+  terraform.tf              — provider + state backend (S3 or Terraform Cloud)
+  variables.tf              — all variables (dev/staging/prod valid environments)
+  main.tf                   — composes all 6 modules
+  outputs.tf                — ECR URL, ECS names, Redis endpoint, CloudFront domain
+  environments/
+    dev.tfvars              — defer until needed
+    staging.tfvars          — fill VPC/subnet IDs here before first deploy
+    prod.tfvars             — defer until launch
+  modules/
+    ecr/                    — image registry, lifecycle policies
+    secrets/                — Secrets Manager /playoffe/{env}/* (14 secrets)
+    elasticache/            — Redis cluster + security group
+    ecs/                    — Fargate cluster + task def + service + auto-scaling
+    cloudwatch/             — 5 alarms + dashboard
+    cloudfront/             — CDN for social-graphics storage bucket
+  README.md                 — full provisioning guide
+```
+
+### GitHub Actions (`.github/workflows/`)
+
+| Workflow | Trigger | Active now? |
+|---|---|---|
+| `pr-checks.yml` | PR opened | ✅ Yes |
+| `staging-deploy.yml` | Push to `master` | ✅ Yes |
+| `dev-deploy.yml` | Push to `develop` branch | ⏳ Deferred |
+| `prod-deploy.yml` | Push `v*.*.*` tag | ⏳ Deferred |
+| `keep-alive.yml` | Every Monday 9am UTC | ✅ Yes |
+
+### Security
+- `apps/web/next.config.mjs` — CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy
+- `apps/web/src/middleware.ts` — sliding-window rate limiting (10/30/120 req/min by route)
+- `supabase/audit/rls-audit.sql` — detects unprotected tables before launch
+
+### Load Tests (`tests/load/`)
+- `draw-generation.js` — p95 < 3s threshold, 20 concurrent users
+- `scoring-concurrency.js` — 15 simultaneous referees, zero-conflict threshold
+- `workers-throughput.js` — queue burst, measures jobs/sec + auto-scale response
+
+---
+
+## What Needs to Happen Next (staging provisioning)
+
+**Estimated time: ~3 hours total**
+
+### Step 1 — AWS IAM (~15 min)
+- AWS Console → IAM → Users → Create user: `playoffe-deploy`
+- Attach policy: `AdministratorAccess`
+- Create Access Key → type: "Application running outside AWS"
+- Save Access Key ID + Secret (shown once only)
+
+### Step 2 — Supabase staging project (~15 min)
+- supabase.com/dashboard → New project → name: `playoffe-staging`
+- Region: ap-southeast-1 (Singapore)
+- Save: **Project Ref**, **Anon key**, **Service role key**, **DB password**
+- Create Personal Access Token: supabase.com/dashboard/account/tokens
+
+### Step 3 — Vercel (~15 min)
+- `cd apps/web && vercel login && vercel link`
+- Create API token: vercel.com/account/tokens → name: `playoffe-github-actions`
+- Add domain in Vercel: `staging.playoffe.com`
+- Add DNS record at your registrar (Vercel will tell you what to add)
+
+### Step 4 — Fill Terraform config (~20 min)
+- AWS Console → VPC → copy default VPC ID
+- AWS Console → VPC → Subnets → copy 2 subnet IDs (different availability zones)
+- Fill into `infra/environments/staging.tfvars`:
+  ```hcl
+  vpc_id     = "vpc-XXXXXXXXXXXXXXXXX"
+  subnet_ids = ["subnet-XXXXXXXX", "subnet-YYYYYYYY"]
+  supabase_storage_url = "https://<staging-ref>.supabase.co/storage/v1/object/public/social-graphics"
+  ```
+
+### Step 5 — Terraform deploy (~15 min + 10 min wait)
+```bash
+cd infra
+terraform init
+
+# Set all secrets as env vars (never in tfvars files)
+export TF_VAR_supabase_url="https://<staging-ref>.supabase.co"
+export TF_VAR_supabase_anon_key="eyJ..."
+export TF_VAR_supabase_service_role_key="eyJ..."
+export TF_VAR_supabase_db_password="..."
+export TF_VAR_anthropic_api_key="sk-ant-..."
+export TF_VAR_instagram_app_id="..."
+export TF_VAR_instagram_app_secret="..."
+export TF_VAR_facebook_app_id="..."
+export TF_VAR_facebook_app_secret="..."
+export TF_VAR_x_api_key="..."
+export TF_VAR_x_api_secret="..."
+export TF_VAR_x_access_token="..."
+export TF_VAR_x_access_token_secret="..."
+
+terraform plan -var-file="environments/staging.tfvars"   # preview first
+terraform apply -var-file="environments/staging.tfvars"  # ~10 min
+terraform output                                          # note the outputs
+```
+
+### Step 6 — Supabase migrations + storage (~10 min)
+```bash
+# Push all 21 migrations to staging
+supabase db push --project-ref <staging-ref>
+
+# Create social-graphics bucket:
+# Supabase Dashboard → Storage → New bucket
+# Name: social-graphics  |  Public: yes  |  Max size: 10MB
+```
+
+### Step 7 — GitHub secrets (~15 min)
+GitHub → repo → Settings → Secrets → Actions → add:
+
+| Secret | Value |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | From Step 1 |
+| `AWS_SECRET_ACCESS_KEY` | From Step 1 |
+| `SUPABASE_ACCESS_TOKEN` | From Step 2 |
+| `STAGING_SUPABASE_PROJECT_REF` | From Step 2 |
+| `DEV_SUPABASE_URL` | `https://<staging-ref>.supabase.co` (reuse staging for PR tests) |
+| `DEV_SUPABASE_ANON_KEY` | Staging anon key (for keep-alive workflow) |
+| `DEV_SUPABASE_SERVICE_ROLE_KEY` | Staging service role key |
+| `VERCEL_TOKEN` | From Step 3 |
+
+### Step 8 — Validate end to end (~30 min)
+```bash
+# 1. Trigger staging deploy
+git commit --allow-empty -m "chore: trigger staging pipeline validation"
+git push origin master
+# → Watch GitHub Actions → staging-deploy.yml → should complete green
+
+# 2. Verify staging is live
+curl -I https://staging.playoffe.com   # should return 200 with security headers
+
+# 3. Verify workers are running
+# AWS Console → ECS → playoffe-staging-workers → Tasks → 1 running task
+
+# 4. Verify keep-alive runs
+# GitHub Actions → Keep Supabase Staging Alive → Run workflow (manual trigger)
+```
+
+---
+
+## When to Add Production
+
+All three of these must be true before deploying prod:
+
+- [ ] Full manual testing complete (happy path + edge cases)
+- [ ] All k6 load test thresholds passing on staging
+- [ ] `supabase/audit/rls-audit.sql` clean — zero unprotected tables
+
+Then:
+```bash
+# Create Supabase prod project, add PROD_SUPABASE_PROJECT_REF secret
+# Create GitHub 'production' environment with required reviewer
+terraform apply -var-file="environments/prod.tfvars"
+supabase db push --project-ref <prod-ref>
+git tag v1.0.0 && git push origin v1.0.0
+# → approve in GitHub → live
+```
+
+---
+
+## Dev Setup (local — unchanged)
 ```bash
 supabase start
 docker start pickleball-redis
-cd apps/web && (unset ANTHROPIC_API_KEY && npm run dev)   # separate terminal
-cd workers && pnpm dev                                     # separate terminal
+cd apps/web && (unset ANTHROPIC_API_KEY && npm run dev)
+cd workers && pnpm dev
 ```
-
-**Local URLs:**
-- App: http://localhost:3000
-- Supabase Studio: http://localhost:54323
-- Mailpit (email): http://localhost:54325
 
 **Test accounts:**
 - `alex@playoffe.dev` / `TestPass123!` — Super Admin
 - `sam@playoffe.dev` / `TestPass123!` — Club Owner (Blue Bird Club)
 
-**Regenerate types after migration:**
-```bash
-supabase gen types typescript --local > packages/db/src/database.types.ts
-# Then strip any CLI noise from line 1 and the last 2 lines if present
-```
+**Gotchas:**
+- `ANTHROPIC_API_KEY` — always unset before `npm run dev` (empty system var overrides `.env.local`)
+- `pnpm approve-builds` required after fresh install (sharp + @resvg/resvg-js native builds)
+- `supabase gen types` output needs first line (`Connecting to db...`) and last 2 lines (CLI update notice) stripped
 
 ---
 
 ## 🚀 Resume Prompt
 
-> Paste everything below this line into a new Claude Code session to resume instantly.
+> Copy everything from here to the end and paste into a new Claude Code session.
 
 ---
 
@@ -222,7 +264,6 @@ We are building **PLAYOFFE** — a full-stack pickleball tournament management p
 **Repo:** `C:\Projects\Repositories\pratik\pickleball-platform`
 **GitHub:** https://github.com/pratikpbhagat/playoffe
 **Branch:** `master`
-**Last commit:** `d5cb787` — feat: add dev environment
 
 ---
 
@@ -237,87 +278,54 @@ ffa2c7b fix: social_post_log platform field + regenerate Supabase types
 ---
 
 ### Phase status
-- **Phases 1–11:** Complete ✅
-- **Phase 12 (Infrastructure/Deployment):** Code complete ✅ — **provisioning not yet done** ⏳
+- **Phases 1–11:** ✅ Complete
+- **Phase 12 — Infrastructure code:** ✅ Complete (all on master)
+- **Phase 12 — Real-world provisioning:** ⏳ Not started
 
 ---
 
-### What Phase 12 code was built (all committed to master)
+### Agreed infrastructure decisions
+- **Staging only** for now — skip dev and prod AWS infra until testing is complete
+- **Supabase free tier** for staging (saves $25/month) — `keep-alive.yml` prevents project pausing
+- **Target cost: ~$64/month** during testing phase
+- **Add prod** only when manual + load + security testing passes on staging
+- **Cost at launch: ~$155/month** (add Supabase Pro prod project + prod AWS stack)
 
-**Terraform (`infra/`):**
-- 6 modules: ECR, ECS Fargate + auto-scaling, ElastiCache Redis, Secrets Manager, CloudWatch (5 alarms), CloudFront CDN
-- 3 environment configs: `infra/environments/dev.tfvars`, `staging.tfvars`, `prod.tfvars` — VPC/subnet IDs still need to be filled in
+---
+
+### What's built (all committed to master)
+
+**Terraform (`infra/`):** 6 modules — ECR, ECS Fargate + auto-scaling, ElastiCache Redis, Secrets Manager, CloudWatch, CloudFront. Three environment configs in `infra/environments/`. VPC/subnet IDs in `staging.tfvars` still need to be filled in before first deploy.
 
 **GitHub Actions (`.github/workflows/`):**
 - `pr-checks.yml` — TS + tests + Vercel preview on every PR
-- `dev-deploy.yml` — push to `develop` branch → deploys to `dev.playoffe.com`
-- `staging-deploy.yml` — push to `master` → deploys to `staging.playoffe.com`
-- `prod-deploy.yml` — push `v*.*.*` tag + manual approval → deploys to `playoffe.com`
+- `staging-deploy.yml` — push to master → full staging deploy
+- `dev-deploy.yml` — deferred (triggers only on `develop` branch)
+- `prod-deploy.yml` — deferred (triggers only on `v*.*.*` tags)
+- `keep-alive.yml` — pings staging Supabase every Monday to prevent free-tier pausing
 
-**Security:** CSP/HSTS headers in `next.config.mjs`, rate limiting in `middleware.ts`, RLS audit SQL in `supabase/audit/rls-audit.sql`
+**Security:** CSP/HSTS headers (`next.config.mjs`), rate limiting (`middleware.ts`), RLS audit SQL (`supabase/audit/rls-audit.sql`)
 
-**Load tests:** k6 scripts in `tests/load/` (draw generation, scoring concurrency, workers throughput)
-
----
-
-### Deployment pipeline
-```
-local → PR preview (ephemeral) → dev.playoffe.com (develop branch)
-     → staging.playoffe.com (master branch)
-     → playoffe.com (v*.*.* tag + approval)
-```
+**Load tests:** k6 scripts in `tests/load/`
 
 ---
 
-### What needs to happen next (real-world provisioning)
+### What needs to happen next — staging provisioning (~3 hours)
 
-**Phase A — External accounts (~1 hour)**
-- AWS IAM user `playoffe-deploy` with Access Key
-- 3 Supabase projects: `playoffe-dev`, `playoffe-staging`, `playoffe-prod` — save refs + keys
-- Supabase Personal Access Token (for CI migrations)
-- Vercel: `cd apps/web && vercel login && vercel link` + create API token
-- Domain DNS: add `dev.` and `staging.` subdomains
+1. **AWS IAM** — create `playoffe-deploy` user, `AdministratorAccess` policy, generate Access Key
+2. **Supabase** — create `playoffe-staging` project (ap-southeast-1), save ref + keys + DB password; create Personal Access Token
+3. **Vercel** — `cd apps/web && vercel login && vercel link`; create API token; add `staging.playoffe.com` domain
+4. **`staging.tfvars`** — fill `vpc_id`, `subnet_ids`, `supabase_storage_url`
+5. **Terraform** — `cd infra && terraform init && terraform apply -var-file="environments/staging.tfvars"` (set all `TF_VAR_*` env vars first — see `infra/README.md` for full list)
+6. **Supabase migrations** — `supabase db push --project-ref <ref>`; create `social-graphics` storage bucket (public)
+7. **GitHub secrets** — add 8 secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SUPABASE_ACCESS_TOKEN`, `STAGING_SUPABASE_PROJECT_REF`, `DEV_SUPABASE_URL`, `DEV_SUPABASE_ANON_KEY`, `DEV_SUPABASE_SERVICE_ROLE_KEY`, `VERCEL_TOKEN`
+8. **Validate** — empty commit to master → watch `staging-deploy.yml` → verify `staging.playoffe.com` live
 
-**Phase B — Fill config files (~20 min)**
-- VPC ID + 2 subnet IDs into all 3 `infra/environments/*.tfvars`
-- `supabase_storage_url` in each tfvars
-
-**Phase C — Terraform deploy (~30 min)**
-- `cd infra && terraform init`
-- Set all `TF_VAR_*` env vars (14 secrets — see `infra/README.md`)
-- `terraform apply -var-file="environments/dev.tfvars"`
-- `supabase db push --project-ref <dev-ref>`
-- Create `social-graphics` Storage bucket on dev Supabase (Dashboard → Storage, public)
-- Repeat for staging — hold prod until staging validated
-
-**Phase D — GitHub secrets (~20 min)**
-Add to repo → Settings → Secrets → Actions:
-`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SUPABASE_ACCESS_TOKEN`,
-`DEV_SUPABASE_PROJECT_REF`, `DEV_SUPABASE_URL`, `DEV_SUPABASE_SERVICE_ROLE_KEY`,
-`STAGING_SUPABASE_PROJECT_REF`, `PROD_SUPABASE_PROJECT_REF`, `VERCEL_TOKEN`
-
-Create GitHub `production` environment with required reviewer (yourself).
-
-**Phase E — Validate pipelines (~1 hour)**
-- `git checkout -b develop && git push origin develop`
-- Commit on develop → `dev-deploy.yml` → verify `dev.playoffe.com` live
-- Merge develop → master → `staging-deploy.yml` → verify `staging.playoffe.com` live
-- `git tag v0.1.0-rc1 && git push origin v0.1.0-rc1` → approval gate → approve → verify
-
-**Phase F — Load test + security audit (staging)**
-- `supabase/audit/rls-audit.sql` against staging — fix any gaps
-- `k6 run tests/load/draw-generation.js` (and scoring + workers scripts)
-- All k6 thresholds must pass before proceeding to prod
-
-**Phase G — First launch**
-- `terraform apply -var-file="environments/prod.tfvars"`
-- `supabase db push --project-ref <prod-ref>`
-- Create `social-graphics` bucket on prod Supabase
-- `git tag v1.0.0 && git push origin v1.0.0` → approve → live
+Full step-by-step commands are in `DAILY_HANDOFF.md` and `infra/README.md`.
 
 ---
 
-### Dev setup (local)
+### Local dev setup
 ```bash
 supabase start
 docker start pickleball-redis
@@ -325,17 +333,6 @@ cd apps/web && (unset ANTHROPIC_API_KEY && npm run dev)
 cd workers && pnpm dev
 ```
 
-**Test accounts:**
-- `alex@playoffe.dev` / `TestPass123!` — Super Admin
-- `sam@playoffe.dev` / `TestPass123!` — Club Owner (Blue Bird Club)
+**Test accounts:** `alex@playoffe.dev` / `TestPass123!` (Super Admin) · `sam@playoffe.dev` / `TestPass123!` (Club Owner)
 
----
-
-### Key context
-- Monorepo: pnpm workspaces — `apps/web`, `workers/`, `packages/db`, `packages/draw-engine`, `packages/rating`, `packages/shared`, `packages/ui`
-- Workers use BullMQ queue names: `social.graphic`, `social.post`, `social.podium` (dots, not colons — BullMQ v5 restriction)
-- `supabase gen types` output must have first line (`Connecting to db...`) and last 2 lines (CLI update notice) stripped manually
-- `ANTHROPIC_API_KEY` — always unset system env before `npm run dev` (system empty var overrides `.env.local`)
-- `pnpm approve-builds` required after fresh install (sharp + @resvg/resvg-js native builds)
-
-Please read `DAILY_HANDOFF.md` in the repo root for the full session context, then confirm what you understand and ask which provisioning phase to start with.
+Please read `DAILY_HANDOFF.md` in the repo root, confirm what you understand, then ask which provisioning step to start with.
