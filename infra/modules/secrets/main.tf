@@ -29,7 +29,7 @@ resource "aws_secretsmanager_secret" "secrets" {
 
   name                    = "${local.prefix}/${each.key}"
   description             = "PLAYOFFE ${var.environment}: ${each.key}"
-  recovery_window_in_days = var.environment == "prod" ? 7 : 0
+  recovery_window_in_days = var.environment == "prod" ? 7 : 0  # dev + staging: instant delete
 }
 
 resource "aws_secretsmanager_secret_version" "secrets" {

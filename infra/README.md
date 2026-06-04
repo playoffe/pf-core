@@ -1,18 +1,31 @@
 # PLAYOFFE Infrastructure
 
-Terraform-managed AWS infrastructure for PLAYOFFE. Each environment (staging, prod) is an independent deployment run from the same configuration.
+Terraform-managed AWS infrastructure for PLAYOFFE. Three environments — dev, staging, prod — each deployed independently from the same configuration.
 
-## What This Creates
+## Environment Overview
 
-| Resource | Staging | Production |
-|---|---|---|
-| ECR repository | `playoffe/workers` (shared) | same repo, different tags |
-| ECS Fargate cluster | `playoffe-staging-workers` | `playoffe-prod-workers` |
-| ECS service | 1 task, auto-scale 1–3 | 2 tasks, auto-scale 2–6 |
-| ElastiCache Redis | `cache.t3.micro` | `cache.t3.small` |
-| Secrets Manager | `/playoffe/staging/*` | `/playoffe/prod/*` |
-| CloudWatch alarms | queue depth, task health, post errors | same |
-| CloudFront CDN | `social-graphics` bucket | same |
+| | Dev | Staging | Production |
+|---|---|---|---|
+| **URL** | dev.playoffe.com | staging.playoffe.com | playoffe.com |
+| **Deploy trigger** | push to `develop` branch | push to `master` branch | push `v*.*.*` tag + approval |
+| **Supabase project** | `playoffe-dev` | `playoffe-staging` | `playoffe-prod` |
+| **Workers** | ECS 1 task (0.25 vCPU) | ECS 1 task (0.5 vCPU) | ECS 2 tasks (1 vCPU) |
+| **Redis** | `cache.t3.micro` | `cache.t3.micro` | `cache.t3.small` |
+| **Secrets path** | `/playoffe/dev/*` | `/playoffe/staging/*` | `/playoffe/prod/*` |
+| **Image tag prefix** | `dev-<sha>` | `staging-<sha>` | `prod-<version>` |
+| **Approval gate** | None | None | Required |
+
+## What This Creates (per environment)
+
+| Resource | Notes |
+|---|---|
+| ECR repository | `playoffe/workers` — shared, images tagged per env |
+| ECS Fargate cluster | `playoffe-{env}-workers` |
+| ECS service | Auto-scaling based on Redis queue depth |
+| ElastiCache Redis | Sized per environment |
+| Secrets Manager | All 14 env vars at `/playoffe/{env}/*` |
+| CloudWatch alarms | Queue depth, task health, CPU, memory, post errors |
+| CloudFront CDN | In front of `social-graphics` Supabase Storage bucket |
 
 ## Prerequisites
 
@@ -36,6 +49,19 @@ terraform init
 # 3. Fill in your VPC/subnet IDs in environments/staging.tfvars
 #    Find them: AWS Console → VPC → Your VPCs
 ```
+
+## Deploying Dev
+
+```bash
+cd infra
+export TF_VAR_supabase_url="https://DEVPROJECT.supabase.co"
+# ... set all other TF_VAR_* to dev project values ...
+
+terraform plan -var-file="environments/dev.tfvars"
+terraform apply -var-file="environments/dev.tfvars"
+```
+
+Also add `DEV_SUPABASE_PROJECT_REF` to GitHub Actions secrets after creating your Supabase dev project.
 
 ## Deploying Staging
 

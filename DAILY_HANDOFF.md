@@ -61,8 +61,9 @@ terraform apply -var-file="environments/staging.tfvars"
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `pr-checks.yml` | PR opened | TypeScript check + workers tests + Vercel preview URL posted to PR |
-| `staging-deploy.yml` | Push to `master` | Supabase migrate → Docker build+push ECR → ECS rolling deploy → Vercel deploy |
-| `prod-deploy.yml` | Push `v*.*.*` tag | Manual approval gate → migrate → promote ECR image → ECS deploy → Vercel → GitHub Release |
+| `dev-deploy.yml` | Push to `develop` | Supabase migrate (dev) → Docker build/push ECR → ECS dev deploy → Vercel `dev.playoffe.com` |
+| `staging-deploy.yml` | Push to `master` | Supabase migrate (staging) → Docker build/push ECR → ECS rolling deploy → Vercel staging |
+| `prod-deploy.yml` | Push `v*.*.*` tag | Manual approval gate → migrate → promote ECR image → ECS deploy → Vercel prod → GitHub Release |
 
 **To release to production:**
 ```bash
@@ -133,10 +134,11 @@ k6 run --env BASE_URL=https://staging.playoffe.com --env COOKIE="sb-..." \
 | `AWS_ACCESS_KEY_ID` | AWS Console → IAM → Users |
 | `AWS_SECRET_ACCESS_KEY` | AWS Console → IAM → Users |
 | `SUPABASE_ACCESS_TOKEN` | supabase.com/dashboard/account/tokens |
+| `DEV_SUPABASE_PROJECT_REF` | Supabase dev project settings |
+| `DEV_SUPABASE_URL` | Dev Supabase URL (for PR tests) |
+| `DEV_SUPABASE_SERVICE_ROLE_KEY` | Dev service role key |
 | `STAGING_SUPABASE_PROJECT_REF` | Supabase staging project settings |
 | `PROD_SUPABASE_PROJECT_REF` | Supabase prod project settings |
-| `DEV_SUPABASE_URL` | Local/dev Supabase URL (for PR tests) |
-| `DEV_SUPABASE_SERVICE_ROLE_KEY` | Dev service role key |
 | `VERCEL_TOKEN` | vercel.com/account/tokens |
 
 ---
