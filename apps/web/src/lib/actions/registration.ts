@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { checkPermission } from '@/lib/permissions';
 import {
   sendPartnerInviteNotification,
   sendEntryConfirmedNotification,
@@ -188,12 +189,17 @@ export async function withdrawEntryAction(entryId: string) {
   // Fetch entry — must belong to this user
   const { data: entry } = await admin
     .from('tournament_entries')
-    .select('id, player_id, category_id, status, tournament_id, tournaments!tournament_id(slug)')
+    .select('id, player_id, category_id, status, tournament_id, tournaments!tournament_id(slug, club_id)')
     .eq('id', entryId)
     .single();
 
   if (!entry || entry.player_id !== user.id) return { error: 'Entry not found.' };
   if (entry.status === 'withdrawn') return { error: 'Already withdrawn.' };
+
+  // Check role_permissions: is the 'player' role allowed to withdraw?
+  const t = entry.tournaments as { slug: string; club_id: string } | null;
+  const allowed = await checkPermission('player', 'entries', 'withdraw', t?.club_id);
+  if (!allowed) return { error: 'Withdrawals are not permitted at this time.' };
 
   const wasActive = entry.status === 'active';
   const tSlug = (entry.tournaments as { slug: string } | null)?.slug ?? entry.tournament_id;
@@ -685,7 +691,17 @@ export async function removeEntryAction(entryId: string) {
   if (!entry) return { error: 'Permission denied.' };
   if (entry.status === 'withdrawn') return { error: 'Already withdrawn.' };
 
-  const admin = createAdminClient();
+  // Check role_permissions: is the 'admin' role allowed to withdraw/remove entries?
+  const adminClient = createAdminClient();
+  const { data: tourneyClub } = await adminClient
+    .from('tournaments')
+    .select('club_id')
+    .eq('id', entry.tournament_id)
+    .single();
+  const allowed = await checkPermission('admin', 'entries', 'withdraw', tourneyClub?.club_id ?? undefined);
+  if (!allowed) return { error: 'Entry removal is not permitted at this time.' };
+
+  const admin = adminClient;
   const wasActive = entry.status === 'active';
 
   await admin.from('tournament_entries').update({ status: 'withdrawn' }).eq('id', entryId);

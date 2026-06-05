@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { checkPermission } from '@/lib/permissions';
 import { AppNav } from '@/components/layout/AppNav';
 import { PublicCategoryCard } from '@/components/events/PublicCategoryCard';
 import { DeadlineCountdown } from '@/components/events/DeadlineCountdown';
@@ -160,6 +161,9 @@ export default async function PublicTournamentPage({ params }: Props) {
     }
   }
 
+  // Permission: can players withdraw their own entries?
+  const canPlayerWithdraw = await checkPermission('player', 'entries', 'withdraw', club.id);
+
   const fmt = (d: string) =>
     new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
   const dateStr = t.start_date === t.end_date
@@ -279,6 +283,7 @@ export default async function PublicTournamentPage({ params }: Props) {
                   playFormatLabel={PLAY_FORMAT_LABEL[cat.play_format] ?? cat.play_format}
                   drawFormatLabel={DRAW_FORMAT_LABEL[cat.draw_format] ?? cat.draw_format}
                   matchProgress={matchProgress[cat.id] ?? null}
+                  canWithdraw={canPlayerWithdraw}
                 />
               ))}
             </div>

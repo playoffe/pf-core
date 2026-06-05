@@ -49,6 +49,8 @@ interface Props {
   entries: EntryRow[];
   /** When true, the empty-state message acknowledges active filters */
   isFiltered?: boolean;
+  /** Controlled by role_permissions — super admin can disable admin withdraw/remove */
+  canWithdraw?: boolean;
 }
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
@@ -65,7 +67,7 @@ const PLAY_FORMAT: Record<string, string> = {
   mixed_doubles: 'Mixed doubles',
 };
 
-export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, entries, isFiltered }: Props) {
+export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, entries, isFiltered, canWithdraw = true }: Props) {
   const router = useRouter();
   const { confirm } = useConfirm();
   const [acting, setActing] = useState<string | null>(null);
@@ -349,7 +351,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
                               {acting === entry.id ? '…' : 'Promote'}
                             </button>
                           )}
-                          {isActive && (
+                          {isActive && canWithdraw && (
                             <button
                               onClick={() => handleWithdraw(entry.id, player?.full_name ?? 'player')}
                               disabled={acting === entry.id}
@@ -358,7 +360,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
                               {acting === entry.id ? '…' : 'Withdraw'}
                             </button>
                           )}
-                          {(isActive || isWaitlisted) && (
+                          {(isActive || isWaitlisted) && canWithdraw && (
                             <button
                               onClick={() => handleRemove(entry.id, player?.full_name ?? 'player')}
                               disabled={acting === entry.id}
@@ -367,7 +369,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
                               {acting === entry.id ? '…' : 'Remove'}
                             </button>
                           )}
-                          {isProvisional && (
+                          {isProvisional && canWithdraw && (
                             <button
                               onClick={() => handleRemove(entry.id, player?.full_name ?? 'player')}
                               disabled={acting === entry.id}
@@ -473,7 +475,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
                           {acting === entry.id ? '…' : 'Promote'}
                         </button>
                       )}
-                      {isActive && (
+                      {isActive && canWithdraw && (
                         <button
                           onClick={() => handleWithdraw(entry.id, player?.full_name ?? 'player')}
                           disabled={acting === entry.id}
@@ -483,7 +485,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
                           {acting === entry.id ? '…' : 'Withdraw'}
                         </button>
                       )}
-                      {(isActive || isWaitlisted) && (
+                      {(isActive || isWaitlisted) && canWithdraw && (
                         <button
                           onClick={() => handleRemove(entry.id, player?.full_name ?? 'player')}
                           disabled={acting === entry.id}
@@ -493,7 +495,7 @@ export function PendingEntriesPanel({ tournamentSlug, tournamentId, category, en
                           {acting === entry.id ? '…' : 'Remove'}
                         </button>
                       )}
-                      {isProvisional && (
+                      {isProvisional && canWithdraw && (
                         <button
                           onClick={() => handleRemove(entry.id, player?.full_name ?? 'player')}
                           disabled={acting === entry.id}

@@ -26,6 +26,8 @@ interface Props {
   playFormatLabel: string;
   drawFormatLabel: string;
   matchProgress: { total: number; completed: number } | null;
+  /** Controlled by role_permissions — super admin can disable player withdrawals */
+  canWithdraw?: boolean;
 }
 
 const MY_STATUS_BADGE: Record<string, { label: string; className: string }> = {
@@ -55,6 +57,7 @@ export function PublicCategoryCard({
   playFormatLabel,
   drawFormatLabel,
   matchProgress,
+  canWithdraw = true,
 }: Props) {
   const router = useRouter();
   const { confirm } = useConfirm();
@@ -76,7 +79,7 @@ export function PublicCategoryCard({
   const canRegister = canAct && !isFull && !doubles;
   const canWaitlist = canAct && isFull && !doubles;
   const canRegisterDoubles = canAct && doubles;
-  const canWithdraw = !!localStatus && localStatus !== 'withdrawn';
+  const canWithdrawEntry = !!localStatus && localStatus !== 'withdrawn' && canWithdraw;
 
   async function handleRegister() {
     setLoading(true);
@@ -230,7 +233,7 @@ export function PublicCategoryCard({
           )}
 
           {/* Withdraw */}
-          {canWithdraw && (
+          {canWithdrawEntry && (
             <button
               onClick={handleWithdraw}
               disabled={loading}
