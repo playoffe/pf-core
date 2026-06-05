@@ -296,7 +296,7 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
           <thead>
             {/* Row 1: Role group headers */}
             <tr className="border-b border-surface-border">
-              <th className="py-3 pl-4 pr-6 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide w-64">
+              <th className="sticky left-0 z-10 bg-surface-card shadow-[2px_0_6px_rgba(0,0,0,0.35)] sm:shadow-none py-3 pl-4 pr-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide w-28 sm:w-64 sm:pr-6">
                 Feature
               </th>
               {ROLES.map((role) => {
@@ -315,7 +315,7 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
 
             {/* Row 2: On / Read / Write sub-headers */}
             <tr className="border-b-2 border-surface-border bg-white/[0.03]">
-              <th className="pl-4" />
+              <th className="sticky left-0 z-10 bg-[#0f1117] pl-4" />
               {ROLES.map((role) => {
                 const theme = ROLE_THEME[role];
                 return (
@@ -342,7 +342,7 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
                 <tr className="border-t-2 border-surface-border bg-white/[0.04]">
                   <td
                     colSpan={1 + ROLES.length * 3}
-                    className="py-3 pl-4 pr-6"
+                    className="sticky left-0 z-10 bg-white/[0.04] py-3 pl-4 pr-6"
                   >
                     <span className="inline-flex items-center gap-2">
                       <span className="h-3.5 w-1 rounded-full bg-brand-500 shrink-0" />
@@ -358,7 +358,7 @@ export function PermissionMatrix({ permissions, clubs, selectedClubId }: Props) 
                     key={`${key}:${sub}`}
                     className="border-b border-surface-border/20 hover:bg-white/[0.025] transition-colors"
                   >
-                    <td className="py-3 pl-4 pr-6 text-sm text-slate-300">{label}</td>
+                    <td className="sticky left-0 z-10 bg-surface-card shadow-[2px_0_6px_rgba(0,0,0,0.35)] sm:shadow-none py-3 pl-4 pr-3 text-xs text-slate-300 sm:pr-6 sm:text-sm">{label}</td>
 
                     {ROLES.map((role) => {
                       const cell = getCell(role, key, sub);
