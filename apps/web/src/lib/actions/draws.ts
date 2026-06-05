@@ -779,26 +779,49 @@ export async function promoteGroupWinnersAction(categoryId: string) {
     return { error: `${pendingGroup.length} group-stage match${pendingGroup.length !== 1 ? 'es' : ''} still to be played` };
   }
 
-  // Compute standings per group
+  // Compute standings per group — fetch sets for point totals
+  const { data: matchesWithSets } = await admin
+    .from('matches')
+    .select('id, group_name, entry_a_id, entry_b_id, winner_entry_id, sets')
+    .eq('category_id', categoryId)
+    .not('group_name', 'is', null);
+
   const groupNames = [...new Set(groupMatches.map((m) => m.group_name as string))].sort();
 
-  // wins map: entryId → wins
-  const winsByEntry = new Map<string, number>();
-  // point-diff map: entryId → total points scored - conceded
+  // Per-entry stat maps
+  const wins      = new Map<string, number>();
+  const losses    = new Map<string, number>();
+  const ptScored  = new Map<string, number>();
+  const ptGiven   = new Map<string, number>();
   const pointDiff = new Map<string, number>();
 
   const initEntry = (id: string) => {
-    if (!winsByEntry.has(id)) winsByEntry.set(id, 0);
-    if (!pointDiff.has(id)) pointDiff.set(id, 0);
+    if (!wins.has(id)) { wins.set(id, 0); losses.set(id, 0); ptScored.set(id, 0); ptGiven.set(id, 0); pointDiff.set(id, 0); }
   };
 
-  for (const m of groupMatches) {
-    if (!m.entry_a_id || !m.entry_b_id || !m.winner_entry_id) continue;
+  for (const m of (matchesWithSets ?? [])) {
+    if (!m.entry_a_id || !m.entry_b_id) continue;
     initEntry(m.entry_a_id);
     initEntry(m.entry_b_id);
-    const loserId = m.winner_entry_id === m.entry_a_id ? m.entry_b_id : m.entry_a_id;
-    winsByEntry.set(m.winner_entry_id, (winsByEntry.get(m.winner_entry_id) ?? 0) + 1);
-    void loserId; // loser gets 0 wins (already initialised)
+    if (m.winner_entry_id) {
+      wins.set(m.winner_entry_id, (wins.get(m.winner_entry_id) ?? 0) + 1);
+      const loserId = m.winner_entry_id === m.entry_a_id ? m.entry_b_id : m.entry_a_id;
+      losses.set(loserId, (losses.get(loserId) ?? 0) + 1);
+    }
+    // Tally points from sets JSONB
+    if (Array.isArray(m.sets)) {
+      let aTotal = 0, bTotal = 0;
+      for (const s of m.sets as { score_a: number; score_b: number }[]) {
+        aTotal += s.score_a ?? 0;
+        bTotal += s.score_b ?? 0;
+      }
+      ptScored.set(m.entry_a_id, (ptScored.get(m.entry_a_id) ?? 0) + aTotal);
+      ptGiven.set(m.entry_a_id,  (ptGiven.get(m.entry_a_id)  ?? 0) + bTotal);
+      ptScored.set(m.entry_b_id, (ptScored.get(m.entry_b_id) ?? 0) + bTotal);
+      ptGiven.set(m.entry_b_id,  (ptGiven.get(m.entry_b_id)  ?? 0) + aTotal);
+      pointDiff.set(m.entry_a_id, (ptScored.get(m.entry_a_id) ?? 0) - (ptGiven.get(m.entry_a_id) ?? 0));
+      pointDiff.set(m.entry_b_id, (ptScored.get(m.entry_b_id) ?? 0) - (ptGiven.get(m.entry_b_id) ?? 0));
+    }
   }
 
   // top_per_group_advance defaults to 2 — count knockout slots per group
@@ -821,14 +844,37 @@ export async function promoteGroupWinnersAction(categoryId: string) {
     if (m.entry_b_id) entriesByGroup.get(g)!.add(m.entry_b_id);
   }
 
-  // Rank entries within each group by wins desc, point diff desc
+  // Rank entries within each group — 6-level tiebreaker chain
   const advancingEntries: string[] = []; // ordered: [A1, A2, B1, B2, …]
+  const gMatchMap = new Map<string, typeof groupMatches>();
+  for (const m of groupMatches) {
+    const g = m.group_name as string;
+    if (!gMatchMap.has(g)) gMatchMap.set(g, []);
+    gMatchMap.get(g)!.push(m);
+  }
+
   for (const gName of groupNames) {
     const entryIds = [...(entriesByGroup.get(gName) ?? [])];
+    const gMs = gMatchMap.get(gName) ?? [];
     const ranked = entryIds.sort((a, b) => {
-      const wDiff = (winsByEntry.get(b) ?? 0) - (winsByEntry.get(a) ?? 0);
-      if (wDiff !== 0) return wDiff;
-      return (pointDiff.get(b) ?? 0) - (pointDiff.get(a) ?? 0);
+      // 1. Most wins
+      if ((wins.get(b) ?? 0) !== (wins.get(a) ?? 0)) return (wins.get(b) ?? 0) - (wins.get(a) ?? 0);
+      // 2. Fewest losses
+      if ((losses.get(a) ?? 0) !== (losses.get(b) ?? 0)) return (losses.get(a) ?? 0) - (losses.get(b) ?? 0);
+      // 3. Best point difference
+      if ((pointDiff.get(b) ?? 0) !== (pointDiff.get(a) ?? 0)) return (pointDiff.get(b) ?? 0) - (pointDiff.get(a) ?? 0);
+      // 4. Most points scored
+      if ((ptScored.get(b) ?? 0) !== (ptScored.get(a) ?? 0)) return (ptScored.get(b) ?? 0) - (ptScored.get(a) ?? 0);
+      // 5. Fewest points given
+      if ((ptGiven.get(a) ?? 0) !== (ptGiven.get(b) ?? 0)) return (ptGiven.get(a) ?? 0) - (ptGiven.get(b) ?? 0);
+      // 6. Head-to-head
+      const h2h = gMs.find((m) =>
+        (m.entry_a_id === a && m.entry_b_id === b) ||
+        (m.entry_a_id === b && m.entry_b_id === a),
+      );
+      if (h2h?.winner_entry_id === b) return 1;
+      if (h2h?.winner_entry_id === a) return -1;
+      return 0;
     });
     advancingEntries.push(...ranked.slice(0, topPerGroup));
   }

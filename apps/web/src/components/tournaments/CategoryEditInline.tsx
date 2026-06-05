@@ -114,9 +114,9 @@ export function CategoryEditInline({
   const maxEntriesNum = parseInt(maxEntries, 10);
   const hasMaxEntries = !isNaN(maxEntriesNum) && maxEntriesNum >= 2;
 
-  const suggestedConfig = hasMaxEntries ? suggestGroupConfig(maxEntriesNum) : null;
-  const effectiveGroups = groupsCount ? parseInt(groupsCount, 10) : (suggestedConfig?.groupsCount ?? 0);
   const effectiveAdvance = parseInt(advancePerGroup, 10) || 2;
+  const suggestedConfig = hasMaxEntries ? suggestGroupConfig(maxEntriesNum, effectiveAdvance) : null;
+  const effectiveGroups = groupsCount ? parseInt(groupsCount, 10) : (suggestedConfig?.groupsCount ?? 0);
   const groupSize = (hasMaxEntries && effectiveGroups > 0) ? deriveGroupSize(maxEntriesNum, effectiveGroups) : 0;
   const knockoutTeams = effectiveGroups > 0 ? deriveKnockoutTeams(effectiveGroups, effectiveAdvance) : 0;
   const knockoutRounds = knockoutTeams >= 2 ? getKnockoutRoundNames(knockoutTeams) : [];
@@ -292,7 +292,7 @@ export function CategoryEditInline({
               effectiveGroups={effectiveGroups}
               groupSize={groupSize}
               advancePerGroup={advancePerGroup}
-              onAdvancePerGroupChange={setAdvancePerGroup}
+              onAdvancePerGroupChange={(v) => { setAdvancePerGroup(v); setGroupsCount(''); }}
               knockoutTeams={knockoutTeams}
               knockoutRounds={knockoutRounds}
               hasThirdPlaceMatch={hasThirdPlaceMatch}

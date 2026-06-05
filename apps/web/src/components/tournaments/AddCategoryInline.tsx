@@ -80,9 +80,9 @@ export function AddCategoryInline({
   const hasMaxEntries = !isNaN(maxEntriesNum) && maxEntriesNum >= 2;
 
   // Derived group config (auto-suggest or user override)
-  const suggestedConfig = hasMaxEntries ? suggestGroupConfig(maxEntriesNum) : null;
-  const effectiveGroups = groupsCount ? parseInt(groupsCount, 10) : (suggestedConfig?.groupsCount ?? 0);
   const effectiveAdvance = parseInt(advancePerGroup, 10) || 2;
+  const suggestedConfig = hasMaxEntries ? suggestGroupConfig(maxEntriesNum, effectiveAdvance) : null;
+  const effectiveGroups = groupsCount ? parseInt(groupsCount, 10) : (suggestedConfig?.groupsCount ?? 0);
   const groupSize = (hasMaxEntries && effectiveGroups > 0)
     ? deriveGroupSize(maxEntriesNum, effectiveGroups)
     : 0;
@@ -259,7 +259,7 @@ export function AddCategoryInline({
             effectiveGroups={effectiveGroups}
             groupSize={groupSize}
             advancePerGroup={advancePerGroup}
-            onAdvancePerGroupChange={setAdvancePerGroup}
+            onAdvancePerGroupChange={(v) => { setAdvancePerGroup(v); setGroupsCount(''); }}
             knockoutTeams={knockoutTeams}
             knockoutRounds={knockoutRounds}
             hasThirdPlaceMatch={hasThirdPlaceMatch}
