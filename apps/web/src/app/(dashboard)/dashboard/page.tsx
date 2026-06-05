@@ -279,7 +279,27 @@ export default async function DashboardPage() {
         {/* Next match widget */}
         {nextMatch && (
           <div className="mt-8 rounded-xl bg-brand-900/20 ring-1 ring-brand-700/30 overflow-hidden">
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-brand-700/20">
+
+            {/* ── Mobile header: stacked ── */}
+            <div className="sm:hidden px-5 py-4 border-b border-brand-700/20 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">📅</span>
+                <p className="text-xs font-semibold text-brand-300 uppercase tracking-wide">Your next match</p>
+              </div>
+              <p className="text-sm font-bold text-white">
+                {formatMatchTime(nextMatch.scheduled_time)}
+                {nextMatch.court ? <span className="ml-2 text-brand-400/70 font-normal">· Court {nextMatch.court}</span> : ''}
+              </p>
+              <Link
+                href={`/events/${nextMatch.tournamentSlug}`}
+                className="block w-full text-center rounded-lg bg-brand-600/30 px-3 py-2 text-xs font-semibold text-brand-300 hover:bg-brand-600/50 transition-colors"
+              >
+                View event →
+              </Link>
+            </div>
+
+            {/* ── Desktop header: single row ── */}
+            <div className="hidden sm:flex items-center gap-3 px-6 py-4 border-b border-brand-700/20">
               <span className="text-lg">📅</span>
               <div>
                 <p className="text-xs font-semibold text-brand-300 uppercase tracking-wide">Your next match</p>
@@ -295,7 +315,9 @@ export default async function DashboardPage() {
                 View event →
               </Link>
             </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 px-6 py-4">
+
+            {/* ── Details row: 2-col grid on mobile, flex wrap on desktop ── */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-5 py-4 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-1 sm:px-6">
               <div>
                 <p className="text-xs text-slate-500">vs</p>
                 <p className="text-base font-semibold text-white">{nextMatch.opponentName}</p>
