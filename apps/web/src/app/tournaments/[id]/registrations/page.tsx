@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { createClient, createAdminClient, getUserRoles } from '@/lib/supabase/server';
+import { checkPermission } from '@/lib/permissions';
 import { AppNav } from '@/components/layout/AppNav';
 import { RegistrationsClient } from '@/components/tournaments/RegistrationsClient';
 
@@ -91,6 +92,9 @@ export default async function RegistrationsPage({ params }: Props) {
   const cats = (categories ?? []) as Array<{ id: string; name: string; slug: string; play_format: string; max_entries: number | null; status: string }>;
   const pendingTotal = allEntries.filter((e) => e.status === 'pending').length;
 
+  // Permission: can admins withdraw / remove entries?
+  const canAdminWithdraw = await checkPermission('admin', 'entries', 'withdraw', t.club_id);
+
   return (
     <div className="min-h-screen bg-surface">
       <AppNav />
@@ -126,6 +130,7 @@ export default async function RegistrationsPage({ params }: Props) {
           tournamentId={t.id}
           categories={cats}
           allEntries={allEntries}
+          canAdminWithdraw={canAdminWithdraw}
         />
       </main>
     </div>

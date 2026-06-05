@@ -34,6 +34,8 @@ interface Props {
   tournamentId: string;
   categories: Category[];
   allEntries: EntryRow[];
+  /** Controlled by role_permissions — super admin can disable admin withdraw/remove */
+  canAdminWithdraw?: boolean;
 }
 
 const STATUS_OPTS = [
@@ -45,7 +47,7 @@ const STATUS_OPTS = [
   { value: 'withdrawn',   label: 'Withdrawn / Removed' },
 ];
 
-export function RegistrationsClient({ tournamentSlug, tournamentId, categories, allEntries }: Props) {
+export function RegistrationsClient({ tournamentSlug, tournamentId, categories, allEntries, canAdminWithdraw = true }: Props) {
   const [activeCatId, setActiveCatId] = useState(categories[0]?.id ?? '');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -156,6 +158,7 @@ export function RegistrationsClient({ tournamentSlug, tournamentId, categories, 
           category={activeCategory}
           entries={filteredEntries}
           isFiltered={!!(search || statusFilter)}
+          canWithdraw={canAdminWithdraw}
         />
       )}
 

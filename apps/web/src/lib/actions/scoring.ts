@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { checkPermission } from '@/lib/permissions';
 import { calculateRatingChange } from '@pickleball/rating';
 import { createNotificationsForPlayers } from './notifications';
 import { sendMatchResultNotification } from '@/lib/email/notifications';
@@ -540,6 +541,10 @@ export async function withdrawAndWalkoverAction(entryId: string, tournamentId: s
     .eq('player_id', user.id)
     .maybeSingle();
   if (!mgr) return { error: 'Permission denied' };
+
+  // Check role_permissions: is the 'admin' role allowed to withdraw entries?
+  const allowed = await checkPermission('admin', 'entries', 'withdraw', t.club_id);
+  if (!allowed) return { error: 'Withdrawals are not permitted at this time.' };
 
   const { data: entry } = await admin
     .from('tournament_entries')
