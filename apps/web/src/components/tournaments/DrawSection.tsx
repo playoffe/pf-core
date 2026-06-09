@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { generateDrawAction, clearDrawAction, generateNextSwissRoundAction, promoteGroupWinnersAction, swapDrawEntriesAction, replaceDrawEntryAction } from '@/lib/actions/draws';
+import { getKnockoutRoundNames, deriveKnockoutTeams } from '@/lib/utils/groupStageConfig';
 import { shareDrawOnSocialAction } from '@/lib/actions/social';
 import { useToast } from '@/components/ui/ToastProvider';
 import type { MatchWithPlayers } from '@/lib/actions/draws';
@@ -33,6 +34,12 @@ interface Props {
     withdrawnInDraw: StalenessEntry[];
     unplacedActive: StalenessEntry[];
   };
+  /** Group stage config — required for group_stage_knockout to show the pre-generate preview */
+  groupStageConfig?: {
+    groupsCount: number | null;
+    advancePerGroup: number;
+    hasThirdPlaceMatch: boolean;
+  };
 }
 
 const FORMAT_LABEL: Record<string, string> = {
@@ -55,6 +62,7 @@ export function DrawSection({
   readOnly = false,
   shareOnSocialEnabled = false,
   stalenessInfo,
+  groupStageConfig,
 }: Props) {
   const router    = useRouter();
   const { toast } = useToast();
@@ -64,6 +72,28 @@ export function DrawSection({
   const [error, setError] = useState<string | null>(null);
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [matches, setMatches] = useState(initialMatches);
+
+  // ── Group stage draw preview (before generating) ─────────────────────────
+  const [showDrawPreview, setShowDrawPreview] = useState(false);
+  const [extraGroupIndex, setExtraGroupIndex] = useState(0);
+
+  const isGroupStage = drawFormat === 'group_stage_knockout';
+  const gsGroupsCount = groupStageConfig?.groupsCount ?? null;
+  const gsAdvance = groupStageConfig?.advancePerGroup ?? 2;
+
+  // Compute actual group sizes from live entryCount (not max_entries)
+  const gsGroupSizes: number[] = (() => {
+    if (!isGroupStage || !gsGroupsCount || gsGroupsCount < 1 || entryCount < 2) return [];
+    const base = Math.floor(entryCount / gsGroupsCount);
+    const remainder = entryCount % gsGroupsCount;
+    if (remainder === 0) return Array(gsGroupsCount).fill(base);
+    return Array.from({ length: gsGroupsCount }, (_, i) =>
+      i === extraGroupIndex ? base + remainder : base,
+    );
+  })();
+  const gsKnockoutTeams = gsGroupsCount ? deriveKnockoutTeams(gsGroupsCount, gsAdvance) : 0;
+  const gsKnockoutRounds = gsKnockoutTeams >= 2 ? getKnockoutRoundNames(gsKnockoutTeams) : [];
+  const gsIsUneven = gsGroupsCount !== null && entryCount % gsGroupsCount !== 0;
 
   // ── Replace-entry state ──────────────────────────────────────────────────────
   const [replaceFrom, setReplaceFrom] = useState('');
@@ -210,10 +240,21 @@ export function DrawSection({
   // Live subscription — auto-refreshes bracket when any match in this category changes
   const liveStatus = useRealtimeCategoryMatches(categoryId);
 
-  async function handleGenerate() {
+  function handleGenerate() {
+    // For group stage: show the preview panel first so the organiser can confirm
+    // the group structure based on the actual (live) entry count.
+    if (isGroupStage && gsGroupsCount) {
+      setShowDrawPreview(true);
+      return;
+    }
+    void handleGenerateConfirmed();
+  }
+
+  async function handleGenerateConfirmed(sizes?: number[]) {
+    setShowDrawPreview(false);
     setLoading(true);
     setError(null);
-    const result = await generateDrawAction(categoryId);
+    const result = await generateDrawAction(categoryId, sizes);
     if (result.error) {
       setError(result.error);
     } else {
@@ -533,8 +574,145 @@ export function DrawSection({
         </div>
       )}
 
+      {/* ── Group stage draw preview panel ───────────────────────────────── */}
+      {showDrawPreview && isGroupStage && gsGroupsCount && (
+        <div className="mb-4 rounded-xl border border-brand-500/30 bg-brand-950/20 p-4 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">Group stage structure</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Based on <span className="text-slate-300 font-medium">{entryCount} actual entries</span>
+                {' '}· {gsGroupsCount} groups · {gsAdvance} advance per group
+              </p>
+            </div>
+            <button
+              onClick={() => setShowDrawPreview(false)}
+              className="text-slate-500 hover:text-slate-300 transition-colors text-sm shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Group cards */}
+          <div className="flex flex-wrap gap-2">
+            {Array.from({ length: gsGroupsCount }, (_, i) => {
+              const gName = String.fromCharCode(65 + i);
+              const sz = gsGroupSizes[i] ?? Math.floor(entryCount / gsGroupsCount);
+              const isExtra = gsIsUneven && i === extraGroupIndex;
+              return (
+                <div
+                  key={gName}
+                  className={`rounded-lg border px-3 py-2 min-w-[72px] ${
+                    isExtra
+                      ? 'border-brand-500/50 bg-brand-900/40'
+                      : 'border-brand-800/40 bg-brand-900/30'
+                  }`}
+                >
+                  <p className="text-[11px] font-bold text-brand-300 mb-1">
+                    Group {gName}
+                    {isExtra && <span className="ml-1 text-[9px] text-brand-400">+1</span>}
+                  </p>
+                  <p className="text-[10px] text-slate-400">{sz} teams</p>
+                  <div className="mt-1.5 space-y-0.5">
+                    {Array.from({ length: Math.min(sz, 6) }, (_, j) => (
+                      <div
+                        key={j}
+                        className={`h-1.5 rounded-full ${j < gsAdvance ? 'bg-brand-500' : 'bg-slate-700'}`}
+                      />
+                    ))}
+                    {sz > 6 && <p className="text-[9px] text-slate-600">+{sz - 6} more</p>}
+                  </div>
+                  <p className="text-[9px] text-brand-400 mt-1">↑ top {gsAdvance}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Knockout flow */}
+          {gsKnockoutRounds.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded bg-slate-800 border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400">
+                Group stage
+              </span>
+              <span className="text-slate-600 text-xs">→</span>
+              {gsKnockoutRounds.map((round, i) => (
+                <span key={round} className="flex items-center gap-1.5">
+                  <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
+                    {round}
+                  </span>
+                  {i < gsKnockoutRounds.length - 1 && (
+                    <span className="text-slate-600 text-xs">→</span>
+                  )}
+                </span>
+              ))}
+              {groupStageConfig?.hasThirdPlaceMatch && (
+                <span className="text-[11px] text-slate-500 ml-1">+ 3rd place</span>
+              )}
+            </div>
+          )}
+
+          {/* Extra player picker — only when uneven */}
+          {gsIsUneven && (
+            <div>
+              <p className="text-xs font-medium text-slate-400 mb-1.5">
+                Extra player assignment
+                <span className="ml-1.5 text-[10px] text-slate-500">
+                  ({entryCount} entries ÷ {gsGroupsCount} groups — pick which group gets the extra player)
+                </span>
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from({ length: gsGroupsCount }, (_, i) => {
+                  const gName = String.fromCharCode(65 + i);
+                  const sz = gsGroupSizes[i] ?? Math.floor(entryCount / gsGroupsCount);
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setExtraGroupIndex(i)}
+                      className={`rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+                        i === extraGroupIndex
+                          ? 'border-brand-500 bg-brand-600/20 text-white'
+                          : 'border-slate-700 bg-surface text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                      }`}
+                    >
+                      Group {gName}
+                      <span className="ml-1 text-[10px] opacity-60">({sz})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Legend */}
+          <p className="text-[10px] text-slate-500">
+            <span className="inline-block h-1.5 w-4 rounded-full bg-brand-500 mr-1 align-middle" />
+            advances to knockout
+            <span className="inline-block h-1.5 w-4 rounded-full bg-slate-700 mx-1 ml-3 align-middle" />
+            eliminated
+          </p>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-3 pt-1 border-t border-surface-border">
+            <button
+              onClick={() => handleGenerateConfirmed(gsIsUneven ? gsGroupSizes : undefined)}
+              disabled={loading}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
+            >
+              {loading ? 'Generating…' : 'Confirm & generate draw'}
+            </button>
+            <button
+              onClick={() => setShowDrawPreview(false)}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Draw not yet generated */}
-      {!isDrawn && !loading && (
+      {!isDrawn && !loading && !showDrawPreview && (
         <div className="rounded-xl bg-surface-card p-8 text-center ring-1 ring-surface-border">
           <p className="text-2xl mb-2">🎯</p>
           <p className="text-sm font-medium text-white mb-1">Draw not generated yet</p>

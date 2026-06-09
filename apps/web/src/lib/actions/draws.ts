@@ -30,7 +30,13 @@ async function assertCategoryManager(categoryId: string, userId: string) {
 }
 
 // ── Generate draw ─────────────────────────────────────────────────────────────
-export async function generateDrawAction(categoryId: string) {
+export async function generateDrawAction(
+  categoryId: string,
+  /** Optional per-group sizes override — used when the organiser re-assigns
+   *  the extra player at draw-generation time (actual entry count may differ
+   *  from max_entries). When provided, these sizes are also persisted to the DB. */
+  groupSizesOverride?: number[],
+) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -84,14 +90,24 @@ export async function generateDrawAction(categoryId: string) {
     ? Math.ceil(catAny.max_entries / groupsCount)
     : 4; // default group size
 
+  // Resolve final group sizes: override > stored > derived
+  const resolvedGroupSizes = groupSizesOverride ?? (storedGroupSizes?.length ? storedGroupSizes : null);
+
+  // Persist the resolved sizes so the draw is reproducible
+  if (resolvedGroupSizes) {
+    await (createAdminClient() as any)
+      .from('tournament_categories')
+      .update({ group_sizes: resolvedGroupSizes })
+      .eq('id', categoryId);
+  }
+
   // Generate the draw
   const config: DrawConfig = {
     format: cat.draw_format as DrawConfig['format'],
     entries: drawEntries,
     category_id: categoryId,
     group_size: groupSize,
-    // Use persisted per-group sizes if available (organiser picked extra player placement)
-    ...(storedGroupSizes && storedGroupSizes.length > 0 && { group_sizes: storedGroupSizes }),
+    ...(resolvedGroupSizes && { group_sizes: resolvedGroupSizes }),
     top_per_group_advance: catAny.advance_per_group ?? 2,
     has_third_place_match: catAny.has_third_place_match ?? false,
   };
