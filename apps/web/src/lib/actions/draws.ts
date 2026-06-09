@@ -254,6 +254,18 @@ export async function clearDrawAction(categoryId: string) {
   if (!cat) return { error: 'Permission denied' };
 
   const admin = createAdminClient();
+
+  // Block regeneration if any match has started
+  const { data: startedMatches } = await admin
+    .from('matches')
+    .select('id')
+    .eq('category_id', categoryId)
+    .neq('status', 'scheduled')
+    .limit(1);
+  if (startedMatches && startedMatches.length > 0) {
+    return { error: 'Cannot regenerate — one or more matches have already started. Use Adjust draw instead.' };
+  }
+
   await admin.from('matches').delete().eq('category_id', categoryId);
   await admin
     .from('tournament_categories')

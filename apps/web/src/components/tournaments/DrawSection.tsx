@@ -194,6 +194,11 @@ export function DrawSection({
     setPromotingGroups(false);
   }
 
+  // True once any match has moved past 'scheduled' — blocks regeneration
+  const anyMatchStarted = matches.some(
+    (m) => m.status !== 'scheduled',
+  );
+
   // Can adjust: draw exists, category not completed, not swiss
   const canAdjust =
     isDrawn &&
@@ -393,7 +398,7 @@ export function DrawSection({
                     </button>
                   )}
 
-                  {categoryStatus === 'draw_generated' && !showRegenConfirm && (
+                  {categoryStatus === 'draw_generated' && !showRegenConfirm && !anyMatchStarted && (
                     <button
                       onClick={() => setShowRegenConfirm(true)}
                       className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-red-600 hover:text-red-400 transition-colors"
@@ -402,7 +407,7 @@ export function DrawSection({
                     </button>
                   )}
 
-                  {showRegenConfirm && (
+                  {showRegenConfirm && !anyMatchStarted && (
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-red-400">Delete existing draw?</span>
                       <button
@@ -504,16 +509,18 @@ export function DrawSection({
               {replaceError && (
                 <p className="text-xs text-red-400">{replaceError}</p>
               )}
-              <p className="text-xs text-amber-500/60">
-                Or{' '}
-                <button
-                  onClick={() => setShowRegenConfirm(true)}
-                  className="underline hover:text-amber-400 transition-colors"
-                >
-                  regenerate the draw
-                </button>{' '}
-                to rebuild the bracket from all current active entries.
-              </p>
+              {!anyMatchStarted && (
+                <p className="text-xs text-amber-500/60">
+                  Or{' '}
+                  <button
+                    onClick={() => setShowRegenConfirm(true)}
+                    className="underline hover:text-amber-400 transition-colors"
+                  >
+                    regenerate the draw
+                  </button>{' '}
+                  to rebuild the bracket from all current active entries.
+                </p>
+              )}
             </div>
           )}
 
@@ -521,13 +528,9 @@ export function DrawSection({
           {stalenessInfo.withdrawnInDraw.length > 0 && stalenessInfo.unplacedActive.length === 0 && (
             <p className="text-xs text-amber-400/70">
               Withdrawn {stalenessInfo.withdrawnInDraw.length === 1 ? 'entry remains' : 'entries remain'} in the bracket.{' '}
-              <button
-                onClick={() => setShowRegenConfirm(true)}
-                className="underline hover:text-amber-300 transition-colors"
-              >
-                Regenerate the draw
-              </button>{' '}
-              to remove {stalenessInfo.withdrawnInDraw.length === 1 ? 'it' : 'them'}.
+              {anyMatchStarted
+                ? 'Use Adjust draw to swap them out manually.'
+                : <><button onClick={() => setShowRegenConfirm(true)} className="underline hover:text-amber-300 transition-colors">Regenerate the draw</button>{' '}to remove {stalenessInfo.withdrawnInDraw.length === 1 ? 'it' : 'them'}.</>}
             </p>
           )}
 
@@ -535,13 +538,9 @@ export function DrawSection({
           {stalenessInfo.withdrawnInDraw.length === 0 && stalenessInfo.unplacedActive.length > 0 && (
             <p className="text-xs text-amber-400/70">
               {stalenessInfo.unplacedActive.length} new entr{stalenessInfo.unplacedActive.length === 1 ? 'y is' : 'ies are'} not in the draw.{' '}
-              <button
-                onClick={() => setShowRegenConfirm(true)}
-                className="underline hover:text-amber-300 transition-colors"
-              >
-                Regenerate the draw
-              </button>{' '}
-              to include {stalenessInfo.unplacedActive.length === 1 ? 'it' : 'them'}.
+              {anyMatchStarted
+                ? 'Use Adjust draw to place them manually.'
+                : <><button onClick={() => setShowRegenConfirm(true)} className="underline hover:text-amber-300 transition-colors">Regenerate the draw</button>{' '}to include {stalenessInfo.unplacedActive.length === 1 ? 'it' : 'them'}.</>}
             </p>
           )}
         </div>
