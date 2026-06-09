@@ -5,6 +5,9 @@ export interface DrawConfig {
   entries: DrawEntry[];
   category_id: string;
   group_size?: number;
+  /** Per-group sizes (ordered). When provided, overrides group_size and allows
+   *  uneven groups — e.g. [6, 5, 5, 5] for 21 entries in 4 groups. */
+  group_sizes?: number[];
   groups_per_page?: number;
   top_per_group_advance?: number;
   min_rest_minutes?: number;

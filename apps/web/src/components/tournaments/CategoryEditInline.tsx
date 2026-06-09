@@ -96,6 +96,7 @@ export function CategoryEditInline({
   const [groupsCount, setGroupsCount] = useState(currentGroupsCount != null ? String(currentGroupsCount) : '');
   const [advancePerGroup, setAdvancePerGroup] = useState(String(currentAdvancePerGroup));
   const [hasThirdPlaceMatch, setHasThirdPlaceMatch] = useState(currentHasThirdPlaceMatch);
+  const [extraGroupIndex, setExtraGroupIndex] = useState(0);
 
   // Scoring
   const [scoringOverride, setScoringOverride] = useState(currentScoringOverride);
@@ -122,6 +123,17 @@ export function CategoryEditInline({
   const knockoutTeams = effectiveGroups > 0 ? deriveKnockoutTeams(effectiveGroups, effectiveAdvance) : 0;
   const knockoutRounds = knockoutTeams >= 2 ? getKnockoutRoundNames(knockoutTeams) : [];
   const allOptions = hasMaxEntries ? getSuggestedGroupOptions(maxEntriesNum, effectiveAdvance) : [];
+
+  // Per-group sizes array — handles uneven distribution
+  const groupSizes: number[] = (() => {
+    if (!hasMaxEntries || effectiveGroups <= 0) return [];
+    const base = Math.floor(maxEntriesNum / effectiveGroups);
+    const remainder = maxEntriesNum % effectiveGroups;
+    if (remainder === 0) return Array(effectiveGroups).fill(base);
+    return Array.from({ length: effectiveGroups }, (_, i) =>
+      i === extraGroupIndex ? base + remainder : base,
+    );
+  })();
 
   function handleMaxEntriesChange(val: string) {
     setMaxEntries(val);
@@ -291,9 +303,12 @@ export function CategoryEditInline({
               suggestedConfig={suggestedConfig}
               allOptions={allOptions}
               groupsCount={groupsCount}
-              onGroupsCountChange={setGroupsCount}
+              onGroupsCountChange={(v) => { setGroupsCount(v); }}
               effectiveGroups={effectiveGroups}
               groupSize={groupSize}
+              groupSizes={groupSizes}
+              extraGroupIndex={extraGroupIndex}
+              onExtraGroupIndexChange={setExtraGroupIndex}
               advancePerGroup={advancePerGroup}
               onAdvancePerGroupChange={(v) => { setAdvancePerGroup(v); setGroupsCount(''); }}
               knockoutTeams={knockoutTeams}

@@ -74,6 +74,8 @@ export function AddCategoryInline({
   const [groupsCount, setGroupsCount] = useState<string>('');
   const [advancePerGroup, setAdvancePerGroup] = useState<string>('2');
   const [hasThirdPlaceMatch, setHasThirdPlaceMatch] = useState(false);
+  // Which group index (0-based) gets the extra player when entries don't divide evenly
+  const [extraGroupIndex, setExtraGroupIndex] = useState<number>(0);
 
   // ── Step 2: scoring override ───────────────────────────────────────────────
   const [scoringOverride, setScoringOverride] = useState(false);
@@ -97,9 +99,22 @@ export function AddCategoryInline({
   const knockoutRounds = knockoutTeams >= 2 ? getKnockoutRoundNames(knockoutTeams) : [];
   const allOptions = hasMaxEntries ? getSuggestedGroupOptions(maxEntriesNum, effectiveAdvance) : [];
 
+  // Per-group sizes array — handles uneven distribution
+  const groupSizes: number[] = (() => {
+    if (!hasMaxEntries || effectiveGroups <= 0) return [];
+    const base = Math.floor(maxEntriesNum / effectiveGroups);
+    const remainder = maxEntriesNum % effectiveGroups;
+    if (remainder === 0) return Array(effectiveGroups).fill(base);
+    // Put the extra player in the chosen group
+    return Array.from({ length: effectiveGroups }, (_, i) =>
+      i === extraGroupIndex ? base + remainder : base,
+    );
+  })();
+
   function handleMaxEntriesChange(val: string) {
     setMaxEntries(val);
     setGroupsCount('');
+    setExtraGroupIndex(0);
   }
 
   function resetForm() {
@@ -114,6 +129,7 @@ export function AddCategoryInline({
     setGroupsCount('');
     setAdvancePerGroup('2');
     setHasThirdPlaceMatch(false);
+    setExtraGroupIndex(0);
     setScoringOverride(false);
     setScoringFormat(tournamentScoringFormat);
     setNumSets(tournamentNumSets);
@@ -159,6 +175,7 @@ export function AddCategoryInline({
       }),
       ...(isGroupStage && {
         groups_count: effectiveGroups > 0 ? effectiveGroups : null,
+        group_sizes: groupSizes.length > 0 ? groupSizes : null,
         advance_per_group: effectiveAdvance,
         has_third_place_match: hasThirdPlaceMatch,
       }),
@@ -331,11 +348,14 @@ export function AddCategoryInline({
           suggestedConfig={suggestedConfig}
           allOptions={allOptions}
           groupsCount={groupsCount}
-          onGroupsCountChange={setGroupsCount}
+          onGroupsCountChange={(v) => { setGroupsCount(v); setExtraGroupIndex(0); }}
           effectiveGroups={effectiveGroups}
           groupSize={groupSize}
+          groupSizes={groupSizes}
+          extraGroupIndex={extraGroupIndex}
+          onExtraGroupIndexChange={setExtraGroupIndex}
           advancePerGroup={advancePerGroup}
-          onAdvancePerGroupChange={(v) => { setAdvancePerGroup(v); setGroupsCount(''); }}
+          onAdvancePerGroupChange={(v) => { setAdvancePerGroup(v); setGroupsCount(''); setExtraGroupIndex(0); }}
           knockoutTeams={knockoutTeams}
           knockoutRounds={knockoutRounds}
           hasThirdPlaceMatch={hasThirdPlaceMatch}
@@ -476,27 +496,19 @@ export function AddCategoryInline({
             <div className="flex flex-wrap gap-2">
               {Array.from({ length: effectiveGroups }, (_, i) => {
                 const gName = String.fromCharCode(65 + i);
-                const thisGroupSize = i < (maxEntriesNum % effectiveGroups || effectiveGroups)
-                  ? groupSize
-                  : groupSize - 1;
-                const actualSize = maxEntriesNum > 0
-                  ? (i < maxEntriesNum % effectiveGroups
-                    ? Math.ceil(maxEntriesNum / effectiveGroups)
-                    : Math.floor(maxEntriesNum / effectiveGroups))
-                  : groupSize;
-                void thisGroupSize;
+                const sz = groupSizes[i] ?? groupSize;
                 return (
                   <div key={gName} className="rounded-lg border border-brand-800/40 bg-brand-900/30 px-3 py-2 min-w-[64px]">
                     <p className="text-[11px] font-bold text-brand-300 mb-1">Group {gName}</p>
-                    <p className="text-[10px] text-slate-400">{actualSize} teams</p>
+                    <p className="text-[10px] text-slate-400">{sz} teams</p>
                     <div className="mt-1.5 space-y-0.5">
-                      {Array.from({ length: Math.min(actualSize, 6) }, (_, j) => (
+                      {Array.from({ length: Math.min(sz, 6) }, (_, j) => (
                         <div
                           key={j}
                           className={`h-1.5 rounded-full ${j < effectiveAdvance ? 'bg-brand-500' : 'bg-slate-700'}`}
                         />
                       ))}
-                      {actualSize > 6 && <p className="text-[9px] text-slate-600">+{actualSize - 6} more</p>}
+                      {sz > 6 && <p className="text-[9px] text-slate-600">+{sz - 6} more</p>}
                     </div>
                     <p className="text-[9px] text-brand-400 mt-1">↑ top {effectiveAdvance}</p>
                   </div>
@@ -664,6 +676,9 @@ interface GroupStageConfigPanelProps {
   onGroupsCountChange: (v: string) => void;
   effectiveGroups: number;
   groupSize: number;
+  groupSizes: number[];
+  extraGroupIndex: number;
+  onExtraGroupIndexChange: (i: number) => void;
   advancePerGroup: string;
   onAdvancePerGroupChange: (v: string) => void;
   knockoutTeams: number;
@@ -680,6 +695,9 @@ export function GroupStageConfigPanel({
   onGroupsCountChange,
   effectiveGroups,
   groupSize,
+  groupSizes,
+  extraGroupIndex,
+  onExtraGroupIndexChange,
   advancePerGroup,
   onAdvancePerGroupChange,
   knockoutTeams,
@@ -687,7 +705,10 @@ export function GroupStageConfigPanel({
   hasThirdPlaceMatch,
   onHasThirdPlaceMatchChange,
 }: GroupStageConfigPanelProps) {
+  const [showStructure, setShowStructure] = useState(false);
   const isOverriding = groupsCount !== '';
+  const effectiveAdvance = parseInt(advancePerGroup, 10) || 2;
+  const isUneven = maxEntries != null && effectiveGroups > 0 && maxEntries % effectiveGroups !== 0;
 
   if (!maxEntries) {
     return (
@@ -799,6 +820,40 @@ export function GroupStageConfigPanel({
         </div>
       )}
 
+      {/* Extra player assignment — only shown when uneven */}
+      {isUneven && effectiveGroups > 0 && (
+        <div>
+          <p className="text-xs font-medium text-slate-400 mb-1.5">
+            Extra player assignment
+            <span className="ml-1.5 text-[10px] text-slate-500">
+              (entries don't divide evenly — pick which group gets +1)
+            </span>
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {Array.from({ length: effectiveGroups }, (_, i) => {
+              const gName = String.fromCharCode(65 + i);
+              const sz = groupSizes[i] ?? groupSize;
+              const selected = i === extraGroupIndex;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onExtraGroupIndexChange(i)}
+                  className={`rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+                    selected
+                      ? 'border-brand-500 bg-brand-600/20 text-white'
+                      : 'border-slate-700 bg-surface text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                  }`}
+                >
+                  Group {gName}
+                  <span className="ml-1 text-[10px] opacity-60">({sz})</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 3rd place match */}
       <label className="flex items-center gap-3 cursor-pointer">
         <input
@@ -814,6 +869,81 @@ export function GroupStageConfigPanel({
           </p>
         </div>
       </label>
+
+      {/* Inline group structure preview */}
+      {effectiveGroups > 0 && knockoutTeams >= 2 && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowStructure((v) => !v)}
+            className="flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 transition-colors"
+          >
+            <span>{showStructure ? '▾' : '▸'}</span>
+            {showStructure ? 'Hide' : 'Show'} group stage structure
+          </button>
+
+          {showStructure && (
+            <div className="mt-3 space-y-3">
+              {/* Group cards */}
+              <div className="flex flex-wrap gap-2">
+                {Array.from({ length: effectiveGroups }, (_, i) => {
+                  const gName = String.fromCharCode(65 + i);
+                  const sz = groupSizes[i] ?? groupSize;
+                  const isExtra = isUneven && i === extraGroupIndex;
+                  return (
+                    <div
+                      key={gName}
+                      className={`rounded-lg border px-3 py-2 min-w-[64px] ${
+                        isExtra
+                          ? 'border-brand-500/50 bg-brand-900/40'
+                          : 'border-brand-800/40 bg-brand-900/30'
+                      }`}
+                    >
+                      <p className="text-[11px] font-bold text-brand-300 mb-1">
+                        Group {gName}
+                        {isExtra && <span className="ml-1 text-[9px] text-brand-400">+1</span>}
+                      </p>
+                      <p className="text-[10px] text-slate-400">{sz} teams</p>
+                      <div className="mt-1.5 space-y-0.5">
+                        {Array.from({ length: Math.min(sz, 6) }, (_, j) => (
+                          <div
+                            key={j}
+                            className={`h-1.5 rounded-full ${j < effectiveAdvance ? 'bg-brand-500' : 'bg-slate-700'}`}
+                          />
+                        ))}
+                        {sz > 6 && <p className="text-[9px] text-slate-600">+{sz - 6} more</p>}
+                      </div>
+                      <p className="text-[9px] text-brand-400 mt-1">↑ top {effectiveAdvance}</p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Knockout flow */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="rounded bg-slate-800 border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400">
+                  Group stage
+                </span>
+                <span className="text-slate-600 text-xs">→</span>
+                {knockoutRounds.map((round, i) => (
+                  <span key={round} className="flex items-center gap-1.5">
+                    <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
+                      {round}
+                    </span>
+                    {i < knockoutRounds.length - 1 && (
+                      <span className="text-slate-600 text-xs">→</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500">
+                <span className="inline-block h-1.5 w-4 rounded-full bg-brand-500 mr-1 align-middle" />
+                advances · <span className="inline-block h-1.5 w-4 rounded-full bg-slate-700 mx-1 align-middle" /> eliminated
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

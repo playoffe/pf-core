@@ -70,14 +70,16 @@ export async function generateDrawAction(categoryId: string) {
     };
   });
 
-  // For group_stage_knockout, derive group_size from stored config
+  // For group_stage_knockout, derive group sizing from stored config
   const catAny = cat as typeof cat & {
     max_entries?: number | null;
     groups_count?: number | null;
+    group_sizes?: number[] | null;
     advance_per_group?: number | null;
     has_third_place_match?: boolean | null;
   };
   const groupsCount = catAny.groups_count ?? null;
+  const storedGroupSizes = catAny.group_sizes ?? null;
   const groupSize = groupsCount && catAny.max_entries
     ? Math.ceil(catAny.max_entries / groupsCount)
     : 4; // default group size
@@ -88,6 +90,8 @@ export async function generateDrawAction(categoryId: string) {
     entries: drawEntries,
     category_id: categoryId,
     group_size: groupSize,
+    // Use persisted per-group sizes if available (organiser picked extra player placement)
+    ...(storedGroupSizes && storedGroupSizes.length > 0 && { group_sizes: storedGroupSizes }),
     top_per_group_advance: catAny.advance_per_group ?? 2,
     has_third_place_match: catAny.has_third_place_match ?? false,
   };

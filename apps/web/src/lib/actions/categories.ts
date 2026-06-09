@@ -35,6 +35,7 @@ export async function createCategoryAction(
     win_by?: 1 | 2;
     deuce_cap?: number | null;
     groups_count?: number | null;
+    group_sizes?: number[] | null;
     advance_per_group?: number;
     has_third_place_match?: boolean;
   },
@@ -48,7 +49,7 @@ export async function createCategoryAction(
   // Destructure scoring override fields before schema validation
   const {
     scoring_override, scoring_format, num_sets, points_per_set, win_by, deuce_cap,
-    groups_count, advance_per_group, has_third_place_match,
+    groups_count, group_sizes, advance_per_group, has_third_place_match,
     ...rest
   } = input;
 
@@ -72,6 +73,7 @@ export async function createCategoryAction(
       deuce_cap: deuce_cap ?? null,
     }),
     groups_count: groups_count ?? null,
+    group_sizes: group_sizes ?? null,
     advance_per_group: advance_per_group ?? 2,
     has_third_place_match: has_third_place_match ?? false,
   });
@@ -154,6 +156,7 @@ export async function updateCategoryAction(
 
   // Group stage configuration — always editable (doesn't affect existing entries)
   if ('groups_count' in input) update.groups_count = input.groups_count ?? null;
+  if ('group_sizes' in input) update.group_sizes = (input as { group_sizes?: number[] | null }).group_sizes ?? null;
   if (input.advance_per_group !== undefined) update.advance_per_group = input.advance_per_group;
   if (input.has_third_place_match !== undefined) update.has_third_place_match = input.has_third_place_match;
 
