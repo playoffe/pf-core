@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { generateDrawAction, clearDrawAction, generateNextSwissRoundAction, promoteGroupWinnersAction, swapDrawEntriesAction, replaceDrawEntryAction } from '@/lib/actions/draws';
+import { updateCategoryAction } from '@/lib/actions/categories';
 import { getKnockoutRoundNames, deriveKnockoutTeams } from '@/lib/utils/groupStageConfig';
 import { shareDrawOnSocialAction } from '@/lib/actions/social';
 import { useToast } from '@/components/ui/ToastProvider';
@@ -98,6 +99,30 @@ export function DrawSection({
   const gsKnockoutRounds = gsKnockoutTeams >= 2 ? getKnockoutRoundNames(gsKnockoutTeams) : [];
   const gsIsUneven = gsGroupsCount !== null && entryCount % gsGroupsCount !== 0;
 
+  // ── Knockout seeding mode (auto vs manual) — editable from the draw preview ──
+  const [localKnockoutSeeding, setLocalKnockoutSeeding] = useState<'auto' | 'manual'>(
+    groupStageConfig?.knockoutSeeding ?? 'auto',
+  );
+  const [savingKnockoutSeeding, setSavingKnockoutSeeding] = useState(false);
+
+  useEffect(() => {
+    setLocalKnockoutSeeding(groupStageConfig?.knockoutSeeding ?? 'auto');
+  }, [groupStageConfig?.knockoutSeeding]);
+
+  async function handleKnockoutSeedingToggle() {
+    const next = localKnockoutSeeding === 'manual' ? 'auto' : 'manual';
+    setLocalKnockoutSeeding(next);
+    setSavingKnockoutSeeding(true);
+    const result = await updateCategoryAction(categoryId, { knockout_seeding: next });
+    if (result?.error) {
+      setLocalKnockoutSeeding(localKnockoutSeeding);
+      toast(result.error, 'error');
+    } else {
+      router.refresh();
+    }
+    setSavingKnockoutSeeding(false);
+  }
+
   // ── Replace-entry state ──────────────────────────────────────────────────────
   const [replaceFrom, setReplaceFrom] = useState('');
   const [replaceTo, setReplaceTo] = useState('');
@@ -183,7 +208,7 @@ export function DrawSection({
     groupMatches.length > 0 &&
     groupMatches.every((m) => m.status === 'completed' || m.status === 'walkover');
   const knockoutSlotsEmpty = knockoutMatches.some((m) => !m.entry_a && !m.entry_b);
-  const knockoutSeeding = groupStageConfig?.knockoutSeeding ?? 'auto';
+  const knockoutSeeding = localKnockoutSeeding;
   const canPromoteGroups = isGroupKnockout && isDrawn && allGroupMatchesDone && knockoutSlotsEmpty && knockoutSeeding === 'auto';
   const showKnockoutBuilderLink = isGroupKnockout && isDrawn && allGroupMatchesDone && knockoutSeeding === 'manual';
 
@@ -643,26 +668,66 @@ export function DrawSection({
           </div>
 
           {/* Knockout flow */}
-          {gsKnockoutRounds.length > 0 && (
+          {gsKnockoutTeams >= 2 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="rounded bg-slate-800 border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400">
                 Group stage
               </span>
               <span className="text-slate-600 text-xs">→</span>
-              {gsKnockoutRounds.map((round, i) => (
-                <span key={round} className="flex items-center gap-1.5">
-                  <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
-                    {round}
-                  </span>
-                  {i < gsKnockoutRounds.length - 1 && (
-                    <span className="text-slate-600 text-xs">→</span>
-                  )}
+              {localKnockoutSeeding === 'manual' ? (
+                <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
+                  Knockout Builder ({gsKnockoutTeams} qualifiers, manual pairing)
                 </span>
-              ))}
-              {groupStageConfig?.hasThirdPlaceMatch && (
-                <span className="text-[11px] text-slate-500 ml-1">+ 3rd place</span>
+              ) : (
+                <>
+                  {gsKnockoutRounds.map((round, i) => (
+                    <span key={round} className="flex items-center gap-1.5">
+                      <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
+                        {round}
+                      </span>
+                      {i < gsKnockoutRounds.length - 1 && (
+                        <span className="text-slate-600 text-xs">→</span>
+                      )}
+                    </span>
+                  ))}
+                  {groupStageConfig?.hasThirdPlaceMatch && (
+                    <span className="text-[11px] text-slate-500 ml-1">+ 3rd place</span>
+                  )}
+                </>
               )}
             </div>
+          )}
+
+          {/* Knockout seeding toggle */}
+          {gsKnockoutTeams >= 2 && (
+            <label className="flex items-center justify-between gap-3 cursor-pointer rounded-lg border border-amber-800/40 bg-amber-950/20 p-3">
+              <div>
+                <span className="text-xs font-medium text-slate-300">
+                  {localKnockoutSeeding === 'manual' ? 'Manual seeding' : 'Automatic seeding'}
+                </span>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {localKnockoutSeeding === 'manual'
+                    ? "After the group stage, you'll manually pair qualifiers for crossover/playoff matches via the Knockout Builder — no auto-byes."
+                    : 'The bracket is generated automatically; top seeds receive byes into the next round.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={localKnockoutSeeding === 'manual'}
+                disabled={savingKnockoutSeeding}
+                onClick={handleKnockoutSeedingToggle}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+                  localKnockoutSeeding === 'manual' ? 'bg-brand-600' : 'bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    localKnockoutSeeding === 'manual' ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </label>
           )}
 
           {/* Extra player picker — only when uneven */}
