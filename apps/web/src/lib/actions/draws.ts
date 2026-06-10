@@ -1114,6 +1114,7 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
 
   let currentPool: KnockoutPoolEntry[] | null = pool;
   let champion: KnockoutPoolEntry | null = null;
+  let roundInProgress = false;
 
   for (const round of sortedRounds) {
     const roundMatches = roundsMap.get(round)!;
@@ -1125,9 +1126,10 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
     const allDone = roundMatches.every((m) => m.status === 'completed' || m.status === 'walkover');
 
     if (!allDone) {
-      // This round is still in progress — not ready to build the next one.
-      // Available pool for THIS round = current pool minus entries already used here.
-      currentPool = null; // can't build a new round while this one is in progress
+      // This round is still in progress — admins can keep creating more matches
+      // for it. Available pool = current pool minus entries already paired here.
+      currentPool = (currentPool ?? []).filter((p) => !usedIds.has(p.entryId));
+      roundInProgress = true;
       break;
     }
 
@@ -1148,7 +1150,7 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
     }
   }
 
-  if (currentPool && currentPool.length < 2) {
+  if (!roundInProgress && currentPool && currentPool.length < 2) {
     if (currentPool.length === 1) champion = currentPool[0];
     currentPool = null;
   }
@@ -1250,7 +1252,7 @@ export async function createKnockoutMatchAction(
     round,
     round_name: finalRoundName,
     group_name: null,
-    bracket_type: 'knockout',
+    bracket_type: 'winners',
     entry_a_id: entryAId,
     entry_b_id: entryBId,
     status: 'scheduled',
