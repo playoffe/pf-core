@@ -19,6 +19,29 @@ export function groupStageKnockout(config: DrawConfig): GeneratedDraw {
     return { name: `Group ${groupName}`, entries: groupEntries, matches };
   });
 
+  if (config.knockout_seeding === 'manual') {
+    const groupRoundsOnly = drawGroups.flatMap((g) => {
+      const matchesByRound = new Map<number, typeof g.matches>();
+      g.matches.forEach((m) => {
+        const list = matchesByRound.get(m.round) ?? [];
+        list.push(m);
+        matchesByRound.set(m.round, list);
+      });
+      return Array.from(matchesByRound.entries()).map(([round, matches]) => ({
+        round,
+        round_name: `Group Stage - Round ${round}`,
+        matches,
+      }));
+    });
+    return {
+      format: 'group_stage_knockout',
+      category_id,
+      rounds: groupRoundsOnly,
+      groups: drawGroups,
+      generated_at: new Date().toISOString(),
+    };
+  }
+
   const knockoutEntryCount = groups.length * top_per_group_advance;
   // Use placeholder entries just to determine bracket structure — entry IDs are
   // nulled out afterwards so they don't violate tournament_entries FK constraints.

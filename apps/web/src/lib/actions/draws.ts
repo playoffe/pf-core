@@ -12,7 +12,7 @@ async function assertCategoryManager(categoryId: string, userId: string) {
 
   const { data: cat } = await admin
     .from('tournament_categories')
-    .select('id, name, tournament_id, draw_format, slug, tournaments!inner(id, club_id, slug, court_count)')
+    .select('id, name, tournament_id, draw_format, slug, max_entries, groups_count, group_sizes, advance_per_group, has_third_place_match, knockout_seeding, tournaments!inner(id, club_id, slug, court_count)')
     .eq('id', categoryId)
     .single();
   if (!cat) return null;
@@ -83,6 +83,7 @@ export async function generateDrawAction(
     group_sizes?: number[] | null;
     advance_per_group?: number | null;
     has_third_place_match?: boolean | null;
+    knockout_seeding?: 'auto' | 'manual' | null;
   };
   const groupsCount = catAny.groups_count ?? null;
   const storedGroupSizes = catAny.group_sizes ?? null;
@@ -110,6 +111,7 @@ export async function generateDrawAction(
     ...(resolvedGroupSizes && { group_sizes: resolvedGroupSizes }),
     top_per_group_advance: catAny.advance_per_group ?? 2,
     has_third_place_match: catAny.has_third_place_match ?? false,
+    knockout_seeding: catAny.knockout_seeding ?? 'auto',
   };
 
   let draw;
@@ -772,25 +774,28 @@ export async function getMatchesForCategory(categoryId: string): Promise<MatchWi
   });
 }
 
-// ── Promote group winners into knockout bracket ───────────────────────────────
-// For group_stage_knockout format: after all group-stage matches finish, this
-// action computes per-group standings and fills the knockout bracket entry slots
-// in the order the draw engine laid them out (Group A 1st, Group A 2nd, …).
-export async function promoteGroupWinnersAction(categoryId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: 'Not authenticated' };
+// ── Shared: compute per-group standings with 6-level tiebreaker ───────────────
+type GroupMatchRow = {
+  id: string;
+  round: number;
+  group_name: string | null;
+  status: string;
+  entry_a_id: string | null;
+  entry_b_id: string | null;
+  winner_entry_id: string | null;
+};
 
-  const cat = await assertCategoryManager(categoryId, user.id);
-  if (!cat) return { error: 'Permission denied' };
-
-  if (cat.draw_format !== 'group_stage_knockout') {
-    return { error: 'This action is only for group stage + knockout categories' };
-  }
-
+async function computeGroupStandings(categoryId: string): Promise<
+  | { error: string }
+  | {
+      groupNames: string[];
+      rankedByGroup: Map<string, string[]>;
+      allGroupMatchesDone: boolean;
+      groupMatches: GroupMatchRow[];
+    }
+> {
   const admin = createAdminClient();
 
-  // Fetch all matches for this category
   const { data: allMatches } = await admin
     .from('matches')
     .select('id, round, group_name, status, entry_a_id, entry_b_id, winner_entry_id')
@@ -799,19 +804,15 @@ export async function promoteGroupWinnersAction(categoryId: string) {
 
   if (!allMatches || allMatches.length === 0) return { error: 'No matches found' };
 
-  // Separate group-stage matches (have a group_name) from knockout (null group_name)
-  const groupMatches = allMatches.filter((m) => m.group_name !== null);
-  const knockoutMatches = allMatches.filter((m) => m.group_name === null);
+  const groupMatches = allMatches.filter((m) => m.group_name !== null) as GroupMatchRow[];
+  if (groupMatches.length === 0) return { error: 'No group-stage matches found' };
 
-  // Verify all group-stage matches are complete
   const pendingGroup = groupMatches.filter(
     (m) => m.status !== 'completed' && m.status !== 'walkover',
   );
-  if (pendingGroup.length > 0) {
-    return { error: `${pendingGroup.length} group-stage match${pendingGroup.length !== 1 ? 'es' : ''} still to be played` };
-  }
+  const allGroupMatchesDone = pendingGroup.length === 0;
 
-  // Compute standings per group — fetch sets for point totals
+  // Compute standings — fetch sets for point totals
   const { data: matchesWithSets } = await admin
     .from('matches')
     .select('id, group_name, entry_a_id, entry_b_id, winner_entry_id, sets')
@@ -820,7 +821,6 @@ export async function promoteGroupWinnersAction(categoryId: string) {
 
   const groupNames = [...new Set(groupMatches.map((m) => m.group_name as string))].sort();
 
-  // Per-entry stat maps
   const wins      = new Map<string, number>();
   const losses    = new Map<string, number>();
   const ptScored  = new Map<string, number>();
@@ -840,7 +840,6 @@ export async function promoteGroupWinnersAction(categoryId: string) {
       const loserId = m.winner_entry_id === m.entry_a_id ? m.entry_b_id : m.entry_a_id;
       losses.set(loserId, (losses.get(loserId) ?? 0) + 1);
     }
-    // Tally points from sets JSONB
     if (Array.isArray(m.sets)) {
       let aTotal = 0, bTotal = 0;
       for (const s of m.sets as { score_a: number; score_b: number }[]) {
@@ -856,8 +855,85 @@ export async function promoteGroupWinnersAction(categoryId: string) {
     }
   }
 
+  const entriesByGroup = new Map<string, Set<string>>();
+  for (const m of groupMatches) {
+    const g = m.group_name as string;
+    if (!entriesByGroup.has(g)) entriesByGroup.set(g, new Set());
+    if (m.entry_a_id) entriesByGroup.get(g)!.add(m.entry_a_id);
+    if (m.entry_b_id) entriesByGroup.get(g)!.add(m.entry_b_id);
+  }
+
+  const gMatchMap = new Map<string, GroupMatchRow[]>();
+  for (const m of groupMatches) {
+    const g = m.group_name as string;
+    if (!gMatchMap.has(g)) gMatchMap.set(g, []);
+    gMatchMap.get(g)!.push(m);
+  }
+
+  const rankedByGroup = new Map<string, string[]>();
+  for (const gName of groupNames) {
+    const entryIds = [...(entriesByGroup.get(gName) ?? [])];
+    const gMs = gMatchMap.get(gName) ?? [];
+    const ranked = entryIds.sort((a, b) => {
+      if ((wins.get(b) ?? 0) !== (wins.get(a) ?? 0)) return (wins.get(b) ?? 0) - (wins.get(a) ?? 0);
+      if ((losses.get(a) ?? 0) !== (losses.get(b) ?? 0)) return (losses.get(a) ?? 0) - (losses.get(b) ?? 0);
+      if ((pointDiff.get(b) ?? 0) !== (pointDiff.get(a) ?? 0)) return (pointDiff.get(b) ?? 0) - (pointDiff.get(a) ?? 0);
+      if ((ptScored.get(b) ?? 0) !== (ptScored.get(a) ?? 0)) return (ptScored.get(b) ?? 0) - (ptScored.get(a) ?? 0);
+      if ((ptGiven.get(a) ?? 0) !== (ptGiven.get(b) ?? 0)) return (ptGiven.get(a) ?? 0) - (ptGiven.get(b) ?? 0);
+      const h2h = gMs.find((m) =>
+        (m.entry_a_id === a && m.entry_b_id === b) ||
+        (m.entry_a_id === b && m.entry_b_id === a),
+      );
+      if (h2h?.winner_entry_id === b) return 1;
+      if (h2h?.winner_entry_id === a) return -1;
+      return 0;
+    });
+    rankedByGroup.set(gName, ranked);
+  }
+
+  return { groupNames, rankedByGroup, allGroupMatchesDone, groupMatches };
+}
+
+// ── Promote group winners into knockout bracket ───────────────────────────────
+// For group_stage_knockout format: after all group-stage matches finish, this
+// action computes per-group standings and fills the knockout bracket entry slots
+// in the order the draw engine laid them out (Group A 1st, Group A 2nd, …).
+export async function promoteGroupWinnersAction(categoryId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const cat = await assertCategoryManager(categoryId, user.id);
+  if (!cat) return { error: 'Permission denied' };
+
+  if (cat.draw_format !== 'group_stage_knockout') {
+    return { error: 'This action is only for group stage + knockout categories' };
+  }
+
+  if (cat.knockout_seeding === 'manual') {
+    return { error: 'This category uses manual knockout seeding — use the Knockout Builder instead' };
+  }
+
+  const admin = createAdminClient();
+
+  const standings = await computeGroupStandings(categoryId);
+  if ('error' in standings) return { error: standings.error };
+  const { groupNames, rankedByGroup, allGroupMatchesDone } = standings;
+
+  if (!allGroupMatchesDone) {
+    return { error: 'One or more group-stage matches still to be played' };
+  }
+
+  // Fetch knockout matches (null group_name)
+  const { data: allMatches } = await admin
+    .from('matches')
+    .select('id, round, group_name, entry_a_id, entry_b_id')
+    .eq('category_id', categoryId)
+    .order('round', { ascending: true });
+  if (!allMatches) return { error: 'No matches found' };
+  const knockoutMatches = allMatches.filter((m) => m.group_name === null);
+
   // top_per_group_advance defaults to 2 — count knockout slots per group
-  // Infer from knockout match count ÷ groups
   const totalKnockoutEntries = knockoutMatches.reduce((acc, m) => {
     if (m.entry_a_id) acc.add(m.entry_a_id);
     if (m.entry_b_id) acc.add(m.entry_b_id);
@@ -867,47 +943,10 @@ export async function promoteGroupWinnersAction(categoryId: string) {
     ? Math.round(totalKnockoutEntries / groupNames.length) || 2
     : 2;
 
-  // Collect all entries per group by scanning group matches
-  const entriesByGroup = new Map<string, Set<string>>();
-  for (const m of groupMatches) {
-    const g = m.group_name as string;
-    if (!entriesByGroup.has(g)) entriesByGroup.set(g, new Set());
-    if (m.entry_a_id) entriesByGroup.get(g)!.add(m.entry_a_id);
-    if (m.entry_b_id) entriesByGroup.get(g)!.add(m.entry_b_id);
-  }
-
-  // Rank entries within each group — 6-level tiebreaker chain
-  const advancingEntries: string[] = []; // ordered: [A1, A2, B1, B2, …]
-  const gMatchMap = new Map<string, typeof groupMatches>();
-  for (const m of groupMatches) {
-    const g = m.group_name as string;
-    if (!gMatchMap.has(g)) gMatchMap.set(g, []);
-    gMatchMap.get(g)!.push(m);
-  }
-
+  // Ordered: [A1, A2, B1, B2, …]
+  const advancingEntries: string[] = [];
   for (const gName of groupNames) {
-    const entryIds = [...(entriesByGroup.get(gName) ?? [])];
-    const gMs = gMatchMap.get(gName) ?? [];
-    const ranked = entryIds.sort((a, b) => {
-      // 1. Most wins
-      if ((wins.get(b) ?? 0) !== (wins.get(a) ?? 0)) return (wins.get(b) ?? 0) - (wins.get(a) ?? 0);
-      // 2. Fewest losses
-      if ((losses.get(a) ?? 0) !== (losses.get(b) ?? 0)) return (losses.get(a) ?? 0) - (losses.get(b) ?? 0);
-      // 3. Best point difference
-      if ((pointDiff.get(b) ?? 0) !== (pointDiff.get(a) ?? 0)) return (pointDiff.get(b) ?? 0) - (pointDiff.get(a) ?? 0);
-      // 4. Most points scored
-      if ((ptScored.get(b) ?? 0) !== (ptScored.get(a) ?? 0)) return (ptScored.get(b) ?? 0) - (ptScored.get(a) ?? 0);
-      // 5. Fewest points given
-      if ((ptGiven.get(a) ?? 0) !== (ptGiven.get(b) ?? 0)) return (ptGiven.get(a) ?? 0) - (ptGiven.get(b) ?? 0);
-      // 6. Head-to-head
-      const h2h = gMs.find((m) =>
-        (m.entry_a_id === a && m.entry_b_id === b) ||
-        (m.entry_a_id === b && m.entry_b_id === a),
-      );
-      if (h2h?.winner_entry_id === b) return 1;
-      if (h2h?.winner_entry_id === a) return -1;
-      return 0;
-    });
+    const ranked = rankedByGroup.get(gName) ?? [];
     advancingEntries.push(...ranked.slice(0, topPerGroup));
   }
 
@@ -943,4 +982,316 @@ export async function promoteGroupWinnersAction(categoryId: string) {
   revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}`);
   revalidatePath(`/tournaments/${tSlug}/scoring`);
   return { success: true, promoted: advancingEntries.length };
+}
+
+// ── Manual Knockout Builder ────────────────────────────────────────────────────
+export interface KnockoutPoolEntry {
+  entryId: string;
+  displayName: string;
+  label: string;
+}
+
+export interface KnockoutBuilderMatch {
+  id: string;
+  round: number;
+  round_name: string;
+  bracket_position: number;
+  entry_a: { id: string; displayName: string } | null;
+  entry_b: { id: string; displayName: string } | null;
+  status: string;
+  winner_entry_id: string | null;
+}
+
+export interface KnockoutBuilderState {
+  groupStageComplete: boolean;
+  topPerGroup: number;
+  rounds: { round: number; roundName: string; matches: KnockoutBuilderMatch[] }[];
+  /** Entries available to be paired up for the next round to build. Null if
+   *  the knockout is already complete or the group stage isn't done yet. */
+  currentPool: KnockoutPoolEntry[] | null;
+  /** Suggested name for the round currently being built. */
+  suggestedRoundName: string | null;
+  champion: KnockoutPoolEntry | null;
+}
+
+async function fetchEntryNames(admin: ReturnType<typeof createAdminClient>, entryIds: string[]): Promise<Map<string, string>> {
+  const nameMap = new Map<string, string>();
+  if (entryIds.length === 0) return nameMap;
+  const { data } = await admin
+    .from('tournament_entries')
+    .select('id, players!player_id(full_name), partner:players!partner_id(full_name)')
+    .in('id', entryIds);
+  for (const e of (data ?? [])) {
+    const player = e.players as { full_name: string } | null;
+    const partner = e.partner as { full_name: string } | null;
+    const name = player?.full_name ?? 'Unknown';
+    nameMap.set(e.id, partner ? `${name} / ${partner.full_name}` : name);
+  }
+  return nameMap;
+}
+
+function suggestRoundName(poolSize: number): string {
+  if (poolSize <= 2) return 'Final';
+  if (poolSize <= 4) return 'Semi-final';
+  if (poolSize <= 8) return 'Quarter-final';
+  return `Round of ${poolSize}`;
+}
+
+export async function getKnockoutBuilderStateAction(categoryId: string): Promise<{ error: string } | { data: KnockoutBuilderState }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const cat = await assertCategoryManager(categoryId, user.id);
+  if (!cat) return { error: 'Permission denied' };
+
+  if (cat.draw_format !== 'group_stage_knockout') {
+    return { error: 'This action is only for group stage + knockout categories' };
+  }
+  if (cat.knockout_seeding !== 'manual') {
+    return { error: 'This category does not use manual knockout seeding' };
+  }
+
+  const admin = createAdminClient();
+
+  const standings = await computeGroupStandings(categoryId);
+  if ('error' in standings) return { error: standings.error };
+  const { groupNames, rankedByGroup, allGroupMatchesDone } = standings;
+
+  const topPerGroup = cat.advance_per_group ?? 2;
+
+  // Existing knockout matches (group_name is null), with entry display info
+  const { data: knockoutRows } = await admin
+    .from('matches')
+    .select('id, round, round_name, group_name, bracket_position, status, entry_a_id, entry_b_id, winner_entry_id')
+    .eq('category_id', categoryId)
+    .is('group_name', null)
+    .order('round', { ascending: true })
+    .order('bracket_position', { ascending: true });
+
+  const knockoutMatches = knockoutRows ?? [];
+
+  // Collect all entry IDs we'll need names for: qualifiers + anything in knockout matches
+  const allEntryIds = new Set<string>();
+  for (const gName of groupNames) {
+    for (const id of (rankedByGroup.get(gName) ?? []).slice(0, topPerGroup)) allEntryIds.add(id);
+  }
+  for (const m of knockoutMatches) {
+    if (m.entry_a_id) allEntryIds.add(m.entry_a_id);
+    if (m.entry_b_id) allEntryIds.add(m.entry_b_id);
+  }
+  const nameMap = await fetchEntryNames(admin, [...allEntryIds]);
+
+  if (!allGroupMatchesDone) {
+    return {
+      data: {
+        groupStageComplete: false,
+        topPerGroup,
+        rounds: [],
+        currentPool: null,
+        suggestedRoundName: null,
+        champion: null,
+      },
+    };
+  }
+
+  // Build initial pool from group qualifiers
+  const pool: KnockoutPoolEntry[] = [];
+  for (const gName of groupNames) {
+    const ranked = (rankedByGroup.get(gName) ?? []).slice(0, topPerGroup);
+    ranked.forEach((entryId, i) => {
+      pool.push({ entryId, displayName: nameMap.get(entryId) ?? 'Unknown', label: `Group ${gName.replace('Group ', '')} #${i + 1}` });
+    });
+  }
+
+  // Group existing knockout matches by round
+  const roundsMap = new Map<number, typeof knockoutMatches>();
+  for (const m of knockoutMatches) {
+    if (!roundsMap.get(m.round)) roundsMap.set(m.round, []);
+    roundsMap.get(m.round)!.push(m);
+  }
+  const sortedRounds = [...roundsMap.keys()].sort((a, b) => a - b);
+
+  let currentPool: KnockoutPoolEntry[] | null = pool;
+  let champion: KnockoutPoolEntry | null = null;
+
+  for (const round of sortedRounds) {
+    const roundMatches = roundsMap.get(round)!;
+    const usedIds = new Set<string>();
+    for (const m of roundMatches) {
+      if (m.entry_a_id) usedIds.add(m.entry_a_id);
+      if (m.entry_b_id) usedIds.add(m.entry_b_id);
+    }
+    const allDone = roundMatches.every((m) => m.status === 'completed' || m.status === 'walkover');
+
+    if (!allDone) {
+      // This round is still in progress — not ready to build the next one.
+      // Available pool for THIS round = current pool minus entries already used here.
+      currentPool = null; // can't build a new round while this one is in progress
+      break;
+    }
+
+    // Round complete — advance pool: winners + carried-over (unused) entries
+    const winners: KnockoutPoolEntry[] = roundMatches
+      .filter((m) => m.winner_entry_id)
+      .map((m) => ({
+        entryId: m.winner_entry_id as string,
+        displayName: nameMap.get(m.winner_entry_id as string) ?? 'Unknown',
+        label: `Winner – ${m.round_name ?? `Round ${round}`}`,
+      }));
+    const carriedOver: KnockoutPoolEntry[] = (currentPool ?? []).filter((p) => !usedIds.has(p.entryId));
+    currentPool = [...winners, ...carriedOver];
+
+    if (currentPool.length === 1 && round === sortedRounds[sortedRounds.length - 1]) {
+      champion = currentPool[0];
+      currentPool = null;
+    }
+  }
+
+  if (currentPool && currentPool.length < 2) {
+    if (currentPool.length === 1) champion = currentPool[0];
+    currentPool = null;
+  }
+
+  const rounds = sortedRounds.map((round) => {
+    const roundMatches = roundsMap.get(round)!;
+    return {
+      round,
+      roundName: roundMatches[0]?.round_name ?? `Knockout Round ${round}`,
+      matches: roundMatches.map((m) => ({
+        id: m.id,
+        round: m.round,
+        round_name: m.round_name ?? '',
+        bracket_position: m.bracket_position ?? 0,
+        entry_a: m.entry_a_id ? { id: m.entry_a_id, displayName: nameMap.get(m.entry_a_id) ?? 'Unknown' } : null,
+        entry_b: m.entry_b_id ? { id: m.entry_b_id, displayName: nameMap.get(m.entry_b_id) ?? 'Unknown' } : null,
+        status: m.status,
+        winner_entry_id: m.winner_entry_id,
+      })),
+    };
+  });
+
+  return {
+    data: {
+      groupStageComplete: true,
+      topPerGroup,
+      rounds,
+      currentPool,
+      suggestedRoundName: currentPool ? suggestRoundName(currentPool.length) : null,
+      champion,
+    },
+  };
+}
+
+// Compute the round number + bracket_position for the next manual knockout
+// match, and the maximum group-stage round (knockout rounds start after it).
+async function getNextKnockoutRoundInfo(admin: ReturnType<typeof createAdminClient>, categoryId: string) {
+  const { data: rows } = await admin
+    .from('matches')
+    .select('round, group_name, bracket_position, status')
+    .eq('category_id', categoryId);
+
+  const groupRounds = (rows ?? []).filter((r) => r.group_name !== null).map((r) => r.round);
+  const maxGroupRound = groupRounds.length > 0 ? Math.max(...groupRounds) : 0;
+
+  const knockoutRows = (rows ?? []).filter((r) => r.group_name === null);
+  if (knockoutRows.length === 0) {
+    return { round: maxGroupRound + 1, bracketPosition: 0 };
+  }
+  const maxKnockoutRound = Math.max(...knockoutRows.map((r) => r.round));
+  const lastRoundRows = knockoutRows.filter((r) => r.round === maxKnockoutRound);
+  const lastRoundDone = lastRoundRows.every((r) => r.status === 'completed' || r.status === 'walkover');
+
+  if (lastRoundDone) {
+    return { round: maxKnockoutRound + 1, bracketPosition: 0 };
+  }
+  return { round: maxKnockoutRound, bracketPosition: lastRoundRows.length };
+}
+
+export async function createKnockoutMatchAction(
+  categoryId: string,
+  entryAId: string,
+  entryBId: string,
+  roundName?: string,
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const cat = await assertCategoryManager(categoryId, user.id);
+  if (!cat) return { error: 'Permission denied' };
+
+  if (cat.draw_format !== 'group_stage_knockout' || cat.knockout_seeding !== 'manual') {
+    return { error: 'This action is only for manual knockout seeding categories' };
+  }
+  if (entryAId === entryBId) {
+    return { error: 'Cannot pair an entry against itself' };
+  }
+
+  const admin = createAdminClient();
+
+  // Verify both entries are currently in the available pool
+  const stateResult = await getKnockoutBuilderStateAction(categoryId);
+  if ('error' in stateResult) return stateResult;
+  const pool = stateResult.data.currentPool;
+  if (!pool) return { error: 'No round is currently ready to be built' };
+  const poolIds = new Set(pool.map((p) => p.entryId));
+  if (!poolIds.has(entryAId) || !poolIds.has(entryBId)) {
+    return { error: 'Both entries must be in the current available pool' };
+  }
+
+  const { round, bracketPosition } = await getNextKnockoutRoundInfo(admin, categoryId);
+  const finalRoundName = roundName?.trim() || suggestRoundName(pool.length);
+
+  const { error: insertErr } = await admin.from('matches').insert({
+    id: crypto.randomUUID(),
+    tournament_id: cat.tournament_id,
+    category_id: categoryId,
+    round,
+    round_name: finalRoundName,
+    group_name: null,
+    bracket_type: 'knockout',
+    entry_a_id: entryAId,
+    entry_b_id: entryBId,
+    status: 'scheduled',
+    sets: [],
+    bracket_position: bracketPosition,
+  });
+  if (insertErr) return { error: `Failed to create match: ${insertErr.message}` };
+
+  const tSlug = cat.tournamentData.slug;
+  revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}`);
+  revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}/knockout-builder`);
+  return { success: true };
+}
+
+export async function deleteKnockoutMatchAction(categoryId: string, matchId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const cat = await assertCategoryManager(categoryId, user.id);
+  if (!cat) return { error: 'Permission denied' };
+
+  const admin = createAdminClient();
+
+  const { data: match } = await admin
+    .from('matches')
+    .select('id, category_id, group_name, status')
+    .eq('id', matchId)
+    .single();
+
+  if (!match || match.category_id !== categoryId || match.group_name !== null) {
+    return { error: 'Match not found' };
+  }
+  if (match.status !== 'scheduled') {
+    return { error: 'Cannot remove a match that has already started' };
+  }
+
+  await admin.from('matches').delete().eq('id', matchId);
+
+  const tSlug = cat.tournamentData.slug;
+  revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}`);
+  revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}/knockout-builder`);
+  return { success: true };
 }

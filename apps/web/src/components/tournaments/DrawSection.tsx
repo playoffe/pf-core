@@ -19,6 +19,7 @@ interface StalenessEntry {
 
 interface Props {
   categoryId: string;
+  categorySlug?: string;
   tournamentSlug: string;
   drawFormat: string;
   categoryStatus: string;
@@ -39,6 +40,7 @@ interface Props {
     groupsCount: number | null;
     advancePerGroup: number;
     hasThirdPlaceMatch: boolean;
+    knockoutSeeding?: 'auto' | 'manual';
   };
 }
 
@@ -52,6 +54,7 @@ const FORMAT_LABEL: Record<string, string> = {
 
 export function DrawSection({
   categoryId,
+  categorySlug,
   tournamentSlug,
   drawFormat,
   categoryStatus,
@@ -180,7 +183,9 @@ export function DrawSection({
     groupMatches.length > 0 &&
     groupMatches.every((m) => m.status === 'completed' || m.status === 'walkover');
   const knockoutSlotsEmpty = knockoutMatches.some((m) => !m.entry_a && !m.entry_b);
-  const canPromoteGroups = isGroupKnockout && isDrawn && allGroupMatchesDone && knockoutSlotsEmpty;
+  const knockoutSeeding = groupStageConfig?.knockoutSeeding ?? 'auto';
+  const canPromoteGroups = isGroupKnockout && isDrawn && allGroupMatchesDone && knockoutSlotsEmpty && knockoutSeeding === 'auto';
+  const showKnockoutBuilderLink = isGroupKnockout && isDrawn && allGroupMatchesDone && knockoutSeeding === 'manual';
 
   async function handlePromoteGroups() {
     setPromotingGroups(true);
@@ -396,6 +401,16 @@ export function DrawSection({
                     >
                       {promotingGroups ? 'Promoting…' : 'Promote group winners →'}
                     </button>
+                  )}
+
+                  {/* Group stage knockout (manual seeding): open the knockout builder */}
+                  {showKnockoutBuilderLink && !showRegenConfirm && (
+                    <Link
+                      href={`/tournaments/${tournamentSlug}/categories/${categorySlug ?? categoryId}/knockout-builder`}
+                      className="rounded-lg border border-brand-600 px-3 py-1.5 text-xs text-brand-400 hover:bg-brand-600/10 transition-colors"
+                    >
+                      Open Knockout Builder →
+                    </Link>
                   )}
 
                   {categoryStatus === 'draw_generated' && !showRegenConfirm && !anyMatchStarted && (

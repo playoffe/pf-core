@@ -38,6 +38,7 @@ export async function createCategoryAction(
     group_sizes?: number[] | null;
     advance_per_group?: number;
     has_third_place_match?: boolean;
+    knockout_seeding?: 'auto' | 'manual';
   },
 ) {
   const supabase = await createClient();
@@ -49,7 +50,7 @@ export async function createCategoryAction(
   // Destructure scoring override fields before schema validation
   const {
     scoring_override, scoring_format, num_sets, points_per_set, win_by, deuce_cap,
-    groups_count, group_sizes, advance_per_group, has_third_place_match,
+    groups_count, group_sizes, advance_per_group, has_third_place_match, knockout_seeding,
     ...rest
   } = input;
 
@@ -76,6 +77,7 @@ export async function createCategoryAction(
     group_sizes: group_sizes ?? null,
     advance_per_group: advance_per_group ?? 2,
     has_third_place_match: has_third_place_match ?? false,
+    knockout_seeding: knockout_seeding ?? 'auto',
   });
 
   if (error) return { error: 'Failed to create category. Please try again.' };
@@ -103,6 +105,7 @@ export async function updateCategoryAction(
     groups_count?: number | null;
     advance_per_group?: number;
     has_third_place_match?: boolean;
+    knockout_seeding?: 'auto' | 'manual';
   },
 ) {
   const supabase = await createClient();
@@ -159,6 +162,7 @@ export async function updateCategoryAction(
   if ('group_sizes' in input) update.group_sizes = (input as { group_sizes?: number[] | null }).group_sizes ?? null;
   if (input.advance_per_group !== undefined) update.advance_per_group = input.advance_per_group;
   if (input.has_third_place_match !== undefined) update.has_third_place_match = input.has_third_place_match;
+  if (input.knockout_seeding !== undefined) update.knockout_seeding = input.knockout_seeding;
 
   if (Object.keys(update).length === 0) return { error: 'No changes provided' };
 

@@ -10,6 +10,7 @@ import {
   suggestGroupConfig,
   deriveGroupSize,
   deriveKnockoutTeams,
+  deriveBracketSize,
   getKnockoutRoundNames,
   getSuggestedGroupOptions,
 } from '@/lib/utils/groupStageConfig';
@@ -40,6 +41,7 @@ interface Props {
   currentGroupsCount: number | null;
   currentAdvancePerGroup: number;
   currentHasThirdPlaceMatch: boolean;
+  currentKnockoutSeeding?: 'auto' | 'manual';
 }
 
 const PLAY_FORMAT_OPTS = [
@@ -81,6 +83,7 @@ export function CategoryEditInline({
   currentGroupsCount,
   currentAdvancePerGroup,
   currentHasThirdPlaceMatch,
+  currentKnockoutSeeding,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -96,6 +99,7 @@ export function CategoryEditInline({
   const [groupsCount, setGroupsCount] = useState(currentGroupsCount != null ? String(currentGroupsCount) : '');
   const [advancePerGroup, setAdvancePerGroup] = useState(String(currentAdvancePerGroup));
   const [hasThirdPlaceMatch, setHasThirdPlaceMatch] = useState(currentHasThirdPlaceMatch);
+  const [knockoutSeeding, setKnockoutSeeding] = useState<'auto' | 'manual'>(currentKnockoutSeeding ?? 'auto');
   const [extraGroupIndex, setExtraGroupIndex] = useState(0);
 
   // Scoring
@@ -122,6 +126,7 @@ export function CategoryEditInline({
   const groupSize = (hasMaxEntries && effectiveGroups > 0) ? deriveGroupSize(maxEntriesNum, effectiveGroups) : 0;
   const knockoutTeams = effectiveGroups > 0 ? deriveKnockoutTeams(effectiveGroups, effectiveAdvance) : 0;
   const knockoutRounds = knockoutTeams >= 2 ? getKnockoutRoundNames(knockoutTeams) : [];
+  const knockoutByes = knockoutTeams >= 2 ? deriveBracketSize(knockoutTeams).byes : 0;
   const allOptions = hasMaxEntries ? getSuggestedGroupOptions(maxEntriesNum, effectiveAdvance) : [];
 
   // Per-group sizes array — handles uneven distribution
@@ -192,6 +197,7 @@ export function CategoryEditInline({
       groups_count: effectiveGroups > 0 ? effectiveGroups : null,
       advance_per_group: effectiveAdvance,
       has_third_place_match: hasThirdPlaceMatch,
+      knockout_seeding: knockoutTeams >= 2 ? knockoutSeeding : 'auto',
     });
 
     setLoading(false);
@@ -313,8 +319,11 @@ export function CategoryEditInline({
               onAdvancePerGroupChange={(v) => { setAdvancePerGroup(v); setGroupsCount(''); }}
               knockoutTeams={knockoutTeams}
               knockoutRounds={knockoutRounds}
+              knockoutByes={knockoutByes}
               hasThirdPlaceMatch={hasThirdPlaceMatch}
               onHasThirdPlaceMatchChange={setHasThirdPlaceMatch}
+              knockoutSeeding={knockoutSeeding}
+              onKnockoutSeedingChange={setKnockoutSeeding}
             />
           )}
 

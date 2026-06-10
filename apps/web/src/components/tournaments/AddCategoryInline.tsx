@@ -8,6 +8,7 @@ import {
   suggestGroupConfig,
   deriveGroupSize,
   deriveKnockoutTeams,
+  deriveBracketSize,
   getKnockoutRoundNames,
   getSuggestedGroupOptions,
 } from '@/lib/utils/groupStageConfig';
@@ -74,6 +75,7 @@ export function AddCategoryInline({
   const [groupsCount, setGroupsCount] = useState<string>('');
   const [advancePerGroup, setAdvancePerGroup] = useState<string>('2');
   const [hasThirdPlaceMatch, setHasThirdPlaceMatch] = useState(false);
+  const [knockoutSeeding, setKnockoutSeeding] = useState<'auto' | 'manual'>('auto');
   // Which group index (0-based) gets the extra player when entries don't divide evenly
   const [extraGroupIndex, setExtraGroupIndex] = useState<number>(0);
 
@@ -97,6 +99,7 @@ export function AddCategoryInline({
     : 0;
   const knockoutTeams = effectiveGroups > 0 ? deriveKnockoutTeams(effectiveGroups, effectiveAdvance) : 0;
   const knockoutRounds = knockoutTeams >= 2 ? getKnockoutRoundNames(knockoutTeams) : [];
+  const knockoutByes = knockoutTeams >= 2 ? deriveBracketSize(knockoutTeams).byes : 0;
   const allOptions = hasMaxEntries ? getSuggestedGroupOptions(maxEntriesNum, effectiveAdvance) : [];
 
   // Per-group sizes array — handles uneven distribution
@@ -129,6 +132,7 @@ export function AddCategoryInline({
     setGroupsCount('');
     setAdvancePerGroup('2');
     setHasThirdPlaceMatch(false);
+    setKnockoutSeeding('auto');
     setExtraGroupIndex(0);
     setScoringOverride(false);
     setScoringFormat(tournamentScoringFormat);
@@ -178,6 +182,7 @@ export function AddCategoryInline({
         group_sizes: groupSizes.length > 0 ? groupSizes : null,
         advance_per_group: effectiveAdvance,
         has_third_place_match: hasThirdPlaceMatch,
+        knockout_seeding: knockoutTeams >= 2 ? knockoutSeeding : 'auto',
       }),
     });
 
@@ -358,8 +363,11 @@ export function AddCategoryInline({
           onAdvancePerGroupChange={(v) => { setAdvancePerGroup(v); setGroupsCount(''); setExtraGroupIndex(0); }}
           knockoutTeams={knockoutTeams}
           knockoutRounds={knockoutRounds}
+          knockoutByes={knockoutByes}
           hasThirdPlaceMatch={hasThirdPlaceMatch}
           onHasThirdPlaceMatchChange={setHasThirdPlaceMatch}
+          knockoutSeeding={knockoutSeeding}
+          onKnockoutSeedingChange={setKnockoutSeeding}
         />
       )}
     </div>
@@ -524,7 +532,7 @@ export function AddCategoryInline({
           </div>
 
           {/* Knockout flow */}
-          {knockoutRounds.length > 0 && (
+          {knockoutTeams >= 2 && (
             <div>
               <p className="text-[11px] text-slate-500 mb-2">
                 Knockout bracket — {knockoutTeams} teams
@@ -534,18 +542,24 @@ export function AddCategoryInline({
                   Group stage
                 </span>
                 <span className="text-slate-600 text-xs">→</span>
-                {knockoutRounds.map((round, i) => (
-                  <span key={round} className="flex items-center gap-1.5">
-                    <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
-                      {round}
-                    </span>
-                    {i < knockoutRounds.length - 1 && (
-                      <span className="text-slate-600 text-xs">→</span>
-                    )}
+                {knockoutSeeding === 'manual' ? (
+                  <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
+                    Knockout Builder ({knockoutTeams} qualifiers, manual pairing)
                   </span>
-                ))}
+                ) : (
+                  knockoutRounds.map((round, i) => (
+                    <span key={round} className="flex items-center gap-1.5">
+                      <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
+                        {round}
+                      </span>
+                      {i < knockoutRounds.length - 1 && (
+                        <span className="text-slate-600 text-xs">→</span>
+                      )}
+                    </span>
+                  ))
+                )}
               </div>
-              {hasThirdPlaceMatch && (
+              {hasThirdPlaceMatch && knockoutSeeding !== 'manual' && (
                 <p className="mt-2 text-[11px] text-slate-500">+ 3rd place match (bronze medal)</p>
               )}
             </div>
@@ -683,8 +697,11 @@ interface GroupStageConfigPanelProps {
   onAdvancePerGroupChange: (v: string) => void;
   knockoutTeams: number;
   knockoutRounds: string[];
+  knockoutByes?: number;
   hasThirdPlaceMatch: boolean;
   onHasThirdPlaceMatchChange: (v: boolean) => void;
+  knockoutSeeding?: 'auto' | 'manual';
+  onKnockoutSeedingChange?: (v: 'auto' | 'manual') => void;
 }
 
 export function GroupStageConfigPanel({
@@ -702,8 +719,11 @@ export function GroupStageConfigPanel({
   onAdvancePerGroupChange,
   knockoutTeams,
   knockoutRounds,
+  knockoutByes = 0,
   hasThirdPlaceMatch,
   onHasThirdPlaceMatchChange,
+  knockoutSeeding = 'auto',
+  onKnockoutSeedingChange,
 }: GroupStageConfigPanelProps) {
   const [showStructure, setShowStructure] = useState(false);
   const isOverriding = groupsCount !== '';
@@ -802,21 +822,29 @@ export function GroupStageConfigPanel({
             <span className="text-xs text-slate-400">Total in knockout</span>
             <span className="text-xs font-semibold text-white">{knockoutTeams} teams</span>
           </div>
-          <div>
-            <p className="text-xs text-slate-400 mb-1.5">Knockout bracket</p>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {knockoutRounds.map((round, i) => (
-                <span key={round} className="flex items-center gap-1.5">
-                  <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
-                    {round}
+          {knockoutSeeding === 'manual' ? (
+            <p className="text-[11px] text-slate-500">
+              No bracket/byes are generated automatically. After the group stage, you&apos;ll
+              manually pair the {knockoutTeams} qualifiers (and every subsequent round) via the
+              Knockout Builder.
+            </p>
+          ) : (
+            <div>
+              <p className="text-xs text-slate-400 mb-1.5">Knockout bracket</p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {knockoutRounds.map((round, i) => (
+                  <span key={round} className="flex items-center gap-1.5">
+                    <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
+                      {round}
+                    </span>
+                    {i < knockoutRounds.length - 1 && (
+                      <span className="text-slate-600 text-xs">→</span>
+                    )}
                   </span>
-                  {i < knockoutRounds.length - 1 && (
-                    <span className="text-slate-600 text-xs">→</span>
-                  )}
-                </span>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -869,6 +897,44 @@ export function GroupStageConfigPanel({
           </p>
         </div>
       </label>
+
+      {/* Knockout seeding mode — always available for group-stage knockouts */}
+      {knockoutTeams >= 2 && onKnockoutSeedingChange && (
+        <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-3 space-y-2">
+          <p className="text-xs font-medium text-amber-300">
+            {knockoutByes > 0
+              ? `${knockoutTeams} qualifiers don't fit a clean bracket — ${knockoutByes} bye${knockoutByes !== 1 ? 's' : ''} would occur.`
+              : `${knockoutTeams} qualifiers fit a clean bracket — manual seeding is optional here.`}
+          </p>
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <div>
+              <span className="text-xs font-medium text-slate-300">
+                {knockoutSeeding === 'manual' ? 'Manual seeding' : 'Automatic seeding'}
+              </span>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                {knockoutSeeding === 'manual'
+                  ? "After the group stage, you'll manually pair qualifiers for crossover/playoff matches via the Knockout Builder — no auto-byes."
+                  : 'The bracket is generated automatically; top seeds receive byes into the next round.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={knockoutSeeding === 'manual'}
+              onClick={() => onKnockoutSeedingChange(knockoutSeeding === 'manual' ? 'auto' : 'manual')}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                knockoutSeeding === 'manual' ? 'bg-brand-600' : 'bg-slate-700'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  knockoutSeeding === 'manual' ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </label>
+        </div>
+      )}
 
       {/* Inline group structure preview */}
       {effectiveGroups > 0 && knockoutTeams >= 2 && (
@@ -925,16 +991,22 @@ export function GroupStageConfigPanel({
                   Group stage
                 </span>
                 <span className="text-slate-600 text-xs">→</span>
-                {knockoutRounds.map((round, i) => (
-                  <span key={round} className="flex items-center gap-1.5">
-                    <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
-                      {round}
-                    </span>
-                    {i < knockoutRounds.length - 1 && (
-                      <span className="text-slate-600 text-xs">→</span>
-                    )}
+                {knockoutSeeding === 'manual' ? (
+                  <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
+                    Knockout Builder ({knockoutTeams} qualifiers, manual pairing)
                   </span>
-                ))}
+                ) : (
+                  knockoutRounds.map((round, i) => (
+                    <span key={round} className="flex items-center gap-1.5">
+                      <span className="rounded bg-brand-900/60 px-2 py-0.5 text-[11px] font-medium text-brand-300 border border-brand-800/40">
+                        {round}
+                      </span>
+                      {i < knockoutRounds.length - 1 && (
+                        <span className="text-slate-600 text-xs">→</span>
+                      )}
+                    </span>
+                  ))
+                )}
               </div>
               <p className="text-[10px] text-slate-500">
                 <span className="inline-block h-1.5 w-4 rounded-full bg-brand-500 mr-1 align-middle" />
