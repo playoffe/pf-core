@@ -161,6 +161,39 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
               </div>
             ))}
           </div>
+          {r.standings && (
+            <div className="border-t border-surface-border px-4 py-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                Stage standings — each team played multiple matches; use this ranking to set up the next knockout round
+              </p>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-surface-border text-text-secondary">
+                    <th className="px-2 py-1 text-left font-medium w-6">#</th>
+                    <th className="px-2 py-1 text-left font-medium">Team</th>
+                    <th className="px-2 py-1 text-center font-medium w-10">W</th>
+                    <th className="px-2 py-1 text-center font-medium w-10">L</th>
+                    <th className="px-2 py-1 text-center font-medium w-12">PS</th>
+                    <th className="px-2 py-1 text-center font-medium w-12">PA</th>
+                    <th className="px-2 py-1 text-center font-medium w-12">PD</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.standings.map((s) => (
+                    <tr key={s.entryId} className="border-b border-surface-border last:border-0">
+                      <td className="px-2 py-1 text-text-secondary">{s.rank}</td>
+                      <td className="px-2 py-1 text-text-primary">{s.displayName}</td>
+                      <td className="px-2 py-1 text-center text-text-primary">{s.wins}</td>
+                      <td className="px-2 py-1 text-center text-text-primary">{s.losses}</td>
+                      <td className="px-2 py-1 text-center text-text-secondary">{s.pointsScored}</td>
+                      <td className="px-2 py-1 text-center text-text-secondary">{s.pointsGiven}</td>
+                      <td className="px-2 py-1 text-center text-text-secondary">{s.pointDiff >= 0 ? `+${s.pointDiff}` : s.pointDiff}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       ))}
 
@@ -187,9 +220,10 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
             />
           </div>
           <p className="mb-3 text-xs text-text-secondary">
-            Select two entries to create a matchup. Entries remain available until they lose a match,
-            so you can pair the same team into multiple matchups if needed. Once you&apos;ve created all
-            the matchups for this round, schedule them from the Schedule tab.
+            {state.rounds[state.rounds.length - 1]?.standings
+              ? "Use the stage standings above to set up the next knockout round — pair each team into one matchup; the loser will be eliminated."
+              : "Select two entries to create a matchup. Entries remain available until they lose a match, so you can pair the same team into multiple matchups if needed."}
+            {' '}Once you&apos;ve created all the matchups for this round, schedule them from the Schedule tab.
           </p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {state.currentPool.map((p) => {

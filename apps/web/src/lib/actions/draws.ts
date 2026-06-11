@@ -994,6 +994,79 @@ export interface KnockoutPoolEntry {
   groupName: string | null;
 }
 
+export interface KnockoutStandingRow {
+  entryId: string;
+  displayName: string;
+  rank: number;
+  wins: number;
+  losses: number;
+  pointsScored: number;
+  pointsGiven: number;
+  pointDiff: number;
+}
+
+/** Rank a set of entries by their results within a single set of matches,
+ *  using the same 6-level tiebreaker as group standings (wins, losses,
+ *  point diff, points scored, points given, head-to-head). */
+function rankByStandings(
+  entryIds: string[],
+  matches: { entry_a_id: string | null; entry_b_id: string | null; winner_entry_id: string | null; sets: unknown }[],
+  nameMap: Map<string, string>,
+): KnockoutStandingRow[] {
+  const wins = new Map<string, number>();
+  const losses = new Map<string, number>();
+  const ptScored = new Map<string, number>();
+  const ptGiven = new Map<string, number>();
+  for (const id of entryIds) { wins.set(id, 0); losses.set(id, 0); ptScored.set(id, 0); ptGiven.set(id, 0); }
+
+  for (const m of matches) {
+    if (!m.entry_a_id || !m.entry_b_id) continue;
+    if (m.winner_entry_id) {
+      wins.set(m.winner_entry_id, (wins.get(m.winner_entry_id) ?? 0) + 1);
+      const loserId = m.winner_entry_id === m.entry_a_id ? m.entry_b_id : m.entry_a_id;
+      losses.set(loserId, (losses.get(loserId) ?? 0) + 1);
+    }
+    if (Array.isArray(m.sets)) {
+      let aTotal = 0, bTotal = 0;
+      for (const s of m.sets as { score_a: number; score_b: number }[]) {
+        aTotal += s.score_a ?? 0;
+        bTotal += s.score_b ?? 0;
+      }
+      ptScored.set(m.entry_a_id, (ptScored.get(m.entry_a_id) ?? 0) + aTotal);
+      ptGiven.set(m.entry_a_id, (ptGiven.get(m.entry_a_id) ?? 0) + bTotal);
+      ptScored.set(m.entry_b_id, (ptScored.get(m.entry_b_id) ?? 0) + bTotal);
+      ptGiven.set(m.entry_b_id, (ptGiven.get(m.entry_b_id) ?? 0) + aTotal);
+    }
+  }
+
+  const ranked = [...entryIds].sort((a, b) => {
+    if ((wins.get(b) ?? 0) !== (wins.get(a) ?? 0)) return (wins.get(b) ?? 0) - (wins.get(a) ?? 0);
+    if ((losses.get(a) ?? 0) !== (losses.get(b) ?? 0)) return (losses.get(a) ?? 0) - (losses.get(b) ?? 0);
+    const diffA = (ptScored.get(a) ?? 0) - (ptGiven.get(a) ?? 0);
+    const diffB = (ptScored.get(b) ?? 0) - (ptGiven.get(b) ?? 0);
+    if (diffB !== diffA) return diffB - diffA;
+    if ((ptScored.get(b) ?? 0) !== (ptScored.get(a) ?? 0)) return (ptScored.get(b) ?? 0) - (ptScored.get(a) ?? 0);
+    if ((ptGiven.get(a) ?? 0) !== (ptGiven.get(b) ?? 0)) return (ptGiven.get(a) ?? 0) - (ptGiven.get(b) ?? 0);
+    const h2h = matches.find((m) =>
+      (m.entry_a_id === a && m.entry_b_id === b) || (m.entry_a_id === b && m.entry_b_id === a),
+    );
+    if (h2h?.winner_entry_id === b) return 1;
+    if (h2h?.winner_entry_id === a) return -1;
+    return 0;
+  });
+
+  return ranked.map((entryId, i) => ({
+    entryId,
+    displayName: nameMap.get(entryId) ?? 'Unknown',
+    rank: i + 1,
+    wins: wins.get(entryId) ?? 0,
+    losses: losses.get(entryId) ?? 0,
+    pointsScored: ptScored.get(entryId) ?? 0,
+    pointsGiven: ptGiven.get(entryId) ?? 0,
+    pointDiff: (ptScored.get(entryId) ?? 0) - (ptGiven.get(entryId) ?? 0),
+  }));
+}
+
 export interface KnockoutBuilderMatch {
   id: string;
   round: number;
@@ -1008,7 +1081,16 @@ export interface KnockoutBuilderMatch {
 export interface KnockoutBuilderState {
   groupStageComplete: boolean;
   topPerGroup: number;
-  rounds: { round: number; roundName: string; matches: KnockoutBuilderMatch[] }[];
+  rounds: {
+    round: number;
+    roundName: string;
+    matches: KnockoutBuilderMatch[];
+    /** Set when at least one entry played more than one match in this round
+     *  (i.e. it was a round-robin "stage" rather than a direct knockout round).
+     *  Ranks the participants so the admin can build the next, single-match
+     *  knockout round from these standings. */
+    standings: KnockoutStandingRow[] | null;
+  }[];
   /** Entries available to be paired up for the next round to build. Null if
    *  the knockout is already complete or the group stage isn't done yet. */
   currentPool: KnockoutPoolEntry[] | null;
@@ -1068,7 +1150,7 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
   // Existing knockout matches (group_name is null), with entry display info
   const { data: knockoutRows } = await admin
     .from('matches')
-    .select('id, round, round_name, group_name, bracket_position, status, entry_a_id, entry_b_id, winner_entry_id')
+    .select('id, round, round_name, group_name, bracket_position, status, entry_a_id, entry_b_id, winner_entry_id, sets')
     .eq('category_id', categoryId)
     .is('group_name', null)
     .order('round', { ascending: true })
@@ -1119,26 +1201,56 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
   }
   const sortedRounds = [...roundsMap.keys()].sort((a, b) => a - b);
 
-  // An entry is eliminated once it loses a completed/walkover knockout match.
-  // Winners simply remain in the active pool (with an updated "Winner – …"
-  // label) and can be paired into any number of subsequent matches — the admin
-  // has full discretion over matchups.
-  const eliminated = new Set<string>();
+  // Walk completed rounds in order, tracking the active pool and computing a
+  // standings table for any round where an entry played more than one match
+  // (a round-robin "stage" rather than a direct knockout round). For direct
+  // knockout rounds (each entry plays at most one match), losers are
+  // eliminated and winners advance with an updated "Winner – …" label.
+  const standingsByRound = new Map<number, KnockoutStandingRow[]>();
+  let pool: KnockoutPoolEntry[] = [...entryInfo.entries()]
+    .map(([entryId, info]) => ({ entryId, displayName: info.displayName, label: info.label, groupName: info.groupName }));
+
   for (const round of sortedRounds) {
     const roundMatches = roundsMap.get(round)!;
+    const allDone = roundMatches.every((m) => m.status === 'completed' || m.status === 'walkover');
+    if (!allDone) break;
+
+    const matchCount = new Map<string, number>();
     for (const m of roundMatches) {
-      if (m.status !== 'completed' && m.status !== 'walkover') continue;
-      if (!m.winner_entry_id) continue;
-      const loserId = m.winner_entry_id === m.entry_a_id ? m.entry_b_id : m.entry_a_id;
-      if (loserId) eliminated.add(loserId);
-      const info = entryInfo.get(m.winner_entry_id);
-      if (info) info.label = `Winner – ${m.round_name ?? `Round ${round}`}`;
+      if (m.entry_a_id) matchCount.set(m.entry_a_id, (matchCount.get(m.entry_a_id) ?? 0) + 1);
+      if (m.entry_b_id) matchCount.set(m.entry_b_id, (matchCount.get(m.entry_b_id) ?? 0) + 1);
+    }
+    const isMultiMatchStage = [...matchCount.values()].some((c) => c > 1);
+
+    if (isMultiMatchStage) {
+      const participantIds = [...matchCount.keys()];
+      const standingRows = rankByStandings(participantIds, roundMatches, nameMap);
+      standingsByRound.set(round, standingRows);
+      const roundLabel = roundMatches[0]?.round_name ?? `Round ${round}`;
+      const ranked = standingRows.map((r) => ({
+        entryId: r.entryId,
+        displayName: r.displayName,
+        label: `${roundLabel} · #${r.rank} (${r.wins}W-${r.losses}L, ${r.pointDiff >= 0 ? '+' : ''}${r.pointDiff})`,
+        groupName: entryInfo.get(r.entryId)?.groupName ?? null,
+      }));
+      const unaffected = pool.filter((p) => !matchCount.has(p.entryId));
+      pool = [...ranked, ...unaffected];
+    } else {
+      const eliminated = new Set<string>();
+      const winnerLabels = new Map<string, string>();
+      for (const m of roundMatches) {
+        if (!m.winner_entry_id) continue;
+        const loserId = m.winner_entry_id === m.entry_a_id ? m.entry_b_id : m.entry_a_id;
+        if (loserId) eliminated.add(loserId);
+        winnerLabels.set(m.winner_entry_id, `Winner – ${m.round_name ?? `Round ${round}`}`);
+      }
+      pool = pool
+        .filter((p) => !eliminated.has(p.entryId))
+        .map((p) => (winnerLabels.has(p.entryId) ? { ...p, label: winnerLabels.get(p.entryId)! } : p));
     }
   }
 
-  let currentPool: KnockoutPoolEntry[] | null = [...entryInfo.entries()]
-    .filter(([entryId]) => !eliminated.has(entryId))
-    .map(([entryId, info]) => ({ entryId, displayName: info.displayName, label: info.label, groupName: info.groupName }));
+  let currentPool: KnockoutPoolEntry[] | null = pool;
 
   const existingPairs: [string, string][] = knockoutMatches
     .filter((m) => m.entry_a_id && m.entry_b_id)
@@ -1167,6 +1279,7 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
         status: m.status,
         winner_entry_id: m.winner_entry_id,
       })),
+      standings: standingsByRound.get(round) ?? null,
     };
   });
 
