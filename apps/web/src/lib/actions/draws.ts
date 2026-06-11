@@ -998,6 +998,7 @@ export interface KnockoutStandingRow {
   entryId: string;
   displayName: string;
   rank: number;
+  played: number;
   wins: number;
   losses: number;
   pointsScored: number;
@@ -1059,6 +1060,7 @@ function rankByStandings(
     entryId,
     displayName: nameMap.get(entryId) ?? 'Unknown',
     rank: i + 1,
+    played: (wins.get(entryId) ?? 0) + (losses.get(entryId) ?? 0),
     wins: wins.get(entryId) ?? 0,
     losses: losses.get(entryId) ?? 0,
     pointsScored: ptScored.get(entryId) ?? 0,
@@ -1099,6 +1101,10 @@ export interface KnockoutBuilderState {
   champion: KnockoutPoolEntry | null;
   /** Pairs of entry IDs that already have a knockout match created (any round/status) — used to warn admins before creating a duplicate matchup. */
   existingPairs: [string, string][];
+  /** Cumulative standings across all completed knockout matches so far (every
+   *  stage), for entries currently in the pool — helps the admin pick the
+   *  next set of matchups. Null if no knockout matches have been completed yet. */
+  overallStandings: KnockoutStandingRow[] | null;
 }
 
 async function fetchEntryNames(admin: ReturnType<typeof createAdminClient>, entryIds: string[]): Promise<Map<string, string>> {
@@ -1179,6 +1185,7 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
         suggestedRoundName: null,
         champion: null,
         existingPairs: [],
+        overallStandings: null,
       },
     };
   }
@@ -1264,6 +1271,14 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
         .map((m) => [m.entry_a_id as string, m.entry_b_id as string])
     : [];
 
+  // Cumulative standings across every completed knockout match so far, for
+  // entries currently in the pool — gives the admin an overview (including
+  // matches played) to decide the next set of matchups.
+  const completedKnockoutMatches = knockoutMatches.filter((m) => m.status === 'completed' || m.status === 'walkover');
+  const overallStandings = completedKnockoutMatches.length > 0
+    ? rankByStandings(currentPool.map((p) => p.entryId), completedKnockoutMatches, nameMap)
+    : null;
+
   let champion: KnockoutPoolEntry | null = null;
   if (currentPool.length === 1) {
     champion = currentPool[0];
@@ -1300,6 +1315,7 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
       suggestedRoundName: currentPool ? suggestRoundName(currentPool.length) : null,
       champion,
       existingPairs,
+      overallStandings,
     },
   };
 }

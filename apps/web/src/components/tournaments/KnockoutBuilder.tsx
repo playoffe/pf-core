@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createKnockoutMatchAction, deleteKnockoutMatchAction, getKnockoutBuilderStateAction } from '@/lib/actions/draws';
-import type { KnockoutBuilderState, KnockoutPoolEntry } from '@/lib/actions/draws';
+import type { KnockoutBuilderState, KnockoutPoolEntry, KnockoutStandingRow } from '@/lib/actions/draws';
 
 function pairAlreadyExists(pairs: [string, string][], a: string, b: string): boolean {
   return pairs.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
@@ -206,32 +206,7 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
                 Stage standings — each team played multiple matches; use this ranking to set up the next knockout round
               </p>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-surface-border text-text-secondary">
-                    <th className="px-2 py-1 text-left font-medium w-6">#</th>
-                    <th className="px-2 py-1 text-left font-medium">Team</th>
-                    <th className="px-2 py-1 text-center font-medium w-10">W</th>
-                    <th className="px-2 py-1 text-center font-medium w-10">L</th>
-                    <th className="px-2 py-1 text-center font-medium w-12">PS</th>
-                    <th className="px-2 py-1 text-center font-medium w-12">PA</th>
-                    <th className="px-2 py-1 text-center font-medium w-12">PD</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {r.standings.map((s) => (
-                    <tr key={s.entryId} className="border-b border-surface-border last:border-0">
-                      <td className="px-2 py-1 text-text-secondary">{s.rank}</td>
-                      <td className="px-2 py-1 text-text-primary">{s.displayName}</td>
-                      <td className="px-2 py-1 text-center text-text-primary">{s.wins}</td>
-                      <td className="px-2 py-1 text-center text-text-primary">{s.losses}</td>
-                      <td className="px-2 py-1 text-center text-text-secondary">{s.pointsScored}</td>
-                      <td className="px-2 py-1 text-center text-text-secondary">{s.pointsGiven}</td>
-                      <td className="px-2 py-1 text-center text-text-secondary">{s.pointDiff >= 0 ? `+${s.pointDiff}` : s.pointDiff}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <KnockoutStandingsTable rows={r.standings} />
             </div>
           )}
         </div>
@@ -241,6 +216,17 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
       {state.champion && (
         <div className="rounded-lg border border-brand-600 bg-brand-600/10 px-4 py-3 text-sm text-text-primary">
           🏆 Champion: <span className="font-semibold">{state.champion.displayName}</span>
+        </div>
+      )}
+
+      {/* Cumulative knockout standings — updated with every stage's results */}
+      {state.currentPool && state.overallStandings && (
+        <div className="rounded-lg border border-surface-border bg-surface-card p-4">
+          <h2 className="mb-1 text-sm font-semibold text-text-primary">Knockout standings</h2>
+          <p className="mb-3 text-xs text-text-secondary">
+            Cumulative results across all knockout matches played so far — use this to pick the next set of matchups from the available pool.
+          </p>
+          <KnockoutStandingsTable rows={state.overallStandings} />
         </div>
       )}
 
@@ -369,5 +355,38 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+function KnockoutStandingsTable({ rows }: { rows: KnockoutStandingRow[] }) {
+  return (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="border-b border-surface-border text-text-secondary">
+          <th className="px-2 py-1 text-left font-medium w-6">#</th>
+          <th className="px-2 py-1 text-left font-medium">Team</th>
+          <th className="px-2 py-1 text-center font-medium w-10" title="Knockout matches played">MP</th>
+          <th className="px-2 py-1 text-center font-medium w-10">W</th>
+          <th className="px-2 py-1 text-center font-medium w-10">L</th>
+          <th className="px-2 py-1 text-center font-medium w-12">PS</th>
+          <th className="px-2 py-1 text-center font-medium w-12">PA</th>
+          <th className="px-2 py-1 text-center font-medium w-12">PD</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((s) => (
+          <tr key={s.entryId} className="border-b border-surface-border last:border-0">
+            <td className="px-2 py-1 text-text-secondary">{s.rank}</td>
+            <td className="px-2 py-1 text-text-primary">{s.displayName}</td>
+            <td className="px-2 py-1 text-center text-text-secondary">{s.played}</td>
+            <td className="px-2 py-1 text-center text-text-primary">{s.wins}</td>
+            <td className="px-2 py-1 text-center text-text-primary">{s.losses}</td>
+            <td className="px-2 py-1 text-center text-text-secondary">{s.pointsScored}</td>
+            <td className="px-2 py-1 text-center text-text-secondary">{s.pointsGiven}</td>
+            <td className="px-2 py-1 text-center text-text-secondary">{s.pointDiff >= 0 ? `+${s.pointDiff}` : s.pointDiff}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
