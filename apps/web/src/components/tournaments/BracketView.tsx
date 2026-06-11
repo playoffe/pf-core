@@ -142,7 +142,11 @@ function MatchCard({
   const inner = (
     <>
       <PlayerRow entry={match.entry_a} isWinner={aWins} setScores={aScores} />
-      <div className="border-t border-surface-border" />
+      <div className="relative border-t border-surface-border">
+        <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-full border border-surface-border bg-surface-card px-1.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+          vs
+        </span>
+      </div>
       <PlayerRow entry={match.entry_b} isWinner={bWins} setScores={bScores} />
     </>
   );
@@ -188,7 +192,7 @@ function RoundColumn({
       </div>
       <div className="flex flex-1 flex-col">
         {matches.map((m) => (
-          <div key={m.id} className="flex items-center justify-center" style={{ flex: slotsPerMatch }}>
+          <div key={m.id} className="flex items-center justify-center py-2" style={{ flex: slotsPerMatch }}>
             <MatchCard
               match={m} tournamentSlug={tournamentSlug} readOnly={readOnly}
               adjustMode={adjustMode} selectedEntryId={selectedEntryId}
