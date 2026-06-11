@@ -1204,7 +1204,10 @@ function rankByStandings(
     }
   }
 
+  const played = (id: string) => (wins.get(id) ?? 0) + (losses.get(id) ?? 0);
+
   const ranked = [...entryIds].sort((a, b) => {
+    if (played(b) !== played(a)) return played(b) - played(a);
     if ((wins.get(b) ?? 0) !== (wins.get(a) ?? 0)) return (wins.get(b) ?? 0) - (wins.get(a) ?? 0);
     if ((losses.get(a) ?? 0) !== (losses.get(b) ?? 0)) return (losses.get(a) ?? 0) - (losses.get(b) ?? 0);
     const diffA = (ptScored.get(a) ?? 0) - (ptGiven.get(a) ?? 0);
@@ -1380,6 +1383,7 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
   const standingsByRound = new Map<number, KnockoutStandingRow[]>();
   let pool: KnockoutPoolEntry[] = [...entryInfo.entries()]
     .map(([entryId, info]) => ({ entryId, displayName: info.displayName, label: info.label, groupName: info.groupName }));
+  let champion: KnockoutPoolEntry | null = null;
 
   for (const round of sortedRounds) {
     const roundMatches = roundsMap.get(round)!;
@@ -1407,21 +1411,33 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
       const unaffected = pool.filter((p) => !matchCount.has(p.entryId));
       pool = [...ranked, ...unaffected];
     } else {
-      const eliminated = new Set<string>();
-      const winnerLabels = new Map<string, string>();
+      // Keep both winners and losers in the pool — losers stay available so
+      // the admin can still schedule them (e.g. a 3rd-place playoff, or to
+      // correct a mistake) rather than disappearing once "eliminated".
+      const labels = new Map<string, string>();
+      const stageName = roundMatches[0]?.round_name ?? `Round ${round}`;
       for (const m of roundMatches) {
         if (!m.winner_entry_id) continue;
         const loserId = m.winner_entry_id === m.entry_a_id ? m.entry_b_id : m.entry_a_id;
-        if (loserId) eliminated.add(loserId);
-        winnerLabels.set(m.winner_entry_id, `Winner – ${m.round_name ?? `Round ${round}`}`);
+        labels.set(m.winner_entry_id, `Winner – ${stageName}`);
+        if (loserId) labels.set(loserId, `Lost – ${stageName}`);
       }
-      pool = pool
-        .filter((p) => !eliminated.has(p.entryId))
-        .map((p) => (winnerLabels.has(p.entryId) ? { ...p, label: winnerLabels.get(p.entryId)! } : p));
+      pool = pool.map((p) => (labels.has(p.entryId) ? { ...p, label: labels.get(p.entryId)! } : p));
+
+      // The winner of the "Final" is the champion — once that's decided, the
+      // knockout is complete (other entries, e.g. for a 3rd-place playoff,
+      // remain visible in the rounds above but no further round is built).
+      const finalMatch = roundMatches.find((m) => (m.round_name ?? '') === 'Final' && m.winner_entry_id);
+      if (finalMatch?.winner_entry_id) {
+        champion = pool.find((p) => p.entryId === finalMatch.winner_entry_id) ?? null;
+      }
     }
   }
 
-  let currentPool: KnockoutPoolEntry[] | null = pool;
+  // Keep the pool (and the match-builder UI) available even after a champion
+  // is determined — there may still be a 3rd-place playoff or other matches
+  // the admin needs to create/correct.
+  let currentPool: KnockoutPoolEntry[] | null = pool.length === 0 ? null : pool;
 
   // Duplicate-pairing checks only apply within the current stage (the round
   // currently being built) — teams may face each other again in a later
@@ -1440,16 +1456,8 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
   // matches played) to decide the next set of matchups.
   const completedKnockoutMatches = knockoutMatches.filter((m) => m.status === 'completed' || m.status === 'walkover');
   const overallStandings = completedKnockoutMatches.length > 0
-    ? rankByStandings(currentPool.map((p) => p.entryId), completedKnockoutMatches, nameMap)
+    ? rankByStandings((currentPool ?? pool).map((p) => p.entryId), completedKnockoutMatches, nameMap)
     : null;
-
-  let champion: KnockoutPoolEntry | null = null;
-  if (currentPool.length === 1) {
-    champion = currentPool[0];
-    currentPool = null;
-  } else if (currentPool.length === 0) {
-    currentPool = null;
-  }
 
   const rounds = sortedRounds.map((round) => {
     const roundMatches = roundsMap.get(round)!;
@@ -1596,6 +1604,47 @@ export async function deleteKnockoutMatchAction(categoryId: string, matchId: str
   }
 
   await admin.from('matches').delete().eq('id', matchId);
+
+  const tSlug = cat.tournamentData.slug;
+  revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}`);
+  revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}/knockout-builder`);
+  return { success: true };
+}
+
+// ── Reset knockout bracket (manual seeding) ─────────────────────────────────
+// Deletes all manually-created knockout matches (group_name IS NULL) for this
+// category — as long as none of them have started — so the admin can rebuild
+// the bracket from scratch via the Knockout Builder.
+export async function resetManualKnockoutAction(categoryId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const cat = await assertCategoryManager(categoryId, user.id);
+  if (!cat) return { error: 'Permission denied' };
+
+  if (cat.draw_format !== 'group_stage_knockout' || cat.knockout_seeding !== 'manual') {
+    return { error: 'This action is only for categories using manual knockout seeding' };
+  }
+
+  const admin = createAdminClient();
+
+  const { data: existingKnockout } = await admin
+    .from('matches')
+    .select('id, status, winner_entry_id')
+    .eq('category_id', categoryId)
+    .is('group_name', null);
+
+  if (!existingKnockout || existingKnockout.length === 0) {
+    return { error: 'No knockout matches to reset' };
+  }
+
+  const started = existingKnockout.some((m) => m.status !== 'scheduled' || m.winner_entry_id);
+  if (started) {
+    return { error: 'Cannot reset — one or more knockout matches have already started or been played' };
+  }
+
+  await admin.from('matches').delete().eq('category_id', categoryId).is('group_name', null);
 
   const tSlug = cat.tournamentData.slug;
   revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}`);

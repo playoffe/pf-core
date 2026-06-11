@@ -4,6 +4,17 @@ import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import type { MatchWithPlayers } from '@/lib/actions/draws';
 
+/** Canonical knockout-stage hierarchy, earliest to latest — used to order
+ *  bracket columns chronologically regardless of the order in which the
+ *  matches were created (and thus regardless of their `round` numbers). */
+const STAGE_HIERARCHY = ['Round of 32', 'Round of 16', 'Quarter-final', 'Semi-final', '3rd place playoff', 'Final'];
+
+function stageRank(roundName: string | null | undefined, fallback: number): number {
+  if (!roundName) return fallback;
+  const idx = STAGE_HIERARCHY.indexOf(roundName);
+  return idx === -1 ? fallback : idx;
+}
+
 interface Props {
   matches: MatchWithPlayers[];
   format: string;
@@ -289,7 +300,12 @@ function EliminationBracket({
     list.push(m);
     roundMap.set(m.round, list);
   }
-  const rounds = Array.from(roundMap.entries()).sort(([a], [b]) => a - b);
+  const rounds = Array.from(roundMap.entries()).sort(([a, aMatches], [b, bMatches]) => {
+    const aRank = stageRank(aMatches[0]?.round_name, a + STAGE_HIERARCHY.length);
+    const bRank = stageRank(bMatches[0]?.round_name, b + STAGE_HIERARCHY.length);
+    if (aRank !== bRank) return aRank - bRank;
+    return a - b;
+  });
   if (rounds.length === 0) return null;
 
   const maxSlots = rounds[0][1].length; // first round has the most matches
@@ -554,7 +570,12 @@ function GroupSection({
     list.push(m);
     roundMap.set(m.round, list);
   }
-  const rounds = Array.from(roundMap.entries()).sort(([a], [b]) => a - b);
+  const rounds = Array.from(roundMap.entries()).sort(([a, aMatches], [b, bMatches]) => {
+    const aRank = stageRank(aMatches[0]?.round_name, a + STAGE_HIERARCHY.length);
+    const bRank = stageRank(bMatches[0]?.round_name, b + STAGE_HIERARCHY.length);
+    if (aRank !== bRank) return aRank - bRank;
+    return a - b;
+  });
 
   const rowClass = `flex items-center gap-3 rounded-lg bg-surface-card px-4 py-2.5 ring-1 ring-surface-border transition-all ${
     readOnly ? '' : 'hover:ring-brand-500/40'
@@ -766,7 +787,12 @@ function RoundRobinBracket({
     list.push(m);
     roundMap.set(m.round, list);
   }
-  const rounds = Array.from(roundMap.entries()).sort(([a], [b]) => a - b);
+  const rounds = Array.from(roundMap.entries()).sort(([a, aMatches], [b, bMatches]) => {
+    const aRank = stageRank(aMatches[0]?.round_name, a + STAGE_HIERARCHY.length);
+    const bRank = stageRank(bMatches[0]?.round_name, b + STAGE_HIERARCHY.length);
+    if (aRank !== bRank) return aRank - bRank;
+    return a - b;
+  });
 
   return (
     <div className="space-y-6">

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createKnockoutMatchAction, deleteKnockoutMatchAction, getKnockoutBuilderStateAction } from '@/lib/actions/draws';
+import { createKnockoutMatchAction, deleteKnockoutMatchAction, getKnockoutBuilderStateAction, resetManualKnockoutAction } from '@/lib/actions/draws';
 import type { KnockoutBuilderState, KnockoutPoolEntry, KnockoutStandingRow } from '@/lib/actions/draws';
 
 function pairAlreadyExists(pairs: [string, string][], a: string, b: string): boolean {
@@ -58,6 +58,13 @@ function previousStageName(state: KnockoutBuilderState): string | null {
 }
 
 function defaultStageName(state: KnockoutBuilderState): string {
+  // If the most recent round still has matches pending, keep that round's
+  // name as the default — only advance to the next stage once every match
+  // in the current stage has been completed.
+  const lastRound = state.rounds[state.rounds.length - 1];
+  if (lastRound && !lastRound.matches.every((m) => m.status === 'completed' || m.status === 'walkover')) {
+    return lastRound.roundName;
+  }
   return nextStageName(previousStageName(state), state.suggestedRoundName ?? '');
 }
 
@@ -69,6 +76,7 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
   const [roundName, setRoundName] = useState(defaultStageName(initialState));
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!state.groupStageComplete) {
@@ -151,6 +159,24 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
     setDeletingId(null);
   }
 
+  async function handleResetBracket() {
+    if (!window.confirm('Remove all knockout matches created so far and start the bracket over?')) return;
+    setResetting(true);
+    setError(null);
+    const result = await resetManualKnockoutAction(categoryId);
+    if ('error' in result && result.error) {
+      setError(result.error);
+      setResetting(false);
+      return;
+    }
+    router.refresh();
+    await refreshState();
+    setResetting(false);
+  }
+
+  const hasStartedMatch = state.rounds.some((r) => r.matches.some((m) => m.status !== 'scheduled'));
+  const canResetBracket = state.rounds.length > 0 && !hasStartedMatch;
+
   async function refreshState() {
     const result = await getKnockoutBuilderStateAction(categoryId);
     if ('data' in result) {
@@ -165,6 +191,19 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
       {error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
+        </div>
+      )}
+
+      {/* Reset bracket */}
+      {canResetBracket && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleResetBracket}
+            disabled={resetting}
+            className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+          >
+            {resetting ? 'Resetting…' : 'Reset bracket ↺'}
+          </button>
         </div>
       )}
 
@@ -201,14 +240,6 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
               </div>
             ))}
           </div>
-          {r.standings && (
-            <div className="border-t border-surface-border px-4 py-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                Stage standings — each team played multiple matches; use this ranking to set up the next knockout round
-              </p>
-              <KnockoutStandingsTable rows={r.standings} />
-            </div>
-          )}
         </div>
       ))}
 
@@ -219,7 +250,8 @@ export function KnockoutBuilder({ categoryId, initialState }: Props) {
         </div>
       )}
 
-      {/* Cumulative knockout standings — updated with every stage's results */}
+      {/* Cumulative knockout standings — single table, updated with every
+          stage's results until the knockout is complete. */}
       {state.currentPool && state.overallStandings && (
         <div className="rounded-lg border border-surface-border bg-surface-card p-4">
           <h2 className="mb-1 text-sm font-semibold text-text-primary">Knockout standings</h2>
