@@ -1384,6 +1384,8 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
   let pool: KnockoutPoolEntry[] = [...entryInfo.entries()]
     .map(([entryId, info]) => ({ entryId, displayName: info.displayName, label: info.label, groupName: info.groupName }));
   let champion: KnockoutPoolEntry | null = null;
+  let finalWinnerId: string | null = null;
+  let finalRunnerUpId: string | null = null;
 
   for (const round of sortedRounds) {
     const roundMatches = roundsMap.get(round)!;
@@ -1430,6 +1432,8 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
       const finalMatch = roundMatches.find((m) => (m.round_name ?? '') === 'Final' && m.winner_entry_id);
       if (finalMatch?.winner_entry_id) {
         champion = pool.find((p) => p.entryId === finalMatch.winner_entry_id) ?? null;
+        finalWinnerId = finalMatch.winner_entry_id;
+        finalRunnerUpId = finalMatch.winner_entry_id === finalMatch.entry_a_id ? finalMatch.entry_b_id : finalMatch.entry_a_id;
       }
     }
   }
@@ -1455,9 +1459,23 @@ export async function getKnockoutBuilderStateAction(categoryId: string): Promise
   // entries currently in the pool — gives the admin an overview (including
   // matches played) to decide the next set of matchups.
   const completedKnockoutMatches = knockoutMatches.filter((m) => m.status === 'completed' || m.status === 'walkover');
-  const overallStandings = completedKnockoutMatches.length > 0
+  let overallStandings = completedKnockoutMatches.length > 0
     ? rankByStandings((currentPool ?? pool).map((p) => p.entryId), completedKnockoutMatches, nameMap)
     : null;
+
+  // Once the Final is decided, its winner and runner-up must occupy the top
+  // two standings positions regardless of other tiebreakers (e.g. matches
+  // played) — this keeps the podium results consistent with the bracket.
+  if (overallStandings && finalWinnerId) {
+    const byId = new Map(overallStandings.map((r) => [r.entryId, r]));
+    const winnerRow = byId.get(finalWinnerId);
+    const runnerUpRow = finalRunnerUpId ? byId.get(finalRunnerUpId) : undefined;
+    if (winnerRow) {
+      const rest = overallStandings.filter((r) => r.entryId !== finalWinnerId && r.entryId !== runnerUpRow?.entryId);
+      const ordered = [winnerRow, ...(runnerUpRow ? [runnerUpRow] : []), ...rest];
+      overallStandings = ordered.map((r, i) => ({ ...r, rank: i + 1 }));
+    }
+  }
 
   const rounds = sortedRounds.map((round) => {
     const roundMatches = roundsMap.get(round)!;
