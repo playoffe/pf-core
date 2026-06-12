@@ -361,12 +361,15 @@ export async function scheduleMatchesAction(
     globalMatchIndex++;
   }
 
-  // Batch update
-  for (const u of updates) {
-    await admin
-      .from('matches')
-      .update({ court: u.court, ...(u.scheduled_time ? { scheduled_time: u.scheduled_time } : {}) })
-      .eq('id', u.id);
+  // Batch update via a single upsert (merges only the provided columns per row)
+  if (updates.length > 0) {
+    await (admin.from('matches') as any).upsert(
+      updates.map((u) => ({
+        id: u.id,
+        court: u.court,
+        ...(u.scheduled_time ? { scheduled_time: u.scheduled_time } : {}),
+      })),
+    );
   }
 
   const tSlug = cat.tournamentData.slug;

@@ -12,6 +12,7 @@ import { sendEmail } from '@/lib/email/service';
 import { buildAdminInviteEmail } from '@/lib/email/templates/admin-invite';
 import { revalidatePath } from 'next/cache';
 import crypto from 'crypto';
+import type { User } from '@supabase/supabase-js';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
@@ -80,11 +81,15 @@ export async function getPlatformStatsAction() {
 export async function getAllUsersForSuperAdminAction() {
   const { admin } = await assertSuperAdmin();
 
-  // Fetch all auth users — service role bypasses auth restrictions
-  const { data: authList } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  const users = (authList?.users ?? []).filter(
-    (u) => u.app_metadata?.role !== 'super_admin',
-  );
+  // Fetch all auth users — service role bypasses auth restrictions, paginate to avoid the 1000-user cap
+  const allAuthUsers: User[] = [];
+  for (let page = 1; ; page++) {
+    const { data } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    const batch = data?.users ?? [];
+    allAuthUsers.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  const users = allAuthUsers.filter((u) => u.app_metadata?.role !== 'super_admin');
 
   // Fetch all player profiles + club memberships in parallel
   const [{ data: players }, { data: managers }] = await Promise.all([
