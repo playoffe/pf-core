@@ -152,6 +152,7 @@ export function DrawSection({
   } | null>(null);
   const [swapping, setSwapping] = useState(false);
   const [swapError, setSwapError] = useState<string | null>(null);
+  const [showAdjustWarning, setShowAdjustWarning] = useState(false);
 
   // Sync matches when server re-renders after router.refresh() passes new initialMatches
   useEffect(() => {
@@ -265,6 +266,14 @@ export function DrawSection({
     drawFormat !== 'swiss' &&
     matches.length > 0 &&
     !readOnly;
+
+  function handleAdjustClick() {
+    if (anyMatchStarted) {
+      setShowAdjustWarning(true);
+    } else {
+      setAdjustMode(true);
+    }
+  }
 
   function handleEntryClick(entryId: string, entryName: string) {
     setSwapError(null);
@@ -416,7 +425,7 @@ export function DrawSection({
                   {/* Adjust draw button */}
                   {canAdjust && !showRegenConfirm && (
                     <button
-                      onClick={() => setAdjustMode(true)}
+                      onClick={handleAdjustClick}
                       className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:border-amber-500 hover:text-amber-400 transition-colors"
                     >
                       ✏️ Adjust draw
@@ -624,6 +633,31 @@ export function DrawSection({
                 : <><button onClick={() => setShowRegenConfirm(true)} className="underline hover:text-amber-300 transition-colors">Regenerate the draw</button>{' '}to include {stalenessInfo.unplacedActive.length === 1 ? 'it' : 'them'}.</>}
             </p>
           )}
+        </div>
+      )}
+
+      {/* ── Adjust-draw warning: matches already started/completed ───────── */}
+      {showAdjustWarning && (
+        <div className="mb-4 rounded-lg border border-amber-700/50 bg-amber-950/40 px-4 py-3 space-y-2">
+          <p className="text-sm font-semibold text-amber-200">⚠️ Some matches have already started or been completed</p>
+          <p className="text-xs text-amber-400/80">
+            Adjusting the draw now may change matchups for matches that have already been played or are in progress.
+            Are you sure you want to continue?
+          </p>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => { setShowAdjustWarning(false); setAdjustMode(true); }}
+              className="rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-600 transition-colors"
+            >
+              Yes, adjust draw
+            </button>
+            <button
+              onClick={() => setShowAdjustWarning(false)}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 

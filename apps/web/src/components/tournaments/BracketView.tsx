@@ -595,7 +595,9 @@ function GroupSection({
           </div>
         </div>
 
-        {/* Participant list */}
+        {/* Participant list — only needed in adjust mode for swap selection;
+            standings are already shown in the Group Standings table above. */}
+        {adjustMode && (
         <div className="space-y-1.5">
           {participants.map((p, i) => {
             const displayName = p.partnerName ? `${p.playerName} / ${p.partnerName}` : p.playerName;
@@ -660,6 +662,7 @@ function GroupSection({
             );
           })}
         </div>
+        )}
       </div>
 
       {/* Matches, grouped by round */}
