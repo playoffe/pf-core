@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
+import { cache } from 'react';
 import type { Database } from '@pickleball/db';
 import type { User } from '@supabase/supabase-js';
 
@@ -29,6 +30,18 @@ export async function createClient() {
     },
   );
 }
+
+/**
+ * Returns the current authenticated user, memoized per request via React's
+ * cache(). Many server components on the same page (e.g. AppNav + the page
+ * itself) each need the user — this avoids issuing a separate Auth-server
+ * round trip for every one of them.
+ */
+export const getCurrentUser = cache(async () => {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  return user;
+});
 
 export function createAdminClient() {
   return createSupabaseClient<Database>(

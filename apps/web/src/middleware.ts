@@ -121,11 +121,14 @@ export async function middleware(request: NextRequest) {
     },
   );
 
+  // Local JWT decode (no Auth-server round trip) — sufficient for the outer
+  // "are you logged in at all" gate. Pages that need an authoritative user
+  // record for RLS-sensitive logic call supabase.auth.getUser() themselves.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
 
-  if (!user) {
+  if (!session) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirectTo', pathname);

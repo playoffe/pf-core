@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { PlayerSearchInput } from '@/components/player/PlayerSearchInput';
 
@@ -19,8 +19,7 @@ export default async function RankingsPage({
   const perPage = 50;
   const offset = (page - 1) * perPage;
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   const admin = createAdminClient();
 
   // ── Club scope: resolve the viewer's club and its member IDs ─────────────

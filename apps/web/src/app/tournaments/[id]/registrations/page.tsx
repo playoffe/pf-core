@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { createClient, createAdminClient, getUserRoles } from '@/lib/supabase/server';
+import { createAdminClient, getCurrentUser, getUserRoles } from '@/lib/supabase/server';
 import { checkPermission } from '@/lib/permissions';
 import { AppNav } from '@/components/layout/AppNav';
 import { RegistrationsClient } from '@/components/tournaments/RegistrationsClient';
@@ -16,8 +16,7 @@ interface Props {
 export default async function RegistrationsPage({ params }: Props) {
   const { id: slug } = await params;
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const admin = createAdminClient();

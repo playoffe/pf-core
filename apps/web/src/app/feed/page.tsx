@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { BADGE_MAP } from '@/lib/badges';
 import { CreatePostCard } from '@/components/feed/CreatePostCard';
@@ -22,8 +22,7 @@ interface Props {
 }
 
 export default async function FeedPage({ searchParams }: Props) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const { scope } = await searchParams;
