@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { unstable_cache } from 'next/cache';
-import { createAdminClient, createClient, getCurrentUser, getPlayerByUsername } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
+import { getPlayerByUsername } from '@pickleball/db';
 import { PlayerProfileView } from '@/components/player/PlayerProfileView';
 import { getPlayerBadges } from '@/lib/actions/badges';
 import { getIsFollowing } from '@/lib/actions/follows';
@@ -14,12 +15,11 @@ interface Props {
 // Cached for 1 hour per username; invalidated after ratings recalculation
 // or match submission via revalidateTag('player-profile-{username}').
 async function getPublicProfileData(username: string) {
-  const supabase = await createClient();
   const admin = createAdminClient();
 
   let player;
   try {
-    player = await getPlayerByUsername(username);
+    player = await getPlayerByUsername(admin, username);
   } catch {
     return null;
   }
