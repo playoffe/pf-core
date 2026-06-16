@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getPlayerByUsername } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
-import { getPlayerByUsername } from '@pickleball/db';
 
 interface Props {
   params: Promise<{ username: string; opponent: string }>;
@@ -24,8 +23,8 @@ export default async function H2HPage({ params }: Props) {
   let playerA, playerB;
   try {
     [playerA, playerB] = await Promise.all([
-      getPlayerByUsername(supabase, username),
-      getPlayerByUsername(supabase, opponentUsername),
+      getPlayerByUsername(username),
+      getPlayerByUsername(opponentUsername),
     ]);
   } catch {
     notFound();

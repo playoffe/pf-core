@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { cache } from 'react';
 import type { Database } from '@pickleball/db';
 import type { User } from '@supabase/supabase-js';
+import { getPlayerByUsername as _getPlayerByUsername } from '@pickleball/db';
 
 export async function createClient() {
   const cookieStore = await cookies();
@@ -69,3 +70,14 @@ export function getUserRoles(user: User | null): string[] {
   const roles = user.app_metadata?.roles as string[] | undefined;
   return roles ?? [];
 }
+
+/**
+ * Looks up a player by username, memoized per request via React's cache().
+ * The profile page and its sub-routes (h2h, matches, stats) all need the
+ * same player record — this ensures at most one DB query per username per
+ * request regardless of how many server components call it.
+ */
+export const getPlayerByUsername = cache(async (username: string) => {
+  const supabase = await createClient();
+  return _getPlayerByUsername(supabase, username);
+});

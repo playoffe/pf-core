@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getPlayerByUsername } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
-import { getPlayerByUsername } from '@pickleball/db';
 
 const PAGE_SIZE = 20;
 
@@ -49,7 +48,7 @@ export default async function MatchHistoryPage({ params, searchParams }: Props) 
 
   let player;
   try {
-    player = await getPlayerByUsername(supabase, username);
+    player = await getPlayerByUsername(username);
   } catch {
     notFound();
   }

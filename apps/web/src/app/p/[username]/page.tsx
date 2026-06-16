@@ -1,8 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { unstable_cache } from 'next/cache';
-import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
-import { getPlayerByUsername } from '@pickleball/db';
+import { createAdminClient, createClient, getCurrentUser, getPlayerByUsername } from '@/lib/supabase/server';
 import { PlayerProfileView } from '@/components/player/PlayerProfileView';
 import { getPlayerBadges } from '@/lib/actions/badges';
 import { getIsFollowing } from '@/lib/actions/follows';
@@ -20,7 +19,7 @@ async function getPublicProfileData(username: string) {
 
   let player;
   try {
-    player = await getPlayerByUsername(supabase, username);
+    player = await getPlayerByUsername(username);
   } catch {
     return null;
   }
