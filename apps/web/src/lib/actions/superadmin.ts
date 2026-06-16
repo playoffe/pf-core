@@ -11,6 +11,7 @@ import { createAdminClient, createClient, getCurrentUser, isSuperAdmin } from '@
 import { sendEmail } from '@/lib/email/service';
 import { buildAdminInviteEmail } from '@/lib/email/templates/admin-invite';
 import { revalidatePath } from 'next/cache';
+import { revalidateFeatureFlags, revalidatePermissions } from '@/lib/supabase/permissions';
 import crypto from 'crypto';
 import type { User } from '@supabase/supabase-js';
 
@@ -701,6 +702,7 @@ export async function updateFeatureFlagAction(flagId: string, isEnabled: boolean
   // Bust the entire layout cache so feature-gated tabs (e.g. Social media in
   // /settings) appear/disappear immediately without a manual hard-refresh.
   revalidatePath('/', 'layout');
+  revalidateFeatureFlags();
   return { success: true };
 }
 
@@ -806,6 +808,7 @@ export async function updateRolePermissionAction(input: {
   });
 
   revalidatePath('/superadmin/rbac');
+  revalidatePermissions();
   return { success: true };
 }
 
@@ -824,6 +827,7 @@ export async function resetClubPermissionsAction(clubId: string) {
   });
 
   revalidatePath('/superadmin/rbac');
+  revalidatePermissions();
   return { success: true };
 }
 
