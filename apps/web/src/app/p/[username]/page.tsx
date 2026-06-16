@@ -64,9 +64,15 @@ export default async function PlayerProfilePage({ params }: Props) {
 
   const isOwnProfile = user?.id === player.id;
 
-  // Fetch badges, follower count, following state, and (if viewing someone
-  // else's profile) the viewer's own username for the H2H link — in parallel.
-  const [badges, isFollowing, followerCountResult, viewerPlayer] = await Promise.all([
+  // All six fetches only need player.id (known above) — run in parallel.
+  const [
+    badges,
+    isFollowing,
+    followerCountResult,
+    viewerPlayer,
+    { data: ratingHistoryRaw },
+    { data: rawHistory },
+  ] = await Promise.all([
     getPlayerBadges(player.id),
     user && !isOwnProfile ? getIsFollowing(player.id) : Promise.resolve(false),
     createAdminClient()
@@ -76,31 +82,30 @@ export default async function PlayerProfilePage({ params }: Props) {
     user && !isOwnProfile
       ? supabase.from('players').select('username').eq('id', user.id).maybeSingle()
       : Promise.resolve({ data: null }),
+    // Rating sparkline (last 30, chronological)
+    admin
+      .from('match_history')
+      .select('played_at, rating_after')
+      .eq('player_id', player.id)
+      .in('result', ['win', 'loss'])
+      .order('played_at', { ascending: true })
+      .limit(30),
+    // Recent match history (admin client bypasses RLS for public profiles)
+    admin
+      .from('match_history')
+      .select('id, result, sets, rating_before, rating_after, rating_change, played_at, tournament_id, opponent_entry_id')
+      .eq('player_id', player.id)
+      .order('played_at', { ascending: false })
+      .limit(5),
   ]);
+
   const followerCount = followerCountResult.count ?? 0;
   const viewerUsername: string | null = viewerPlayer?.data?.username ?? null;
-
-  // Fetch rating history for sparkline (last 30 matches, chronological)
-  const { data: ratingHistoryRaw } = await admin
-    .from('match_history')
-    .select('played_at, rating_after')
-    .eq('player_id', player.id)
-    .in('result', ['win', 'loss'])
-    .order('played_at', { ascending: true })
-    .limit(30);
 
   const ratingHistory: RatingHistoryPoint[] = (ratingHistoryRaw ?? []).map((r) => ({
     played_at: r.played_at,
     rating_after: r.rating_after as unknown as number,
   }));
-
-  // Fetch recent match history (admin bypasses RLS so public profiles show history)
-  const { data: rawHistory } = await admin
-    .from('match_history')
-    .select('id, result, sets, rating_before, rating_after, rating_change, played_at, tournament_id, opponent_entry_id')
-    .eq('player_id', player.id)
-    .order('played_at', { ascending: false })
-    .limit(5);
 
   let matchHistory: MatchHistoryRow[] = [];
 
