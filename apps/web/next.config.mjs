@@ -85,6 +85,14 @@ const nextConfig = {
         source: '/(.*)',
         headers: securityHeaders,
       },
+      {
+        // Service worker must never be served from cache — browsers use it as
+        // the cache root, so a stale sw.js blocks all updates indefinitely.
+        source: '/sw.js',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        ],
+      },
     ];
   },
 };
