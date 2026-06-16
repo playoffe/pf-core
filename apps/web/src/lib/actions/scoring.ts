@@ -564,22 +564,31 @@ export async function withdrawAndWalkoverAction(entryId: string, tournamentId: s
     .or(`entry_a_id.eq.${entryId},entry_b_id.eq.${entryId}`);
 
   const now = new Date().toISOString();
-  let walkovers = 0;
+  const matchList = pending ?? [];
 
-  for (const m of pending ?? []) {
-    const opponentId = m.entry_a_id === entryId ? m.entry_b_id : m.entry_a_id;
-    await admin.from('matches').update({
-      status: 'walkover',
-      winner_entry_id: opponentId ?? null,
-      completed_at: now,
-    }).eq('id', m.id);
+  // Batch the status updates first, then parallelize bracket advancement.
+  await Promise.all(
+    matchList.map((m) => {
+      const opponentId = m.entry_a_id === entryId ? m.entry_b_id : m.entry_a_id;
+      return admin.from('matches').update({
+        status: 'walkover',
+        winner_entry_id: opponentId ?? null,
+        completed_at: now,
+      }).eq('id', m.id);
+    }),
+  );
 
-    if (opponentId) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await advanceMatch(admin, m as any, opponentId, entryId);
-      walkovers++;
-    }
-  }
+  const walkovers = (
+    await Promise.all(
+      matchList.map(async (m) => {
+        const opponentId = m.entry_a_id === entryId ? m.entry_b_id : m.entry_a_id;
+        if (!opponentId) return 0;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await advanceMatch(admin, m as any, opponentId, entryId);
+        return 1;
+      }),
+    )
+  ).reduce((a: number, b) => a + b, 0);
 
   await admin.from('tournament_entries').update({ status: 'withdrawn' }).eq('id', entryId);
 
