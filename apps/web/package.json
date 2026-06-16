@@ -12,7 +12,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
     "@aws-sdk/client-ses": "^3.1052.0",
-    "bullmq": "^5.13.0",
     "@hookform/resolvers": "^3.9.1",
     "@pickleball/db": "workspace:*",
     "@pickleball/draw-engine": "workspace:*",
@@ -21,6 +20,7 @@
     "@pickleball/ui": "workspace:*",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.10",
+    "bullmq": "^5.13.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.469.0",
@@ -37,6 +37,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@next/bundle-analyzer": "^16.2.9",
     "@types/node": "^22.10.7",
     "@types/nodemailer": "^8.0.0",
     "@types/qrcode": "^1.5.5",
