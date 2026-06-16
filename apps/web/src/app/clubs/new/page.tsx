@@ -1,16 +1,13 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { ClubForm } from '@/components/clubs/ClubForm';
 
 export const metadata: Metadata = { title: 'Create a club' };
 
 export default async function NewClubPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   return (

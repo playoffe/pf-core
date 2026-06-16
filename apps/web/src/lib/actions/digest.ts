@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { sendEmail } from '@/lib/email/service';
 import { buildDigestEmail } from '@/lib/email/templates/digest';
 
@@ -17,7 +17,7 @@ export async function sendDigestAction(
 ): Promise<{ success?: boolean; error?: string }> {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUser();
     if (!user) return { error: 'Not authenticated' };
 
     const admin = createAdminClient();

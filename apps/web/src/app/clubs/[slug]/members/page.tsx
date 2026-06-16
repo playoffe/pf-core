@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { ClubAdminNav } from '@/components/clubs/ClubAdminNav';
 import { ClubMembersPanel } from '@/components/clubs/ClubMembersPanel';
@@ -15,8 +15,7 @@ interface Props {
 export default async function ClubMembersPage({ params }: Props) {
   const { slug } = await params;
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect(`/login?return=/clubs/${slug}/members`);
 
   const admin = createAdminClient();

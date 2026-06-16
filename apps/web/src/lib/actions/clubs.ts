@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 
 /** Returns the caller's club_managers role for a club, or null if not a manager. */
 async function getClubManagerRole(
@@ -39,9 +39,7 @@ export interface CreateClubInput {
 
 export async function createClubAction(input: CreateClubInput) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const { name, city, location, description, brand_primary_color = '#7c3aed' } = input;
@@ -113,7 +111,7 @@ export async function getClubManagers(clubId: string) {
 
 export async function addClubManagerAction(clubId: string, username: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -152,7 +150,7 @@ export async function addClubManagerAction(clubId: string, username: string) {
 
 export async function removeClubManagerAction(clubId: string, playerId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -170,9 +168,7 @@ export async function removeClubManagerAction(clubId: string, playerId: string) 
 
 export async function getMyClubs() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return [];
 
   const admin = createAdminClient();
@@ -238,7 +234,7 @@ export async function getClubMembersAction(clubId: string): Promise<ClubMember[]
 
 export async function addClubMemberAction(clubId: string, clubSlug: string, username: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -288,7 +284,7 @@ export async function addClubMemberAction(clubId: string, clubSlug: string, user
 
 export async function removeClubMemberAction(clubId: string, clubSlug: string, playerId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -427,7 +423,7 @@ export interface UpdateClubInput {
 
 export async function updateClubAction(clubId: string, clubSlug: string, input: UpdateClubInput) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -456,7 +452,7 @@ export async function updateClubAction(clubId: string, clubSlug: string, input: 
 
 export async function uploadClubLogoAction(clubId: string, clubSlug: string, formData: FormData) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();

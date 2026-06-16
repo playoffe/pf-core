@@ -1,16 +1,14 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 
 /**
  * Follow a player. Safe to call multiple times (upsert).
  */
 export async function followPlayerAction(followingId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
   if (user.id === followingId) return { error: 'Cannot follow yourself' };
 
@@ -54,9 +52,7 @@ export async function followPlayerAction(followingId: string) {
  */
 export async function unfollowPlayerAction(followingId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const { error } = await supabase
@@ -85,9 +81,7 @@ export async function unfollowPlayerAction(followingId: string) {
  */
 export async function getIsFollowing(followingId: string): Promise<boolean> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return false;
 
   const { count } = await supabase

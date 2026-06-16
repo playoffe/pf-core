@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { generateDraw } from '@pickleball/draw-engine';
 import type { DrawConfig, DrawEntry } from '@pickleball/shared';
 import { createNotificationsForPlayers } from './notifications';
@@ -38,9 +38,7 @@ export async function generateDrawAction(
   groupSizesOverride?: number[],
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -263,9 +261,7 @@ export async function generateDrawAction(
 // ── Clear draw (for regenerate) ───────────────────────────────────────────────
 export async function clearDrawAction(categoryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -304,9 +300,7 @@ export async function scheduleMatchesAction(
   options?: { startTime?: string; matchDurationMins?: number },
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -400,9 +394,7 @@ export async function scheduleMatchesAction(
 // new round's matches.
 export async function generateNextSwissRoundAction(categoryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -584,7 +576,7 @@ export async function swapDrawEntriesAction(
   entryId2: string,
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -667,7 +659,7 @@ export async function replaceDrawEntryAction(
   replacementEntryId: string, // active entry not yet in any match
 ): Promise<{ success: true } | { error: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -916,7 +908,7 @@ async function computeGroupStandings(categoryId: string): Promise<
 // in the order the draw engine laid them out (Group A 1st, Group A 2nd, …).
 export async function promoteGroupWinnersAction(categoryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1037,7 +1029,7 @@ export async function promoteGroupWinnersAction(categoryId: string) {
 // knockout placeholder matches from scratch, ready for `promoteGroupWinnersAction`.
 export async function resetKnockoutBracketAction(categoryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1315,7 +1307,7 @@ function suggestRoundName(poolSize: number): string {
 
 export async function getKnockoutBuilderStateAction(categoryId: string): Promise<{ error: string } | { data: KnockoutBuilderState }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1558,7 +1550,7 @@ export async function createKnockoutMatchAction(
   roundName?: string,
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1616,7 +1608,7 @@ export async function createKnockoutMatchAction(
 
 export async function deleteKnockoutMatchAction(categoryId: string, matchId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1651,7 +1643,7 @@ export async function deleteKnockoutMatchAction(categoryId: string, matchId: str
 // the bracket from scratch via the Knockout Builder.
 export async function resetManualKnockoutAction(categoryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);

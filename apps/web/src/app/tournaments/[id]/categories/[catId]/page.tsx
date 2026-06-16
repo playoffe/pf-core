@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { createClient, createAdminClient, getUserRoles } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser, getUserRoles } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { EntryList } from '@/components/tournaments/EntryList';
 import { AddPlayerByEmail } from '@/components/tournaments/AddPlayerByEmail';
@@ -41,7 +41,7 @@ export default async function CategoryPage({ params }: Props) {
   const { id: tournamentSlug, catId: catSlug } = await params;
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const admin = createAdminClient();

@@ -1,11 +1,10 @@
 import { redirect } from 'next/navigation';
-import { createClient, isSuperAdmin } from '@/lib/supabase/server';
+import { getCurrentUser, isSuperAdmin } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { SuperAdminNav } from '@/components/layout/SuperAdminNav';
 
 export default async function SuperAdminLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!isSuperAdmin(user)) {
     redirect('/dashboard');

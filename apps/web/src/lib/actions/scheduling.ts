@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { detectConflictsFromUpdates } from '@/lib/scheduling-utils';
 import type { ScheduleUpdate, ConflictInfo, SmartScheduleParams } from '@/lib/scheduling-utils';
 // Type-only re-export — erases at runtime, allowed in 'use server' files.
@@ -14,7 +14,7 @@ export async function batchScheduleMatchesAction(
   updates: ScheduleUpdate[],
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   if (updates.length === 0) return { success: true, count: 0 };
@@ -73,7 +73,7 @@ export async function generateSmartScheduleAction(
   params: SmartScheduleParams,
 ): Promise<{ updates: ScheduleUpdate[]; conflicts: ConflictInfo[] } | { error: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -219,7 +219,7 @@ export async function updateCourtCountAction(
   newCourtCount: number,
 ): Promise<{ success: true; invalidatedMatchIds: string[] } | { error: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();

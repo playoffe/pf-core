@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { getPlayerByUsername } from '@pickleball/db';
 import { PlayerProfileView } from '@/components/player/PlayerProfileView';
 import { getPlayerBadges } from '@/lib/actions/badges';
@@ -53,7 +53,7 @@ export default async function PlayerProfilePage({ params }: Props) {
   const admin = createAdminClient();
 
   // Check current viewer
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   let player;
   try {

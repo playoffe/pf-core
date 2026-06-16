@@ -3,7 +3,7 @@
 import crypto from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { headers, cookies } from 'next/headers';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { createNotificationsForPlayers } from '@/lib/actions/notifications';
 
 function hashPin(pin: string) {
@@ -13,7 +13,7 @@ function hashPin(pin: string) {
 // ── Generate a referee PIN for a tournament ───────────────────────────────────
 export async function createRefereePinAction(tournamentId: string, label: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -64,7 +64,7 @@ export async function createRefereePinAction(tournamentId: string, label: string
 // ── Revoke a PIN ──────────────────────────────────────────────────────────────
 export async function revokePinAction(pinId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -78,7 +78,7 @@ export async function revokePinAction(pinId: string) {
 // (so they can't check in again) and the session (removes them from the list).
 export async function deleteRefereeAction(pinId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -131,7 +131,7 @@ export async function deleteRefereeAction(pinId: string) {
 // ── Regenerate a PIN (revoke old, create new with same label) ─────────────────
 export async function regeneratePinAction(pinId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();

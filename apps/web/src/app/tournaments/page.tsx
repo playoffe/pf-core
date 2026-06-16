@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { getMyTournaments } from '@/lib/actions/tournaments';
 import { AppNav } from '@/components/layout/AppNav';
 
@@ -14,7 +14,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string; dot: stri
 
 export default async function MyTournamentsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   // No limit — show every tournament from clubs the user manages

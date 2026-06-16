@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { ClubAdminNav } from '@/components/clubs/ClubAdminNav';
 import { ClubSettingsForm } from '@/components/clubs/ClubSettingsForm';
@@ -21,7 +21,7 @@ export default async function ClubSettingsPage({ params, searchParams }: Props) 
   const sp       = await searchParams;
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect(`/login?return=/clubs/${slug}/settings`);
 
   const admin = createAdminClient();

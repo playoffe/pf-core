@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { createClient, createAdminClient, getUserRoles } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser, getUserRoles } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { getMyTournaments } from '@/lib/actions/tournaments';
 import { getMyClubs } from '@/lib/actions/clubs';
@@ -18,9 +18,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const { data: player } = await supabase

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { PracticeLogList } from '@/components/player/PracticeLogList';
 import { getPracticeLogsAction } from '@/lib/actions/practice';
@@ -8,8 +8,7 @@ import { getPracticeLogsAction } from '@/lib/actions/practice';
 export const metadata: Metadata = { title: 'Practice Log · PLAYOFFE' };
 
 export default async function PracticePage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const logs = await getPracticeLogsAction();

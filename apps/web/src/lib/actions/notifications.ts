@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { sendPushToPlayer } from '@/lib/actions/push';
 import type { NotificationPrefs } from '@/lib/notification-types';
 import { DEFAULT_NOTIFICATION_PREFS } from '@/lib/notification-types';
@@ -27,7 +27,7 @@ export async function getNotificationsAction(): Promise<{
 }> {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUser();
     if (!user) return { notifications: [], unreadCount: 0 };
 
     const { data, error } = await supabase
@@ -50,7 +50,7 @@ export async function getNotificationsAction(): Promise<{
 export async function markNotificationReadAction(id: string) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUser();
     if (!user) return { error: 'Not authenticated' };
 
     await supabase
@@ -69,7 +69,7 @@ export async function markNotificationReadAction(id: string) {
 export async function markAllNotificationsReadAction() {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUser();
     if (!user) return { error: 'Not authenticated' };
 
     await supabase
@@ -194,7 +194,7 @@ export async function createNotificationsForPlayers(
 
 export async function getNotificationPrefsAction(): Promise<NotificationPrefs> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return DEFAULT_NOTIFICATION_PREFS;
 
   // Use admin to bypass RLS and select the JSONB column (may not be in generated types yet)
@@ -212,7 +212,7 @@ export async function getNotificationPrefsAction(): Promise<NotificationPrefs> {
 
 export async function saveNotificationPrefsAction(prefs: NotificationPrefs) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();

@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { checkPermission } from '@/lib/permissions';
 import { calculateRatingChange } from '@pickleball/rating';
 import { createNotificationsForPlayers } from './notifications';
@@ -100,7 +100,7 @@ export async function assignMatchDetailsAction(
   refereeName: string | null,
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);
@@ -128,7 +128,7 @@ export async function assignMatchDetailsAction(
 // Admin-initiated version (uses user session auth).
 export async function pauseMatchForReassignmentAction(matchId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);
@@ -162,7 +162,7 @@ export async function startMatchAction(
   serverNumber?: 1 | 2 | null,
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);
@@ -201,7 +201,7 @@ export async function saveScoreAction(
   serverNumber?: number | null,
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);
@@ -231,7 +231,7 @@ export async function submitResultAction(
   winnerEntryId: string,
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);
@@ -456,7 +456,7 @@ export async function submitResultAction(
 // ── Walkover ──────────────────────────────────────────────────────────────────
 export async function walkoverAction(matchId: string, winnerEntryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);
@@ -521,7 +521,7 @@ export async function walkoverAction(matchId: string, winnerEntryId: string) {
 // opponent the withdrawn player/pair was yet to face.
 export async function withdrawAndWalkoverAction(entryId: string, tournamentId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -601,7 +601,7 @@ export async function overrideMatchResultAction(
   newSets: SetScore[],
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);
@@ -795,7 +795,7 @@ export async function overrideMatchResultAction(
 // new result is submitted.
 export async function approveMatchRestartAction(matchId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);
@@ -834,7 +834,7 @@ export async function approveMatchRestartAction(matchId: string) {
 // logic, then marks the match completed.  Organiser-only.
 export async function approvePlayerReportAction(matchId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);
@@ -965,7 +965,7 @@ export async function approvePlayerReportAction(matchId: string) {
 export async function rejectPlayerReportAction(matchId: string) {
   'use server';
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const ctx = await assertMatchManager(matchId, user.id);

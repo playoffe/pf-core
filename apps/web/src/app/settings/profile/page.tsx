@@ -1,17 +1,15 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { EditProfileForm } from '@/components/player/EditProfileForm';
 import { PhotoUpload } from '@/components/player/PhotoUpload';
 
 export const metadata: Metadata = { title: 'Edit profile' };
 
 export default async function EditProfilePage() {
+  const user = await getCurrentUser();
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
   if (!user) redirect('/login?return=/settings/profile');
 
   const { data: player } = await supabase

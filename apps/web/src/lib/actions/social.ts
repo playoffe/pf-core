@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import type {
   SocialConnectionPublic,
   SocialPostPrefs,
@@ -41,7 +41,7 @@ export interface ClubConnectionPublic {
 /** Returns active OAuth connections for the current player (no tokens). */
 export async function getSocialConnectionsAction(): Promise<SocialConnectionPublic[]> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return [];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +58,7 @@ export async function getSocialConnectionsAction(): Promise<SocialConnectionPubl
 /** Returns social posting preferences for the current player. */
 export async function getSocialPostPrefsAction(): Promise<SocialPostPrefs> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return DEFAULT_SOCIAL_POST_PREFS;
 
   const admin = createAdminClient();
@@ -83,7 +83,7 @@ export async function saveSocialPostPrefsAction(
   prefs: SocialPostPrefs,
 ): Promise<{ success?: true; error?: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -103,7 +103,7 @@ export async function disconnectSocialAccountAction(
   platform: OAuthPlatform,
 ): Promise<{ success?: true; error?: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -204,7 +204,7 @@ export async function getPlayerSocialConfigAction(playerId: string): Promise<{
 /** Returns all posts waiting for the current player to approve or decline. */
 export async function getPendingPreviewsAction(): Promise<PostLogRow[]> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return [];
 
   const admin = createAdminClient();
@@ -226,7 +226,7 @@ export async function approvePreviewAction(
   postLogId: string,
 ): Promise<{ success?: true; error?: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -284,7 +284,7 @@ export async function declinePreviewAction(
   postLogId: string,
 ): Promise<{ success?: true; error?: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -310,7 +310,7 @@ export async function declinePreviewAction(
 /** Returns the last 50 post log entries for the current player (all statuses). */
 export async function getPostHistoryAction(): Promise<PostLogRow[]> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return [];
 
   const admin = createAdminClient();
@@ -391,7 +391,7 @@ export async function shareDrawOnSocialAction(
   categoryId: string,
 ): Promise<{ success?: true; error?: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -454,7 +454,7 @@ export async function shareScheduleOnSocialAction(
   tournamentId: string,
 ): Promise<{ success?: true; error?: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -516,7 +516,7 @@ export async function disconnectClubSocialAccountAction(
   platform: OAuthPlatform,
 ): Promise<{ success?: true; error?: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   // Verify user is a manager of this club

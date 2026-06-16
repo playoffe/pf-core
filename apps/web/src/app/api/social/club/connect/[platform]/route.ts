@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 
 // Same OAuth configs as player flow — same developer apps
 const OAUTH_CONFIGS = {
@@ -53,7 +53,7 @@ export async function GET(
 
   // Require authenticated session + club manager role
   const supabase  = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.redirect(new URL(`/login?return=/clubs/${clubSlug}/settings`, req.url));
   }

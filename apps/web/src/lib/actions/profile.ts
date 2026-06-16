@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 
 export interface CareerEntry { role: string; club: string; years: string }
@@ -20,9 +20,7 @@ export interface ProfileFormValues {
 
 export async function updateProfileAction(values: ProfileFormValues) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const fullName = values.full_name.trim();
@@ -81,7 +79,7 @@ export async function updateProfileAction(values: ProfileFormValues) {
 
 export async function uploadAvatarAction(formData: FormData) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const file = formData.get('file') as File | null;
@@ -117,9 +115,7 @@ export async function uploadAvatarAction(formData: FormData) {
 
 export async function getOwnProfileAction() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const { data } = await supabase

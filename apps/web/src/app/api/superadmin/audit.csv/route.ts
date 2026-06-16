@@ -1,9 +1,9 @@
-import { createClient, createAdminClient, isSuperAdmin } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser, isSuperAdmin } from '@/lib/supabase/server';
 
 export async function GET() {
   // 1. Auth check
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!isSuperAdmin(user)) {
     return new Response('Forbidden', { status: 403 });
   }

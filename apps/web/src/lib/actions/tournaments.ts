@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { createTournamentSchema, type CreateTournamentInput } from '@pickleball/shared';
 import { enqueueTournamentCompleteGraphics } from '@/lib/social-queue';
 
@@ -10,9 +10,7 @@ export async function createTournamentAction(
   input: CreateTournamentInput & { club_id: string },
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const { club_id, ...rest } = input;
@@ -62,9 +60,7 @@ export async function updateTournamentAction(
   },
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -128,9 +124,7 @@ export async function updateTournamentAction(
  */
 export async function getMyTournaments(limit?: number) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return [];
 
   const admin = createAdminClient();
@@ -181,9 +175,7 @@ export async function updateTournamentStatusAction(
   status: TournamentStatus,
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -226,7 +218,7 @@ export async function updateTournamentStatusAction(
 // Dates are cleared so the organiser fills them in fresh.
 export async function cloneTournamentAction(tournamentId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -352,7 +344,7 @@ export async function upsertTournamentStageScoringAction(
   },
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -394,7 +386,7 @@ export async function deleteTournamentStageScoringAction(
   stage: StageKey,
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();

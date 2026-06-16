@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { checkPermission } from '@/lib/permissions';
 import { AppNav } from '@/components/layout/AppNav';
 import { PublicCategoryCard } from '@/components/events/PublicCategoryCard';
@@ -146,7 +146,7 @@ export default async function PublicTournamentPage({ params }: Props) {
 
   // Who is the current viewer?
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   let myEntries: Record<string, string> = {}; // categoryId → status
   if (user) {

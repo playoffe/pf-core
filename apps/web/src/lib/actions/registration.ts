@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { checkPermission } from '@/lib/permissions';
 import {
   sendPartnerInviteNotification,
@@ -66,9 +66,7 @@ async function promoteWaitlisted(categoryId: string) {
 
 export async function registerForCategoryAction(categoryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'You must be logged in to register.' };
 
   const admin = createAdminClient();
@@ -179,9 +177,7 @@ export async function registerForCategoryAction(categoryId: string) {
 
 export async function withdrawEntryAction(entryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated.' };
 
   const admin = createAdminClient();
@@ -247,9 +243,7 @@ async function assertManagerForEntry(entryId: string, userId: string) {
 
 export async function approveEntryAction(entryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated.' };
 
   const entry = await assertManagerForEntry(entryId, user.id);
@@ -300,9 +294,7 @@ export async function approveEntryAction(entryId: string) {
 
 export async function rejectEntryAction(entryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated.' };
 
   const entry = await assertManagerForEntry(entryId, user.id);
@@ -347,9 +339,7 @@ export async function rejectEntryAction(entryId: string) {
 // ── Manually promote a specific waitlisted entry ──────────────────────────────
 export async function promoteWaitlistedEntryAction(entryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated.' };
 
   const entry = await assertManagerForEntry(entryId, user.id);
@@ -393,9 +383,7 @@ export async function promoteWaitlistedEntryAction(entryId: string) {
 
 export async function bulkApproveEntriesAction(categoryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated.' };
 
   const admin = createAdminClient();
@@ -460,7 +448,7 @@ export async function bulkApproveEntriesAction(categoryId: string) {
 
 export async function registerDoublesAction(categoryId: string, partnerUsername: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'You must be logged in to register.' };
 
   const admin = createAdminClient();
@@ -582,7 +570,7 @@ export async function registerDoublesAction(categoryId: string, partnerUsername:
 
 export async function confirmPartnerInviteAction(entryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'You must be logged in.' };
 
   const admin = createAdminClient();
@@ -656,7 +644,7 @@ export async function confirmPartnerInviteAction(entryId: string) {
 
 export async function declinePartnerInviteAction(entryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'You must be logged in.' };
 
   const admin = createAdminClient();
@@ -684,7 +672,7 @@ export async function declinePartnerInviteAction(entryId: string) {
 
 export async function removeEntryAction(entryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated.' };
 
   const entry = await assertManagerForEntry(entryId, user.id);
@@ -717,7 +705,7 @@ export async function removeEntryAction(entryId: string) {
 
 export async function updateEntrySeedAction(entryId: string, seed: number | null) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated.' };
 
   const entry = await assertManagerForEntry(entryId, user.id);
@@ -734,7 +722,7 @@ export async function updateEntrySeedAction(entryId: string, seed: number | null
 
 export async function getMyEntries() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return [];
 
   const admin = createAdminClient();
@@ -756,7 +744,7 @@ export async function getMyEntries() {
 /** Invites where the current user is the partner (needs to confirm/decline). */
 export async function getMyPartnerInvites() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return [];
 
   const admin = createAdminClient();
