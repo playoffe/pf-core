@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { createClient, createAdminClient, isSuperAdmin, getUserRoles } from '@/lib/supabase/server';
+import { createClient, createAdminClient, getCurrentUser, isSuperAdmin, getUserRoles } from '@/lib/supabase/server';
 import { isFeatureEnabled } from '@/lib/features';
 import { NotificationBell } from './NotificationBell';
 import { NavLink } from './NavLink';
@@ -11,9 +11,7 @@ import type { Notification } from '@/lib/actions/notifications';
 
 export async function AppNav() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   const { data: player } = user
     ? await supabase.from('players').select('username, full_name').eq('id', user.id).single()

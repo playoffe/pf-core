@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { upsertSocialConnectionAction } from '@/lib/actions/social';
 import type { OAuthPlatform } from '@/lib/social-types';
 
@@ -249,7 +249,7 @@ export async function GET(
 
   // Verify the current session matches the player who initiated the flow
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user || user.id !== statePayload.playerId) {
     return NextResponse.redirect(
       new URL('/settings/social?error=session_mismatch', req.url),

@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 
 type PushSub = { endpoint: string; p256dh: string; auth: string };
 
@@ -11,7 +11,7 @@ function fromAny(client: any, table: string) {
 
 export async function subscribeToPushAction(subscription: PushSub) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -31,7 +31,7 @@ export async function subscribeToPushAction(subscription: PushSub) {
 
 export async function unsubscribeFromPushAction(endpoint: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();

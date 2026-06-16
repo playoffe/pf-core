@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 
 export interface PracticeLogInput {
@@ -14,7 +14,7 @@ export interface PracticeLogInput {
 
 export async function createPracticeLogAction(input: PracticeLogInput) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const duration = input.duration_minutes ? parseInt(input.duration_minutes, 10) : null;
@@ -39,7 +39,7 @@ export async function createPracticeLogAction(input: PracticeLogInput) {
 
 export async function updatePracticeLogAction(id: string, input: PracticeLogInput) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const duration = input.duration_minutes ? parseInt(input.duration_minutes, 10) : null;
@@ -67,7 +67,7 @@ export async function updatePracticeLogAction(id: string, input: PracticeLogInpu
 
 export async function deletePracticeLogAction(id: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const { error } = await supabase
@@ -84,7 +84,7 @@ export async function deletePracticeLogAction(id: string) {
 
 export async function getPracticeLogsAction() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const { data } = await supabase

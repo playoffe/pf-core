@@ -2,8 +2,12 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 // ── Simple sliding-window rate limiter (edge-compatible, no Redis dependency)
-// State resets per Vercel serverless cold-start — suitable for first-launch scale.
-// For stricter limits, replace with @upstash/ratelimit backed by Upstash Redis.
+// LIMITATION: this Map lives in the V8 isolate's heap. In production, Vercel
+// spawns multiple concurrent isolates (one per worker process), each with its
+// own independent copy of rateLimitStore. A client can send N * limit requests
+// per window by hitting N different isolates — the counter is NOT shared across
+// workers. This is intentional for the current scale (single-region, low-traffic).
+// For a globally-enforced limit, replace with @upstash/ratelimit + Upstash Redis.
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
 const RATE_LIMIT_RULES: Array<{ pattern: RegExp; limit: number; windowMs: number }> = [
@@ -121,11 +125,14 @@ export async function middleware(request: NextRequest) {
     },
   );
 
+  // Local JWT decode (no Auth-server round trip) — sufficient for the outer
+  // "are you logged in at all" gate. Pages that need an authoritative user
+  // record for RLS-sensitive logic call supabase.auth.getUser() themselves.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
 
-  if (!user) {
+  if (!session) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirectTo', pathname);

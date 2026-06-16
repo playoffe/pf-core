@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 
 export type FeedPost = {
   id: string;
@@ -41,7 +41,7 @@ export async function getFeedPostsAction(
   scope: 'following' | 'all' = 'following',
 ): Promise<FeedPost[]> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   const admin = createAdminClient();
 
   let scopedPlayerIds: string[] | null = null;
@@ -156,7 +156,7 @@ export async function getFeedPostsAction(
 
 export async function createPostAction(formData: FormData) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const body = (formData.get('body') as string | null)?.trim();
@@ -195,7 +195,7 @@ export async function createPostAction(formData: FormData) {
 
 export async function deletePostAction(postId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const { error } = (await fromAny(supabase as unknown as ReturnType<typeof createAdminClient>, 'feed_posts')
@@ -210,7 +210,7 @@ export async function deletePostAction(postId: string) {
 
 export async function toggleLikeAction(postId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const sc = supabase as unknown as ReturnType<typeof createAdminClient>;
@@ -234,7 +234,7 @@ export async function toggleLikeAction(postId: string) {
 
 export async function addCommentAction(postId: string, body: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const trimmed = body.trim().slice(0, 300);
@@ -272,7 +272,7 @@ export async function addCommentAction(postId: string, body: string) {
 
 export async function deleteCommentAction(commentId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const sc = supabase as unknown as ReturnType<typeof createAdminClient>;

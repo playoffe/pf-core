@@ -2,15 +2,14 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { createClient, getUserRoles } from '@/lib/supabase/server';
+import { getCurrentUser, getUserRoles } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { getMyClubs } from '@/lib/actions/clubs';
 
 export const metadata: Metadata = { title: 'My Clubs · PLAYOFFE' };
 
 export default async function MyClubsPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   // Admin-only: player mode → redirect to events

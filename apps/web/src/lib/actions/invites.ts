@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { sendEmail } from '@/lib/email/service';
 import { buildTournamentInviteEmail } from '@/lib/email/templates/tournament-invite';
 import { createNotificationForPlayer } from './notifications';
@@ -28,7 +28,7 @@ export async function sendTournamentInvitesAction(
 ): Promise<{ results?: InviteResult[]; error?: string }> {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUser();
     if (!user) return { error: 'Not authenticated' };
 
     const admin = createAdminClient();

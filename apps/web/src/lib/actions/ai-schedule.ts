@@ -1,7 +1,7 @@
 'use server';
 
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import type { ScheduleUpdate } from './scheduling';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ export async function callScheduleAssistantAction(params: {
   }
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();

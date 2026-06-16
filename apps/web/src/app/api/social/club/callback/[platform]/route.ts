@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { upsertClubSocialConnectionAction } from '@/lib/actions/social';
 import type { OAuthPlatform } from '@/lib/social-types';
 
@@ -157,7 +157,7 @@ export async function GET(
 
   // Verify the user who initiated the flow is still logged in
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user || user.id !== statePayload.userId) {
     return NextResponse.redirect(
       new URL(`/clubs/${statePayload.clubSlug}/settings?error=session_mismatch`, req.url),

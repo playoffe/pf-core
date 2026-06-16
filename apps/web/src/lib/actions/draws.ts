@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { generateDraw } from '@pickleball/draw-engine';
 import type { DrawConfig, DrawEntry } from '@pickleball/shared';
 import { createNotificationsForPlayers } from './notifications';
@@ -38,9 +38,7 @@ export async function generateDrawAction(
   groupSizesOverride?: number[],
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -184,34 +182,50 @@ export async function generateDrawAction(
         && (m.bracket_type === 'winners' || m.bracket_type === null), // only WB byes
     );
 
-    for (const bye of byeMatches) {
-      const winnerEntryId = bye.entry_a_id ?? bye.entry_b_id;
-      if (!winnerEntryId) continue;
-
-      await admin
+    // Pre-fetch every next-round match that positional (SE) byes might advance into,
+    // in one query, instead of one SELECT per bye.
+    const positionalByes = byeMatches.filter((b) => !(b.winner_to_match_id && b.winner_slot));
+    const nextRounds = [...new Set(positionalByes.map((b) => b.round + 1))];
+    const nextMatchByRoundPos = new Map<string, string>();
+    if (nextRounds.length > 0) {
+      const { data: nextMatches } = await admin
         .from('matches')
-        .update({ status: 'walkover', winner_entry_id: winnerEntryId, completed_at: new Date().toISOString() })
-        .eq('id', bye.id);
-
-      // Advance winner using explicit link (DE) or positional (SE)
-      if (bye.winner_to_match_id && bye.winner_slot) {
-        const slot = bye.winner_slot === 'a' ? 'entry_a_id' : 'entry_b_id';
-        await admin.from('matches').update({ [slot]: winnerEntryId }).eq('id', bye.winner_to_match_id);
-      } else {
-        const nextPos = Math.floor(bye.bracket_position / 2);
-        const slot = bye.bracket_position % 2 === 0 ? 'entry_a_id' : 'entry_b_id';
-        const { data: nextMatch } = await admin
-          .from('matches')
-          .select('id')
-          .eq('category_id', categoryId)
-          .eq('round', bye.round + 1)
-          .eq('bracket_position', nextPos)
-          .maybeSingle();
-        if (nextMatch) {
-          await admin.from('matches').update({ [slot]: winnerEntryId }).eq('id', nextMatch.id);
-        }
+        .select('id, round, bracket_position')
+        .eq('category_id', categoryId)
+        .in('round', nextRounds);
+      for (const nm of nextMatches ?? []) {
+        if (nm.bracket_position !== null) nextMatchByRoundPos.set(`${nm.round}:${nm.bracket_position}`, nm.id);
       }
     }
+
+    const completedAt = new Date().toISOString();
+    await Promise.all(
+      byeMatches.map((bye) => {
+        const winnerEntryId = bye.entry_a_id ?? bye.entry_b_id;
+        if (!winnerEntryId) return Promise.resolve();
+
+        const walkoverUpdate = admin
+          .from('matches')
+          .update({ status: 'walkover', winner_entry_id: winnerEntryId, completed_at: completedAt })
+          .eq('id', bye.id);
+
+        // Advance winner using explicit link (DE) or positional (SE)
+        let advanceUpdate: PromiseLike<unknown> = Promise.resolve();
+        if (bye.winner_to_match_id && bye.winner_slot) {
+          const slot = bye.winner_slot === 'a' ? 'entry_a_id' : 'entry_b_id';
+          advanceUpdate = admin.from('matches').update({ [slot]: winnerEntryId }).eq('id', bye.winner_to_match_id);
+        } else {
+          const nextPos = Math.floor(bye.bracket_position / 2);
+          const slot = bye.bracket_position % 2 === 0 ? 'entry_a_id' : 'entry_b_id';
+          const nextMatchId = nextMatchByRoundPos.get(`${bye.round + 1}:${nextPos}`);
+          if (nextMatchId) {
+            advanceUpdate = admin.from('matches').update({ [slot]: winnerEntryId }).eq('id', nextMatchId);
+          }
+        }
+
+        return Promise.all([walkoverUpdate, advanceUpdate]);
+      }),
+    );
   }
 
   // Update category status
@@ -247,9 +261,7 @@ export async function generateDrawAction(
 // ── Clear draw (for regenerate) ───────────────────────────────────────────────
 export async function clearDrawAction(categoryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -288,9 +300,7 @@ export async function scheduleMatchesAction(
   options?: { startTime?: string; matchDurationMins?: number },
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -361,12 +371,15 @@ export async function scheduleMatchesAction(
     globalMatchIndex++;
   }
 
-  // Batch update
-  for (const u of updates) {
-    await admin
-      .from('matches')
-      .update({ court: u.court, ...(u.scheduled_time ? { scheduled_time: u.scheduled_time } : {}) })
-      .eq('id', u.id);
+  // Batch update via a single upsert (merges only the provided columns per row)
+  if (updates.length > 0) {
+    await (admin.from('matches') as any).upsert(
+      updates.map((u) => ({
+        id: u.id,
+        court: u.court,
+        ...(u.scheduled_time ? { scheduled_time: u.scheduled_time } : {}),
+      })),
+    );
   }
 
   const tSlug = cat.tournamentData.slug;
@@ -381,9 +394,7 @@ export async function scheduleMatchesAction(
 // new round's matches.
 export async function generateNextSwissRoundAction(categoryId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -565,7 +576,7 @@ export async function swapDrawEntriesAction(
   entryId2: string,
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -648,7 +659,7 @@ export async function replaceDrawEntryAction(
   replacementEntryId: string, // active entry not yet in any match
 ): Promise<{ success: true } | { error: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -783,6 +794,7 @@ type GroupMatchRow = {
   entry_a_id: string | null;
   entry_b_id: string | null;
   winner_entry_id: string | null;
+  sets: unknown;
 };
 
 async function computeGroupStandings(categoryId: string): Promise<
@@ -798,7 +810,7 @@ async function computeGroupStandings(categoryId: string): Promise<
 
   const { data: allMatches } = await admin
     .from('matches')
-    .select('id, round, group_name, status, entry_a_id, entry_b_id, winner_entry_id')
+    .select('id, round, group_name, status, entry_a_id, entry_b_id, winner_entry_id, sets')
     .eq('category_id', categoryId)
     .order('round', { ascending: true });
 
@@ -812,12 +824,8 @@ async function computeGroupStandings(categoryId: string): Promise<
   );
   const allGroupMatchesDone = pendingGroup.length === 0;
 
-  // Compute standings — fetch sets for point totals
-  const { data: matchesWithSets } = await admin
-    .from('matches')
-    .select('id, group_name, entry_a_id, entry_b_id, winner_entry_id, sets')
-    .eq('category_id', categoryId)
-    .not('group_name', 'is', null);
+  // Standings/point totals are computed from the same group-stage rows fetched above.
+  const matchesWithSets = groupMatches;
 
   const groupNames = [...new Set(groupMatches.map((m) => m.group_name as string))].sort();
 
@@ -900,7 +908,7 @@ async function computeGroupStandings(categoryId: string): Promise<
 // in the order the draw engine laid them out (Group A 1st, Group A 2nd, …).
 export async function promoteGroupWinnersAction(categoryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1021,7 +1029,7 @@ export async function promoteGroupWinnersAction(categoryId: string) {
 // knockout placeholder matches from scratch, ready for `promoteGroupWinnersAction`.
 export async function resetKnockoutBracketAction(categoryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1299,7 +1307,7 @@ function suggestRoundName(poolSize: number): string {
 
 export async function getKnockoutBuilderStateAction(categoryId: string): Promise<{ error: string } | { data: KnockoutBuilderState }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1542,7 +1550,7 @@ export async function createKnockoutMatchAction(
   roundName?: string,
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1600,7 +1608,7 @@ export async function createKnockoutMatchAction(
 
 export async function deleteKnockoutMatchAction(categoryId: string, matchId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);
@@ -1635,7 +1643,7 @@ export async function deleteKnockoutMatchAction(categoryId: string, matchId: str
 // the bracket from scratch via the Knockout Builder.
 export async function resetManualKnockoutAction(categoryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const cat = await assertCategoryManager(categoryId, user.id);

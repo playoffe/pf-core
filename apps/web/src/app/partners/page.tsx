@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Suspense } from 'react';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { PartnerActions } from '@/components/player/PartnerActions';
 import { PartnerFilters } from '@/components/player/PartnerFilters';
@@ -17,7 +17,7 @@ interface Props {
 
 export default async function PartnersPage({ searchParams }: Props) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const admin = createAdminClient();

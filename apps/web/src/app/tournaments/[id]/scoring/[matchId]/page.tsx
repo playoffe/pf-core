@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { createClient, createAdminClient, getUserRoles } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser, getUserRoles } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { MatchScoreCard } from '@/components/scoring/MatchScoreCard';
 import { MatchAssignmentBadges } from '@/components/scoring/MatchAssignmentBadges';
@@ -19,7 +19,7 @@ export default async function MatchScoringPage({ params }: Props) {
   const { id: slug, matchId } = await params;
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const admin = createAdminClient();

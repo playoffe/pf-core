@@ -7,11 +7,13 @@
  * All reads use the admin client (service role) to bypass RLS.
  */
 
-import { createClient, createAdminClient, isSuperAdmin } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser, isSuperAdmin } from '@/lib/supabase/server';
 import { sendEmail } from '@/lib/email/service';
 import { buildAdminInviteEmail } from '@/lib/email/templates/admin-invite';
 import { revalidatePath } from 'next/cache';
+import { revalidateFeatureFlags, revalidatePermissions } from '@/lib/supabase/permissions';
 import crypto from 'crypto';
+import type { User } from '@supabase/supabase-js';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
@@ -19,7 +21,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
 async function assertSuperAdmin() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!isSuperAdmin(user)) throw new Error('Forbidden: Super Admin only');
   return { user: user!, admin: createAdminClient() };
 }
@@ -80,11 +82,15 @@ export async function getPlatformStatsAction() {
 export async function getAllUsersForSuperAdminAction() {
   const { admin } = await assertSuperAdmin();
 
-  // Fetch all auth users — service role bypasses auth restrictions
-  const { data: authList } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  const users = (authList?.users ?? []).filter(
-    (u) => u.app_metadata?.role !== 'super_admin',
-  );
+  // Fetch all auth users — service role bypasses auth restrictions, paginate to avoid the 1000-user cap
+  const allAuthUsers: User[] = [];
+  for (let page = 1; ; page++) {
+    const { data } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    const batch = data?.users ?? [];
+    allAuthUsers.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  const users = allAuthUsers.filter((u) => u.app_metadata?.role !== 'super_admin');
 
   // Fetch all player profiles + club memberships in parallel
   const [{ data: players }, { data: managers }] = await Promise.all([
@@ -696,6 +702,7 @@ export async function updateFeatureFlagAction(flagId: string, isEnabled: boolean
   // Bust the entire layout cache so feature-gated tabs (e.g. Social media in
   // /settings) appear/disappear immediately without a manual hard-refresh.
   revalidatePath('/', 'layout');
+  revalidateFeatureFlags();
   return { success: true };
 }
 
@@ -801,6 +808,7 @@ export async function updateRolePermissionAction(input: {
   });
 
   revalidatePath('/superadmin/rbac');
+  revalidatePermissions();
   return { success: true };
 }
 
@@ -819,6 +827,7 @@ export async function resetClubPermissionsAction(clubId: string) {
   });
 
   revalidatePath('/superadmin/rbac');
+  revalidatePermissions();
   return { success: true };
 }
 
@@ -827,7 +836,7 @@ export async function resetClubPermissionsAction(clubId: string) {
 export async function activatePlayerProfileAction() {
   'use server';
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const roles = (user.app_metadata?.roles as string[] | undefined) ?? [];

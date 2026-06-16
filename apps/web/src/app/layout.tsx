@@ -4,9 +4,10 @@ import { TopProgressBar } from '@/components/layout/TopProgressBar';
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider';
 import { ToastProvider } from '@/components/ui/ToastProvider';
 import { PermissionProvider } from '@/components/PermissionProvider';
+import { getPermissionsData } from '@/lib/supabase/permissions';
 import './globals.css';
 
-const inter = Inter({ variable: '--font-inter', subsets: ['latin'] });
+const inter = Inter({ variable: '--font-inter', subsets: ['latin'], display: 'swap' });
 
 export const metadata: Metadata = {
   title: { default: 'PLAYOFFE', template: '%s | PLAYOFFE' },
@@ -14,14 +15,24 @@ export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const { permissions, featureFlags } = await getPermissionsData();
+
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Warm up the connection to Supabase before the first JS-initiated request */}
+        <link rel="preconnect" href={process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''} />
+        <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''} />
+      </head>
       <body className={`${inter.variable} min-h-screen bg-surface font-sans antialiased`}>
         <TopProgressBar />
         <ConfirmProvider>
           <ToastProvider>
-            <PermissionProvider>
+            <PermissionProvider
+              initialPermissions={permissions}
+              initialFeatureFlags={featureFlags}
+            >
               {children}
             </PermissionProvider>
           </ToastProvider>

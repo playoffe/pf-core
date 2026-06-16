@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, getCurrentUser } from '@/lib/supabase/server';
 import { AdminInviteClaimForm } from '@/components/auth/AdminInviteClaimForm';
 
 export const metadata: Metadata = { title: 'Set up your club · PLAYOFFE' };
@@ -87,8 +87,7 @@ export default async function AdminInviteClaimPage({ params }: Props) {
   }
 
   // Check the current session to determine the login-gate state
-  const supabase = await createClient();
-  const { data: { user: currentUser } } = await supabase.auth.getUser();
+  const currentUser = await getCurrentUser();
   const isLoggedInAsInvitee = currentUser?.email === invite.invitee_email;
   const isLoggedInAsOther   = !!currentUser && currentUser.email !== invite.invitee_email;
 

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 import { isFeatureEnabled } from '@/lib/features';
 import {
   getSocialConnectionsAction,
@@ -30,7 +30,7 @@ export default async function SocialSettingsPage({ searchParams }: Props) {
   if (!socialEnabled) redirect('/settings/profile');
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login?return=/settings/social');
 
   const sp = await searchParams;

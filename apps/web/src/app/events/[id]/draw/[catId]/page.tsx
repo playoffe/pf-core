@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { BracketView } from '@/components/tournaments/BracketView';
 import { StandingsTable } from '@/components/tournaments/StandingsTable';
@@ -43,7 +43,7 @@ export default async function PublicDrawPage({ params }: Props) {
   // Check if the current user is a club manager for this tournament
   // Managers get clickable match tiles; everyone else gets read-only view
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   let isManager = false;
   if (user) {
     const { data: mgr } = await admin

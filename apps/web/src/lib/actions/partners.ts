@@ -1,11 +1,11 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 
 export async function sendPartnerRequestAction(toPlayerId: string, message: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
   if (user.id === toPlayerId) return { error: 'Cannot send request to yourself' };
 
@@ -28,7 +28,7 @@ export async function sendPartnerRequestAction(toPlayerId: string, message: stri
 
 export async function respondToPartnerRequestAction(requestId: string, status: 'accepted' | 'declined') {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const { error } = await supabase
@@ -45,7 +45,7 @@ export async function respondToPartnerRequestAction(requestId: string, status: '
 
 export async function cancelPartnerRequestAction(requestId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const { error } = await supabase
@@ -76,7 +76,7 @@ export interface PartnerFilters {
  */
 export async function getPartnerSuggestionsAction(filters?: PartnerFilters) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { players: [], myRating: null, sentIds: new Set<string>() };
 
   const admin = createAdminClient();

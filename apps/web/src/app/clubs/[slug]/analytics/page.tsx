@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { ClubAdminNav } from '@/components/clubs/ClubAdminNav';
 import { getClubAnalyticsAction } from '@/lib/actions/clubs';
@@ -23,8 +23,7 @@ const STATUS_LABEL: Record<string, string> = {
 export default async function ClubAnalyticsPage({ params }: Props) {
   const { slug } = await params;
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect(`/login?return=/clubs/${slug}/analytics`);
 
   const admin = createAdminClient();

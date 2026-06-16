@@ -1,5 +1,5 @@
 import { redirect, notFound } from 'next/navigation';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, getCurrentUser } from '@/lib/supabase/server';
 import { withdrawEntryAction } from '@/lib/actions/registration';
 import { AppNav } from '@/components/layout/AppNav';
 import Link from 'next/link';
@@ -11,8 +11,7 @@ interface Props {
 export default async function WithdrawPage({ params }: Props) {
   const { id: tournamentSlug, catId: catSlug } = await params;
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect(`/login?return=/events/${tournamentSlug}`);
 
   const admin = createAdminClient();

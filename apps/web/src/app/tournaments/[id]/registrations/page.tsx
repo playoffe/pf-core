@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { createClient, createAdminClient, getUserRoles } from '@/lib/supabase/server';
+import { createAdminClient, getCurrentUser, getUserRoles } from '@/lib/supabase/server';
 import { checkPermission } from '@/lib/permissions';
 import { AppNav } from '@/components/layout/AppNav';
 import { RegistrationsClient } from '@/components/tournaments/RegistrationsClient';
@@ -16,8 +16,7 @@ interface Props {
 export default async function RegistrationsPage({ params }: Props) {
   const { id: slug } = await params;
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const admin = createAdminClient();
@@ -48,23 +47,24 @@ export default async function RegistrationsPage({ params }: Props) {
     : isAdminRole ? 'admin' : 'player';
   if (activeMode === 'player') redirect(`/events/${slug}`);
 
-  // Fetch all categories with their slugs
-  const { data: categories } = await admin
-    .from('tournament_categories')
-    .select('id, name, slug, play_format, max_entries, status')
-    .eq('tournament_id', t.id)
-    .order('created_at');
-
-  // Fetch all non-withdrawn entries with player + partner details
-  const { data: entries } = await admin
-    .from('tournament_entries')
-    .select(`
-      id, status, registered_at, category_id, seed,
-      players!player_id(id, full_name, username, global_stats(current_rating)),
-      partner:players!partner_id(full_name, username)
-    `)
-    .eq('tournament_id', t.id)
-    .order('registered_at', { ascending: true });
+  // Fetch categories, entries, and admin-withdraw permission in parallel.
+  const [{ data: categories }, { data: entries }, canAdminWithdraw] = await Promise.all([
+    admin
+      .from('tournament_categories')
+      .select('id, name, slug, play_format, max_entries, status')
+      .eq('tournament_id', t.id)
+      .order('created_at'),
+    admin
+      .from('tournament_entries')
+      .select(`
+        id, status, registered_at, category_id, seed,
+        players!player_id(id, full_name, username, global_stats(current_rating)),
+        partner:players!partner_id(full_name, username)
+      `)
+      .eq('tournament_id', t.id)
+      .order('registered_at', { ascending: true }),
+    checkPermission('admin', 'entries', 'withdraw', t.club_id),
+  ]);
 
   type EntryRow = {
     id: string;
@@ -91,9 +91,6 @@ export default async function RegistrationsPage({ params }: Props) {
 
   const cats = (categories ?? []) as Array<{ id: string; name: string; slug: string; play_format: string; max_entries: number | null; status: string }>;
   const pendingTotal = allEntries.filter((e) => e.status === 'pending').length;
-
-  // Permission: can admins withdraw / remove entries?
-  const canAdminWithdraw = await checkPermission('admin', 'entries', 'withdraw', t.club_id);
 
   return (
     <div className="min-h-screen bg-surface">

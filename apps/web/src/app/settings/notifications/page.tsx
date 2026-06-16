@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
+import { getCurrentUser } from '@/lib/supabase/server';
 import { getNotificationPrefsAction } from '@/lib/actions/notifications';
 import { NotificationPrefsForm } from '@/components/settings/NotificationPrefsForm';
 import { PushSubscribeButton } from '@/components/settings/PushSubscribeButton';
@@ -9,8 +9,7 @@ import { PushSubscribeButton } from '@/components/settings/PushSubscribeButton';
 export const metadata: Metadata = { title: 'Notification preferences' };
 
 export default async function NotificationsSettingsPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login?return=/settings/notifications');
 
   const prefs = await getNotificationPrefsAction();

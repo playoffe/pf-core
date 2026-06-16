@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { createCategorySchema, type CreateCategoryInput } from '@pickleball/shared';
 
 // ── Verify the calling user manages the tournament's club ──────────────────
@@ -42,9 +42,7 @@ export async function createCategoryAction(
   },
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   // Destructure scoring override fields before schema validation
@@ -109,9 +107,7 @@ export async function updateCategoryAction(
   },
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -217,7 +213,7 @@ export async function upsertStageScoringAction(
   },
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -250,7 +246,7 @@ export async function upsertStageScoringAction(
 /** Delete a stage scoring override (reverts to category/tournament default). */
 export async function deleteStageScoringAction(categoryId: string, stage: StageKey) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -306,9 +302,7 @@ export async function getCategoryWithEntries(categoryId: string) {
 // ── Remove a single entry ──────────────────────────────────────────────────
 export async function removeEntryAction(entryId: string, tournamentId: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const t = await assertTournamentManager(tournamentId, user.id);
@@ -329,9 +323,7 @@ export async function bulkUpdateSeedsAction(
   tournamentId: string,
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const t = await assertTournamentManager(tournamentId, user.id);
@@ -356,9 +348,7 @@ export async function updateSeedAction(
   tournamentId: string,
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const t = await assertTournamentManager(tournamentId, user.id);
@@ -377,7 +367,7 @@ export async function updateSeedAction(
 // ── Search players (typeahead for add-player input) ───────────────────────
 export async function searchPlayersForCategoryAction(query: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user || query.trim().length < 2) return [];
 
   const admin = createAdminClient();
@@ -397,9 +387,7 @@ export async function addPlayerByEmailAction(
   partnerEmail?: string,   // required for doubles / mixed doubles categories
 ) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const t = await assertTournamentManager(tournamentId, user.id);
@@ -670,7 +658,7 @@ async function resolveEntryNames(entryIds: string[]) {
 // anything, so the UI can show a confirmation preview before finalizing.
 export async function previewCategoryResultsAction(categoryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const result = await deriveCategoryResults(categoryId, user.id);
@@ -694,7 +682,7 @@ export async function previewCategoryResultsAction(categoryId: string) {
 // the category as 'completed'. Safe to call multiple times (idempotent).
 export async function finalizeCategoryResultsAction(categoryId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const result = await deriveCategoryResults(categoryId, user.id);

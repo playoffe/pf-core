@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, getCurrentUser } from '@/lib/supabase/server';
 
 // ── Per-platform OAuth configuration ─────────────────────────────────────────
 
@@ -53,7 +53,7 @@ export async function GET(
 
   // Require authenticated session
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.redirect(new URL('/login?return=/settings/social', req.url));
   }

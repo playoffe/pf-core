@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { createClient, createAdminClient, getUserRoles } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser, getUserRoles } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { PrintButton } from '@/components/ui/PrintButton';
 import { DisputeQueue } from '@/components/scoring/DisputeQueue';
@@ -25,7 +25,7 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
   const { date: dateFilter, category: categoryFilter } = await searchParams;
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const admin = createAdminClient();

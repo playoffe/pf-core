@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { sendPushToPlayer } from './push';
 
 export type AnnouncementUrgency = 'normal' | 'urgent';
@@ -28,7 +28,7 @@ export async function sendAnnouncementAction(
   alsoPushNotify: boolean,
 ): Promise<{ success: true } | { error: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -92,7 +92,7 @@ export async function archiveAnnouncementAction(
   tournamentSlug: string,
 ): Promise<{ success: true } | { error: string }> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();

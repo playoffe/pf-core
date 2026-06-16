@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { KnockoutBuilder } from '@/components/tournaments/KnockoutBuilder';
 import { getKnockoutBuilderStateAction } from '@/lib/actions/draws';
@@ -16,7 +16,7 @@ export default async function KnockoutBuilderPage({ params }: Props) {
   const { id: tournamentSlug, catId: catSlug } = await params;
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect('/login');
 
   const admin = createAdminClient();
