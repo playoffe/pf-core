@@ -96,41 +96,49 @@ variable "anthropic_api_key" {
 variable "instagram_app_id" {
   type      = string
   sensitive = true
+  default   = ""
 }
 
 variable "instagram_app_secret" {
   type      = string
   sensitive = true
+  default   = ""
 }
 
 variable "facebook_app_id" {
   type      = string
   sensitive = true
+  default   = ""
 }
 
 variable "facebook_app_secret" {
   type      = string
   sensitive = true
+  default   = ""
 }
 
 variable "x_api_key" {
   type      = string
   sensitive = true
+  default   = ""
 }
 
 variable "x_api_secret" {
   type      = string
   sensitive = true
+  default   = ""
 }
 
 variable "x_access_token" {
   type      = string
   sensitive = true
+  default   = ""
 }
 
 variable "x_access_token_secret" {
   type      = string
   sensitive = true
+  default   = ""
 }
 
 # ── Alerts ────────────────────────────────────────────────────────────────────

@@ -103,7 +103,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
 
 resource "aws_cloudwatch_log_metric_filter" "post_errors" {
   name           = "${var.name_prefix}-social-post-errors"
-  log_group_name = "/ecs/${var.name_prefix}/workers"
+  log_group_name = var.ecs_log_group_name
   pattern        = "\"✗\""  # matches the worker error log pattern
 
   metric_transformation {
@@ -138,26 +138,29 @@ resource "aws_cloudwatch_dashboard" "main" {
       {
         type = "metric"
         properties = {
-          title  = "Redis Queue Depth"
-          period = 60
-          metrics = [["AWS/ElastiCache", "CurrItems", "CacheClusterId", var.redis_cluster_id]]
-          view   = "timeSeries"
+          title   = "Redis Queue Depth"
+          region  = var.aws_region
+          period  = 60
+          metrics = [["AWS/ElastiCache", "CurrItems", "CacheClusterId", coalesce(var.redis_cluster_id, "none")]]
+          view    = "timeSeries"
         }
       },
       {
         type = "metric"
         properties = {
-          title  = "ECS Running Tasks"
-          period = 60
+          title   = "ECS Running Tasks"
+          region  = var.aws_region
+          period  = 60
           metrics = [["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_service_name]]
-          view   = "timeSeries"
+          view    = "timeSeries"
         }
       },
       {
         type = "metric"
         properties = {
-          title  = "ECS CPU / Memory"
-          period = 300
+          title   = "ECS CPU / Memory"
+          region  = var.aws_region
+          period  = 300
           metrics = [
             ["AWS/ECS", "CPUUtilization",    "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_service_name],
             ["AWS/ECS", "MemoryUtilization", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_service_name]
@@ -168,10 +171,11 @@ resource "aws_cloudwatch_dashboard" "main" {
       {
         type = "metric"
         properties = {
-          title  = "Social Post Errors (5-min)"
-          period = 300
+          title   = "Social Post Errors (5-min)"
+          region  = var.aws_region
+          period  = 300
           metrics = [["Playoffe/${var.environment}", "SocialPostErrors"]]
-          view   = "singleValue"
+          view    = "singleValue"
         }
       }
     ]

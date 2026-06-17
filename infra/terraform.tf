@@ -8,17 +8,14 @@ terraform {
     }
   }
 
-  # Remote state — choose ONE backend and uncomment it.
-  #
-  # Option A: Terraform Cloud (free, recommended for small teams)
-  # cloud {
-  #   organization = "playoffe"
-  #   workspaces {
-  #     tags = ["playoffe"]
-  #   }
-  # }
-  #
-  # Option B: S3 + DynamoDB (self-hosted)
+  cloud {
+    organization = "playoffe"
+    workspaces {
+      tags = ["playoffe"]
+    }
+  }
+
+  # Option B (not used): S3 + DynamoDB self-hosted backend
   # backend "s3" {
   #   bucket         = "playoffe-terraform-state"
   #   key            = "playoffe/${var.environment}/terraform.tfstate"

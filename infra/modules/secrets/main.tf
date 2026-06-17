@@ -13,20 +13,22 @@ locals {
   prefix = "/playoffe/${var.environment}"
 
   # The 13 application secrets (REDIS_URL handled separately in main.tf for prod)
+  # Social media secrets are optional — use "not-configured" placeholder when empty
+  # so SSM (which rejects empty strings) always gets a valid value.
   secrets = {
     NEXT_PUBLIC_SUPABASE_URL       = var.supabase_url
     NEXT_PUBLIC_SUPABASE_ANON_KEY  = var.supabase_anon_key
     SUPABASE_SERVICE_ROLE_KEY      = var.supabase_service_role_key
     SUPABASE_DB_PASSWORD           = var.supabase_db_password
     ANTHROPIC_API_KEY              = var.anthropic_api_key
-    INSTAGRAM_APP_ID               = var.instagram_app_id
-    INSTAGRAM_APP_SECRET           = var.instagram_app_secret
-    FACEBOOK_APP_ID                = var.facebook_app_id
-    FACEBOOK_APP_SECRET            = var.facebook_app_secret
-    X_API_KEY                      = var.x_api_key
-    X_API_SECRET                   = var.x_api_secret
-    X_ACCESS_TOKEN                 = var.x_access_token
-    X_ACCESS_TOKEN_SECRET          = var.x_access_token_secret
+    INSTAGRAM_APP_ID               = var.instagram_app_id     != "" ? var.instagram_app_id     : "not-configured"
+    INSTAGRAM_APP_SECRET           = var.instagram_app_secret != "" ? var.instagram_app_secret : "not-configured"
+    FACEBOOK_APP_ID                = var.facebook_app_id      != "" ? var.facebook_app_id      : "not-configured"
+    FACEBOOK_APP_SECRET            = var.facebook_app_secret  != "" ? var.facebook_app_secret  : "not-configured"
+    X_API_KEY                      = var.x_api_key            != "" ? var.x_api_key            : "not-configured"
+    X_API_SECRET                   = var.x_api_secret         != "" ? var.x_api_secret         : "not-configured"
+    X_ACCESS_TOKEN                 = var.x_access_token       != "" ? var.x_access_token       : "not-configured"
+    X_ACCESS_TOKEN_SECRET          = var.x_access_token_secret != "" ? var.x_access_token_secret : "not-configured"
   }
 
   # Prod also needs REDIS_URL stored (populated after ElastiCache is ready)

@@ -13,8 +13,8 @@ environment = "staging"
 aws_region  = "ap-southeast-1"
 
 # Networking — AWS Console → VPC → Your VPCs / Subnets
-vpc_id     = "vpc-XXXXXXXXXXXXXXXXX"
-subnet_ids = ["subnet-XXXXXXXXXXXXXXXXX", "subnet-XXXXXXXXXXXXXXXXX"]
+vpc_id     = "vpc-0d5f2431218a69a91"
+subnet_ids = ["subnet-05638cabfc3dbfa27", "subnet-0665e522aaa6b9ffb"]
 
 # ECS Workers
 ecs_desired_count = 1
@@ -28,7 +28,7 @@ workers_image_tag = "latest"
 alert_email = "alerts-staging@playoffe.com"
 
 # Supabase Storage CDN origin
-supabase_storage_url = "https://XXXXXXXXXXXXXXXX.supabase.co/storage/v1/object/public/social-graphics"
+supabase_storage_url = "https://iaholpielqlrvktotjpu.supabase.co/storage/v1/object/public/social-graphics"
 
 # ── Sensitive values — export as TF_VAR_* before running terraform apply ──────
 # export TF_VAR_supabase_url="https://XXXXXXXX.supabase.co"

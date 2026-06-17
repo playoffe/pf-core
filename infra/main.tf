@@ -95,10 +95,12 @@ module "cloudwatch" {
   name_prefix = local.name_prefix
   environment = var.environment
 
-  ecs_cluster_name = module.ecs.cluster_name
-  ecs_service_name = module.ecs.service_name
-  redis_cluster_id = local.is_prod ? module.elasticache[0].cluster_id : null
-  alert_email      = var.alert_email
+  ecs_cluster_name   = module.ecs.cluster_name
+  ecs_service_name   = module.ecs.service_name
+  ecs_log_group_name = module.ecs.log_group
+  redis_cluster_id   = local.is_prod ? module.elasticache[0].cluster_id : null
+  alert_email        = var.alert_email
+  aws_region         = var.aws_region
 }
 
 # ── CloudFront: CDN for social-graphics storage bucket ────────────────────────

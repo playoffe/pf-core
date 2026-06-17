@@ -106,7 +106,7 @@ resource "aws_security_group_rule" "ecs_to_redis" {
   protocol                 = "tcp"
   security_group_id        = var.elasticache_sg_id
   source_security_group_id = aws_security_group.ecs_tasks.id
-  description              = "ECS workers → ElastiCache Redis"
+  description              = "ECS workers to ElastiCache Redis"
 }
 
 # ── ECS Cluster ───────────────────────────────────────────────────────────────
