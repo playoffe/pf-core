@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+
+export const dynamic = 'force-dynamic';
 import { getAllPlanLimits, getTournamentPricingTiers } from '@/lib/plans';
 import { LandingNav } from '@/components/marketing/LandingNav';
 import { PricingTabs } from '@/components/marketing/PricingTabs';
