@@ -36,25 +36,6 @@ jobs:
           supabase db push --linked
           echo "✓ Migrations applied to staging"
 
-      - uses: pnpm/action-setup@v3
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Install dependencies for seed script
-        run: pnpm install --frozen-lockfile --filter @pickleball/web
-
-      - name: Seed superadmin
-        env:
-          SUPABASE_URL: https://iaholpielqlrvktotjpu.supabase.co
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
-          SUPERADMIN_PASSWORD: ${{ secrets.STAGING_SUPERADMIN_PASSWORD }}
-        run: node scripts/seed-superadmin.mjs
-
   # ── 2. Build Docker image and push to ECR ────────────────────────────────────
   build-and-push:
     name: Build & Push Workers Image
