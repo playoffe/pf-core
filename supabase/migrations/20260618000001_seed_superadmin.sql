@@ -31,6 +31,21 @@ begin
     where id = v_user_id;
   end if;
 
+  -- Identity record required for email/password login
+  insert into auth.identities (
+    id, user_id, identity_data, provider, provider_id, created_at, updated_at
+  )
+  values (
+    gen_random_uuid(),
+    v_user_id,
+    jsonb_build_object('sub', v_user_id::text, 'email', 'admin@playoffe.com'),
+    'email',
+    v_user_id::text,
+    now(),
+    now()
+  )
+  on conflict (provider, provider_id) do nothing;
+
   -- Upsert into players (profile table)
   insert into players (id, email, username, full_name, gender, role)
   values (v_user_id, 'admin@playoffe.com', 'admin', 'Admin', 'male', 'admin')
