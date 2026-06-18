@@ -2,7 +2,7 @@
 # Multi-stage build: install → build → production image
 
 FROM node:20-slim AS base
-RUN corepack enable pnpm
+RUN corepack enable && corepack prepare pnpm@10.12.1 --activate
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 FROM base AS deps
@@ -12,19 +12,21 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY workers/package.json ./workers/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/db/package.json ./packages/db/
+COPY packages/rating/package.json ./packages/rating/
 
-# Install only what the workers package needs
-RUN pnpm install --frozen-lockfile --filter @pickleball/workers... --ignore-scripts
+# Install all workspace deps (devDeps included — tsc needed for build)
+RUN pnpm install --frozen-lockfile
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 FROM base AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/workers/node_modules ./workers/node_modules
 COPY workers/ ./workers/
 COPY packages/ ./packages/
 COPY tsconfig.base.json ./
+# Restore node_modules after source copy (source copy would overwrite them)
+COPY --from=deps /app/workers/node_modules ./workers/node_modules
 
 WORKDIR /app/workers
 RUN pnpm build
@@ -40,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app/workers
 
 COPY --from=builder /app/workers/dist ./dist
+COPY --from=builder /app/node_modules /app/node_modules
 COPY --from=builder /app/workers/node_modules ./node_modules
 COPY --from=builder /app/workers/package.json ./package.json
 
