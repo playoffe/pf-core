@@ -21,23 +21,121 @@ import type { GraphicJobData, PostJobData } from '../queue.js';
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
-// Existing seeded test players (from local Supabase seed data)
+// Fixed UUIDs in a test-only namespace — avoids collisions with real data
 const PLAYERS = {
-  sam:    { id: '3bffe714-a2fc-4838-87fe-87464d38aa7b', name: 'Sam Chen' },
-  alex:   { id: 'cfba91e0-d71c-4dd9-a358-d502995a8c5e', name: 'Alex Rivera' },
+  sam:  { id: 'f0000001-0000-0000-0000-000000000001', name: 'Sam Chen' },
+  alex: { id: 'f0000001-0000-0000-0000-000000000002', name: 'Alex Rivera' },
 };
 
-// Completed match in the seed data
 const MATCH = {
-  matchId:      'ff000003-0000-0000-0000-000000000001',
-  tournamentId: 'cc000002-0000-0000-0000-000000000002',
-  categoryId:   'dd000003-0000-0000-0000-000000000003',
-  winnerEntryId: 'ee000003-0000-0000-0000-000000000001', // Sam Chen
+  matchId:       'f0000001-0000-0000-0000-000000000010',
+  tournamentId:  'f0000001-0000-0000-0000-000000000020',
+  categoryId:    'f0000001-0000-0000-0000-000000000030',
+  winnerEntryId: 'f0000001-0000-0000-0000-000000000040',
   winnerId:      PLAYERS.sam.id,
 };
 
+const STUB_CLUB_ID = 'f0000001-0000-0000-0000-000000000050';
+
 // IDs of rows created by the test (cleaned up after)
 const testLogIds: string[] = [];
+
+// ─── Test player setup / teardown ────────────────────────────────────────────
+
+async function setupTestPlayers() {
+  for (const player of Object.values(PLAYERS)) {
+    const testEmail = `${player.id}@test.playoffe.internal`;
+
+    // Create auth user (idempotent — look up existing on duplicate)
+    const { data, error } = await supabase.auth.admin.createUser({
+      email: testEmail,
+      password: 'test-password-stub',
+      email_confirm: true,
+      user_metadata: { full_name: player.name },
+    });
+
+    let userId: string;
+    if (error) {
+      if (!error.message.includes('already been registered')) {
+        throw new Error(`setupTestPlayers createUser failed: ${error.message}`);
+      }
+      // User exists from a prior run — look up their real UUID
+      const { data: list } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+      const existing = list?.users.find(u => u.email === testEmail);
+      if (!existing) throw new Error(`setupTestPlayers: could not find existing user ${testEmail}`);
+      userId = existing.id;
+    } else {
+      userId = data.user.id;
+    }
+
+    // Upsert into players table using the auth user's id
+    const { error: pErr } = await supabase.from('players').upsert({
+      id:        userId,
+      email:     testEmail,
+      username:  `test-${userId.slice(0, 8)}`,
+      full_name: player.name,
+      gender:    'male',
+      role:      'player',
+    }, { onConflict: 'id' });
+    if (pErr) throw new Error(`setupTestPlayers players upsert failed: ${pErr.message}`);
+
+    // Upsert player_profiles row
+    const { error: ppErr } = await supabase.from('player_profiles').upsert({
+      player_id: userId,
+      social_post_prefs: {},
+    }, { onConflict: 'player_id' });
+    if (ppErr) throw new Error(`setupTestPlayers player_profiles upsert failed: ${ppErr.message}`);
+
+    // Update in-memory id to match the auth user id (in case it differs)
+    player.id = userId;
+  }
+  // Keep MATCH.winnerId in sync
+  MATCH.winnerId = PLAYERS.sam.id;
+}
+
+async function teardownTestPlayers() {
+  for (const player of Object.values(PLAYERS)) {
+    await supabase.from('players').delete().eq('id', player.id);
+    const { data } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+    const user = data.users.find(u => u.email === `${player.id}@test.playoffe.internal`);
+    if (user) await supabase.auth.admin.deleteUser(user.id);
+  }
+}
+
+// ─── Test tournament/club setup ───────────────────────────────────────────────
+// social_post_log.tournament_id has a FK to tournaments(id), so we need a real
+// tournament row with our test UUID or the insert fails silently.
+
+async function setupTestData() {
+  const { error: clubErr } = await supabase
+    .from('clubs')
+    .upsert({
+      id:                STUB_CLUB_ID,
+      name:              'Test Club (stub)',
+      slug:              'test-club-stub-e2e',
+      subscription_tier: 'free',
+    }, { onConflict: 'id' });
+  if (clubErr) throw new Error(`setupTestData club failed: ${clubErr.message}`);
+
+  const { error: tErr } = await supabase
+    .from('tournaments')
+    .upsert({
+      id:           MATCH.tournamentId,
+      club_id:      STUB_CLUB_ID,
+      name:         'Test Tournament (stub)',
+      start_date:   '2026-01-01',
+      end_date:     '2026-01-02',
+      display_code: 'STUBTEST',
+      status:       'draft',
+      created_by:   PLAYERS.sam.id,
+    }, { onConflict: 'id' });
+  if (tErr) throw new Error(`setupTestData tournament failed: ${tErr.message}`);
+}
+
+async function teardownTestData() {
+  await supabase.from('tournaments').delete().eq('id', MATCH.tournamentId);
+  await supabase.from('clubs').delete().eq('id', STUB_CLUB_ID);
+}
 
 // ─── Platform API stubs ───────────────────────────────────────────────────────
 
@@ -611,6 +709,12 @@ async function main() {
   }
   console.log('  ✓ Supabase connected\n');
 
+  // Create test players (idempotent — safe to re-run)
+  await setupTestPlayers();
+  console.log('  ✓ Test players ready');
+  await setupTestData();
+  console.log('  ✓ Test tournament/club ready\n');
+
   try {
     console.log('── Skip / pause scenarios ──────────────────────────────────');
     await run('S1: Global pause ON → skip', scenario1_GlobalPause);
@@ -634,10 +738,11 @@ async function main() {
     // ── Cleanup ──────────────────────────────────────────────────────────────
     console.log('\n── Cleanup ─────────────────────────────────────────────────');
     await cleanupPostLog(testLogIds);
-    await resetSocialPrefs(PLAYERS.sam.id);
     await removeConnection(PLAYERS.sam.id, 'instagram');
     await removeConnection(PLAYERS.sam.id, 'facebook');
     await removeConnection(PLAYERS.sam.id, 'x');
+    await teardownTestData();
+    await teardownTestPlayers();
     removeFetchStubs();
     console.log(`  Cleaned up ${testLogIds.length} post_log row(s)\n`);
   }
