@@ -5,7 +5,6 @@ export interface ClubContext {
   mostCommonFormat: string;
   mostCommonScoring: string;
   mostCommonCategories: string;
-  registeredPlayers: Array<{ name: string; rating: number }>;
   todayDate: string;
   existingTournamentNames: string[];
 }
@@ -36,11 +35,6 @@ Most common scoring rules used by this club:
 Most common categories run by this club:
 {{MOST_COMMON_CATEGORIES}}
 
-Currently registered players for this tournament (name + skill rating):
-{{REGISTERED_PLAYERS}}
-
-Total registered players: {{TOTAL_PLAYERS}}
-
 Today's date: {{TODAY_DATE}}
 
 Existing tournament names for this club (names already taken — do not allow duplicates):
@@ -55,8 +49,8 @@ Work through these steps in order. Complete one step per turn. Do not combine mu
 
 STEP 1 — TOURNAMENT NAME
 Ask: "What would you like to name this tournament?"
-- If the organizer gives a name, check it against EXISTING_TOURNAMENT_NAMES (case-insensitive).
-  - If the name is already taken, do NOT accept it. Say: "There's already a tournament called [name] for this club. How about [suggested alternative]?"
+- If the organizer gives a name, check it against EXISTING_TOURNAMENT_NAMES using exact match only (case-insensitive). Partial matches or similar names are fine.
+  - If the name is an exact match (ignoring case), do NOT accept it. Say: "There's already a tournament called [name] for this club. How about [suggested alternative]?"
   - Suggest alternatives in this priority order:
     1. Append the year if not already present: "[Name] 2026"
     2. Append the month: "[Name] June 2026"
@@ -138,7 +132,22 @@ Ask: "Anything else I should know? For example — any timing constraints, speci
 - If they provide notes, acknowledge them and store as free text: "Got it — I'll pass those to the scheduler."
 - Common things organizers add here: "Finals must be on Court 1", "Nothing before 9am", "Leave a lunch break at 1pm".
 
-STEP 10 — CONFIRMATION
+STEP 10 — PLAYER REGISTRATION UPLOAD
+Ask: "Would you like to upload the players registered for this tournament so far? You can always add them later from the tournament page."
+- This step is optional. If they say no or want to skip: move directly to Step 11.
+- If yes: present the confirmed categories as a numbered list, with a final "Skip — add players later" option. Example:
+    1. Men's Doubles
+    2. Women's Doubles
+    3. Mixed Doubles
+    4. Skip — add players later
+  Wait for the organizer to pick a number.
+- When they pick a category number: tell them to upload the CSV using the upload button that will appear below. Say: "Go ahead and upload the CSV for [Category Name]. The file should have columns: Name, Email (optional)."
+- After the upload is confirmed (the UI will confirm it): acknowledge it ("Players for [Category] uploaded.") and show the list again for remaining categories, with already-uploaded ones marked (✓).
+- Repeat until all desired categories are done or the organizer picks "Skip".
+- Once done: move to Step 11.
+- Store uploaded categories in config-state as player_uploads: [{category, count}].
+
+STEP 11 — CONFIRMATION
 Present the full tournament summary and ask for confirmation.
 
 Format the summary exactly like this:
@@ -208,7 +217,7 @@ TONE AND STYLE RULES
 OUTPUT FORMAT (Step 10 confirmation only)
 ==========================================================
 
-When the organizer confirms the summary in Step 10, output the following JSON block and nothing else after it:
+When the organizer confirms the summary in Step 11, output the following JSON block and nothing else after it:
 
 \`\`\`json
 {
@@ -257,7 +266,7 @@ CONFIG STATE (output on EVERY response)
 At the very end of EVERY response (including this one), append a config state block. This is parsed by the application and never shown to the user. Use exactly this format:
 
 \`\`\`config-state
-{"step":[current step number 1-10],"name":[confirmed name or null],"start_date":[confirmed YYYY-MM-DD or null],"end_date":[confirmed YYYY-MM-DD or null],"venue":[confirmed venue or null],"courts":[confirmed number or null],"categories":[confirmed array or null],"notes":[confirmed notes or null]}
+{"step":[current step number 1-11],"name":[confirmed name or null],"start_date":[confirmed YYYY-MM-DD or null],"end_date":[confirmed YYYY-MM-DD or null],"venue":[confirmed venue or null],"courts":[confirmed number or null],"categories":[confirmed array or null],"notes":[confirmed notes or null],"player_uploads":[array of {category,count} or null]}
 \`\`\`
 
 Rules for config-state:
@@ -274,7 +283,7 @@ WHAT YOU MUST NEVER DO
 ==========================================================
 
 - Never skip a required field (name, date, venue, courts, categories, player counts, formats, scoring).
-- Never output the TOURNAMENT_CONFIG JSON before Step 10 confirmation.
+- Never output the TOURNAMENT_CONFIG JSON before Step 11 confirmation.
 - Never output partial or malformed JSON.
 - Never combine two wizard steps into one message.
 - Never re-ask a question the organizer has already answered (unless they ask to change it).
@@ -283,11 +292,6 @@ WHAT YOU MUST NEVER DO
 `;
 
 export function buildSystemPrompt(ctx: ClubContext): string {
-  const playerList =
-    ctx.registeredPlayers.length > 0
-      ? ctx.registeredPlayers.map((p) => `${p.name} (rating: ${p.rating.toFixed(1)})`).join('\n')
-      : 'No players registered yet for this tournament.';
-
   return SYSTEM_PROMPT_TEMPLATE
     .replaceAll('{{CLUB_NAME}}', ctx.clubName)
     .replaceAll('{{CLUB_ID}}', ctx.clubId)
@@ -295,8 +299,6 @@ export function buildSystemPrompt(ctx: ClubContext): string {
     .replace('{{MOST_COMMON_FORMAT}}', ctx.mostCommonFormat || 'None yet')
     .replace('{{MOST_COMMON_SCORING}}', ctx.mostCommonScoring || 'None yet')
     .replace('{{MOST_COMMON_CATEGORIES}}', ctx.mostCommonCategories || 'None yet')
-    .replace('{{REGISTERED_PLAYERS}}', playerList)
-    .replace('{{TOTAL_PLAYERS}}', String(ctx.registeredPlayers.length))
     .replaceAll('{{TODAY_DATE}}', ctx.todayDate)
     .replace('{{EXISTING_TOURNAMENT_NAMES}}', ctx.existingTournamentNames.length > 0 ? ctx.existingTournamentNames.join('\n') : 'None yet');
 }

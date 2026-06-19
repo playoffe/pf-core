@@ -8,6 +8,7 @@ import type { WizardMessage, WizardPartialConfig } from '@/app/api/wizard/turn/r
 interface Props {
   clubId: string;
   clubName: string;
+  existingTournamentNames: string[];
 }
 
 // ── Quick-reply chip definitions per step ─────────────────────────────────────
@@ -104,10 +105,59 @@ function getChips(step: number): string[] {
     case 9:
       return ['Skip — no additional notes'];
     case 10:
+      return ['Yes, let\'s upload players', 'No, skip for now'];
+    case 11:
       return ['Looks good — create it!'];
     default:
       return [];
   }
+}
+
+// ── CSV upload button for step 10 ────────────────────────────────────────────
+
+function CsvUploadButton({ onParsed }: { onParsed: (players: Array<{ name: string; email?: string }>, count: number) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const rows = text.split(/\r?\n/).filter((r) => r.trim());
+      const players: Array<{ name: string; email?: string }> = [];
+      for (const row of rows) {
+        const cols = row.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+        const name = cols[0];
+        const email = cols[1];
+        if (name && name.toLowerCase() !== 'name') {
+          players.push({ name, ...(email ? { email } : {}) });
+        }
+      }
+      onParsed(players, players.length);
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleFile(file);
+          e.target.value = '';
+        }}
+      />
+      <button
+        onClick={() => inputRef.current?.click()}
+        className="rounded-lg border border-teal-600 bg-teal-950/40 px-3 py-1.5 text-xs font-semibold text-teal-300 hover:bg-teal-900/50 active:scale-95 transition-all"
+      >
+        Upload CSV
+      </button>
+    </>
+  );
 }
 
 // ── Date range picker for step 2 ─────────────────────────────────────────────
@@ -198,9 +248,10 @@ const DEFAULT_PARTIAL_CONFIG: WizardPartialConfig = {
   courts: null,
   categories: null,
   notes: null,
+  player_uploads: null,
 };
 
-export function WizardChat({ clubId, clubName }: Props) {
+export function WizardChat({ clubId, clubName, existingTournamentNames }: Props) {
   const router = useRouter();
   const [messages, setMessages] = useState<WizardMessage[]>([]);
   const [displayMessages, setDisplayMessages] = useState<
@@ -279,6 +330,7 @@ export function WizardChat({ clubId, clubName }: Props) {
             courts: next.courts ?? prev.courts,
             categories: next.categories ?? prev.categories,
             notes: next.notes ?? prev.notes,
+            player_uploads: next.player_uploads ?? prev.player_uploads,
           };
         });
 
@@ -325,6 +377,13 @@ export function WizardChat({ clubId, clubName }: Props) {
       ? [...new Set([...claudeSuggestedCategories, ...getCategoryChips(partialConfig.name, displayMessages)])]
       : getChips(partialConfig.step);
 
+  // Permanent blocklist: club name + all existing tournament names (exact, case-insensitive)
+  const blockedNames = new Set(
+    [clubName, ...existingTournamentNames].map((s) => s.toLowerCase()),
+  );
+
+  const isBlockedChip = (s: string) => blockedNames.has(s.toLowerCase());
+
   // Extract quoted/bold suggestions for all other steps
   const quotedSuggestions: string[] = lastAssistantMsg
     ? [
@@ -335,7 +394,9 @@ export function WizardChat({ clubId, clubName }: Props) {
           .filter((line) => !/^(got it|confirmed|perfect|locked|✓|done —)/i.test(line.trim()) && /\*\*/.test(line))
           .flatMap((line) => [...line.matchAll(/\*\*([^*]{3,60})\*\*/g)].map((m) => m[1] ?? ''))
           .filter((s) => !s.endsWith('?') && !/^(what|where|when|how|who|is it|are|do you|does|shall|would|can|could)\b/i.test(s)),
-      ].filter(Boolean)
+      ]
+      .filter(Boolean)
+      .filter((s) => !isBlockedChip(s))
     : [];
 
   // Detect confirmation questions (including "are you running the same ones?")
@@ -344,14 +405,14 @@ export function WizardChat({ clubId, clubName }: Props) {
         .test(lastAssistantMsg.content)
     : false;
 
-  const confirmationChips = isConfirmationQuestion ? ["Yes, that's right", 'No, let me change it'] : [];
+  // Confirmation questions show only Yes/No — no other chips
+  const baseChips = isConfirmationQuestion
+    ? ["Yes, that's right", 'No, let me change it']
+    : stepChips.length > 0
+      ? stepChips
+      : quotedSuggestions.filter((s) => !s.includes('\n'));
 
-  // Merge: step chips take priority; quoted suggestions fill in when no step chips exist; confirmation chips always appended
-  const baseChips = stepChips.length > 0
-    ? stepChips
-    : quotedSuggestions.filter((s) => !s.includes('\n'));
-
-  const chips = [...new Set([...baseChips, ...confirmationChips])];
+  const chips = [...new Set(baseChips)];
 
   return (
     <div className="flex h-full min-h-0">
@@ -420,6 +481,14 @@ export function WizardChat({ clubId, clubName }: Props) {
               ))}
               {partialConfig.step === 2 && (
                 <DateRangePicker onSelect={(msg) => void sendMessage(msg)} />
+              )}
+              {partialConfig.step === 10 && (
+                <CsvUploadButton
+                  onParsed={(players, count) => {
+                    // Send a message confirming the upload so Claude can acknowledge and continue
+                    void sendMessage(`CSV uploaded: ${count} player${count !== 1 ? 's' : ''} parsed and ready to import.`);
+                  }}
+                />
               )}
             </div>
           </div>

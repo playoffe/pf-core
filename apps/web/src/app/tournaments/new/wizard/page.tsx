@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { getCurrentUser } from '@/lib/supabase/server';
+import { getCurrentUser, createAdminClient } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { WizardChat } from '@/components/tournaments/WizardChat';
 import { getMyClubs } from '@/lib/actions/clubs';
@@ -30,6 +30,13 @@ export default async function WizardPage({ searchParams }: Props) {
   const clubs = await getMyClubs();
   const club = clubs.find((c) => c.id === clubId);
   if (!club) redirect('/tournaments/new');
+
+  const admin = createAdminClient();
+  const { data: existingTournaments } = await admin
+    .from('tournaments')
+    .select('name')
+    .eq('club_id', clubId);
+  const existingNames = (existingTournaments ?? []).map((t) => (t as { name: string }).name);
 
   return (
     <div className="h-screen bg-surface flex flex-col overflow-hidden">
@@ -60,6 +67,7 @@ export default async function WizardPage({ searchParams }: Props) {
         <WizardChat
           clubId={clubId}
           clubName={typeof club.name === 'string' ? club.name : 'your club'}
+          existingTournamentNames={existingNames}
         />
       </div>
     </div>

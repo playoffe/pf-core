@@ -25,6 +25,7 @@ export interface WizardPartialConfig {
     scoring: { points_per_set: number; sets_per_match: number; deuce_rule: boolean };
   }> | null;
   notes: string | null;
+  player_uploads: Array<{ category: string; count: number }> | null;
 }
 
 export interface WizardTournamentConfig {
@@ -79,6 +80,7 @@ function extractConfigState(text: string): { clean: string; config: WizardPartia
       courts: (raw.courts as number | null) ?? null,
       categories: (raw.categories as WizardPartialConfig['categories']) ?? null,
       notes: (raw.notes as string | null) ?? null,
+      player_uploads: (raw.player_uploads as WizardPartialConfig['player_uploads']) ?? null,
     };
     return { clean, config };
   } catch {
@@ -205,31 +207,6 @@ async function fetchClubContext(clubId: string): Promise<ClubContext> {
     .map(([name]) => name);
   const mostCommonCategories = topCats.length > 0 ? topCats.join(', ') : '';
 
-  // Players who have competed at this club recently
-  const recentIds = past.slice(0, 3).map((t) => (t as { id: string }).id);
-  const { data: entryData } = recentIds.length > 0
-    ? await admin
-        .from('tournament_entries')
-        .select('player_id, players!player_id(full_name, global_stats(current_rating))')
-        .in('tournament_id', recentIds)
-        .eq('status', 'active')
-        .limit(50)
-    : { data: [] };
-
-  const playersSeen = new Map<string, { name: string; rating: number }>();
-  for (const entry of entryData ?? []) {
-    const e = entry as unknown as {
-      player_id: string;
-      players: { full_name: string; global_stats: Array<{ current_rating: number }> } | null;
-    };
-    if (!e.player_id || !e.players) continue;
-    const stats = e.players.global_stats;
-    const rating = Array.isArray(stats) ? (stats[0]?.current_rating ?? 3.0) : ((stats as { current_rating?: number } | null)?.current_rating ?? 3.0);
-    playersSeen.set(e.player_id, { name: e.players.full_name, rating });
-  }
-
-  const registeredPlayers = [...playersSeen.values()].sort((a, b) => b.rating - a.rating);
-
   return {
     clubName,
     clubId,
@@ -237,7 +214,6 @@ async function fetchClubContext(clubId: string): Promise<ClubContext> {
     mostCommonFormat,
     mostCommonScoring,
     mostCommonCategories,
-    registeredPlayers,
     todayDate: new Date().toLocaleDateString('en-GB', {
       weekday: 'long',
       year: 'numeric',
@@ -447,6 +423,7 @@ export async function POST(req: NextRequest) {
       courts: null,
       categories: null,
       notes: null,
+      player_uploads: null,
     };
 
     return NextResponse.json({
