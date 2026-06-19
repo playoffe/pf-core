@@ -21,23 +21,70 @@ import type { GraphicJobData, PostJobData } from '../queue.js';
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
-// Existing seeded test players (from local Supabase seed data)
+// Fixed UUIDs in a test-only namespace — avoids collisions with real data
 const PLAYERS = {
-  sam:    { id: '3bffe714-a2fc-4838-87fe-87464d38aa7b', name: 'Sam Chen' },
-  alex:   { id: 'cfba91e0-d71c-4dd9-a358-d502995a8c5e', name: 'Alex Rivera' },
+  sam:  { id: 'test0001-0000-0000-0000-000000000001', name: 'Sam Chen' },
+  alex: { id: 'test0001-0000-0000-0000-000000000002', name: 'Alex Rivera' },
 };
 
-// Completed match in the seed data
 const MATCH = {
-  matchId:      'ff000003-0000-0000-0000-000000000001',
-  tournamentId: 'cc000002-0000-0000-0000-000000000002',
-  categoryId:   'dd000003-0000-0000-0000-000000000003',
-  winnerEntryId: 'ee000003-0000-0000-0000-000000000001', // Sam Chen
+  matchId:       'test0001-0000-0000-0000-000000000010',
+  tournamentId:  'test0001-0000-0000-0000-000000000020',
+  categoryId:    'test0001-0000-0000-0000-000000000030',
+  winnerEntryId: 'test0001-0000-0000-0000-000000000040',
   winnerId:      PLAYERS.sam.id,
 };
 
 // IDs of rows created by the test (cleaned up after)
 const testLogIds: string[] = [];
+
+// ─── Test player setup / teardown ────────────────────────────────────────────
+
+async function setupTestPlayers() {
+  for (const player of Object.values(PLAYERS)) {
+    // Create auth user
+    const { data, error } = await supabase.auth.admin.createUser({
+      email: `${player.id}@test.playoffe.internal`,
+      password: 'test-password-stub',
+      email_confirm: true,
+      user_metadata: { full_name: player.name },
+    });
+    if (error && !error.message.includes('already been registered')) {
+      throw new Error(`setupTestPlayers createUser failed: ${error.message}`);
+    }
+    const userId = data?.user?.id ?? player.id;
+
+    // Upsert into players table using the auth user's id
+    await supabase.from('players').upsert({
+      id:        userId,
+      email:     `${player.id}@test.playoffe.internal`,
+      username:  `test-${player.id.slice(0, 8)}`,
+      full_name: player.name,
+      gender:    'male',
+      role:      'player',
+    }, { onConflict: 'id' });
+
+    // Upsert player_profiles row
+    await supabase.from('player_profiles').upsert({
+      player_id: userId,
+      social_post_prefs: {},
+    }, { onConflict: 'player_id' });
+
+    // Update in-memory id to match the auth user id (in case it differs)
+    player.id = userId;
+  }
+  // Keep MATCH.winnerId in sync
+  MATCH.winnerId = PLAYERS.sam.id;
+}
+
+async function teardownTestPlayers() {
+  for (const player of Object.values(PLAYERS)) {
+    await supabase.from('players').delete().eq('id', player.id);
+    const { data } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+    const user = data.users.find(u => u.email === `${player.id}@test.playoffe.internal`);
+    if (user) await supabase.auth.admin.deleteUser(user.id);
+  }
+}
 
 // ─── Platform API stubs ───────────────────────────────────────────────────────
 
@@ -611,6 +658,10 @@ async function main() {
   }
   console.log('  ✓ Supabase connected\n');
 
+  // Create test players (idempotent — safe to re-run)
+  await setupTestPlayers();
+  console.log('  ✓ Test players ready\n');
+
   try {
     console.log('── Skip / pause scenarios ──────────────────────────────────');
     await run('S1: Global pause ON → skip', scenario1_GlobalPause);
@@ -634,10 +685,10 @@ async function main() {
     // ── Cleanup ──────────────────────────────────────────────────────────────
     console.log('\n── Cleanup ─────────────────────────────────────────────────');
     await cleanupPostLog(testLogIds);
-    await resetSocialPrefs(PLAYERS.sam.id);
     await removeConnection(PLAYERS.sam.id, 'instagram');
     await removeConnection(PLAYERS.sam.id, 'facebook');
     await removeConnection(PLAYERS.sam.id, 'x');
+    await teardownTestPlayers();
     removeFetchStubs();
     console.log(`  Cleaned up ${testLogIds.length} post_log row(s)\n`);
   }
