@@ -306,13 +306,26 @@ export function WizardChat({ clubId, clubName }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const stepChips = partialConfig.step === 5
-    ? getCategoryChips(partialConfig.name, displayMessages)
-    : getChips(partialConfig.step);
-
-  // Extract inline suggestions from the latest assistant message:
-  // catches "quoted text" and **bold text** that look like clickable options
   const lastAssistantMsg = [...displayMessages].reverse().find((m) => m.role === 'assistant');
+
+  // For step 5: pull category names Claude actually mentioned (handles long comma-separated bold lists)
+  const claudeSuggestedCategories: string[] =
+    partialConfig.step === 5 && lastAssistantMsg
+      ? lastAssistantMsg.content
+          .split('\n')
+          .filter((line) => /\*\*/.test(line) && !/^(got it|confirmed|perfect|locked|✓)/i.test(line.trim()))
+          .flatMap((line) => [...line.matchAll(/\*\*([^*]+)\*\*/g)].map((m) => m[1] ?? ''))
+          .flatMap((s) => (s.includes(',') ? s.split(/,\s*(?:and\s+)?/) : [s]))
+          .map((s) => s.trim())
+          .filter((s) => s.length >= 3 && s.length <= 60 && !s.endsWith('?'))
+      : [];
+
+  const stepChips =
+    partialConfig.step === 5
+      ? [...new Set([...claudeSuggestedCategories, ...getCategoryChips(partialConfig.name, displayMessages)])]
+      : getChips(partialConfig.step);
+
+  // Extract quoted/bold suggestions for all other steps
   const quotedSuggestions: string[] = lastAssistantMsg
     ? [
         ...[...lastAssistantMsg.content.matchAll(/[""]([^"""]{3,60})[""]|"([^"]{3,60})"/g)]
@@ -325,13 +338,13 @@ export function WizardChat({ clubId, clubName }: Props) {
       ].filter(Boolean)
     : [];
 
-  // Detect confirmation questions and inject Yes / No chips
+  // Detect confirmation questions (including "are you running the same ones?")
   const isConfirmationQuestion = lastAssistantMsg
-    ? /is that right\??|does that (look|sound) (right|correct)\??|sound(s)? good\??|correct\??|shall we (go|move|proceed)\??|want to (change|adjust|update)\??/i
+    ? /is that right\??|does that (look|sound) (right|correct)\??|sound(s)? good\??|correct\??|shall we (go|move|proceed)\??|want to (change|adjust|update)\??|are you running the same\??|same (ones|categories|format)\??/i
         .test(lastAssistantMsg.content)
     : false;
 
-  const confirmationChips = isConfirmationQuestion ? ['Yes, that\'s right', 'No, let me change it'] : [];
+  const confirmationChips = isConfirmationQuestion ? ["Yes, that's right", 'No, let me change it'] : [];
 
   // Merge: step chips take priority; quoted suggestions fill in when no step chips exist; confirmation chips always appended
   const baseChips = stepChips.length > 0
