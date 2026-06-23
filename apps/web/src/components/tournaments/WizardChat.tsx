@@ -95,13 +95,8 @@ function getChips(step: number): string[] {
       return ['Suggest a split based on ratings', "I'll enter the counts manually"];
     case 7:
       return ['Round Robin', 'Single Elimination', 'Group Stage + Knockout', 'Swiss'];
-    case 8:
-      return [
-        'Standard (11 pts, best of 3)',
-        '11 pts, best of 1',
-        '15 pts, best of 3',
-        '21 pts, best of 1',
-      ];
+    // Step 8 (scoring) is multi-part (type, points/sets, golden point vs deuce, optional cap) —
+    // chips come from Claude's suggested_replies field instead of a fixed list here.
     case 9:
       return ['Skip — no additional notes'];
     case 10:
@@ -333,6 +328,7 @@ const DEFAULT_PARTIAL_CONFIG: WizardPartialConfig = {
   notes: null,
   player_uploads: null,
   suggested_replies: null,
+  suggested_categories: null,
 };
 
 export function WizardChat({ clubId, clubName, existingTournamentNames }: Props) {
@@ -417,6 +413,7 @@ export function WizardChat({ clubId, clubName, existingTournamentNames }: Props)
             player_uploads: next.player_uploads ?? prev.player_uploads,
             // Not merged with prev — these are per-turn and should not linger from an old step
             suggested_replies: next.suggested_replies,
+            suggested_categories: next.suggested_categories,
           };
         });
 
@@ -477,18 +474,12 @@ export function WizardChat({ clubId, clubName, existingTournamentNames }: Props)
       ? [...new Set([...claudeSuggestedCategories, ...claudeReplies, ...getCategoryChips(partialConfig.name, displayMessages)])]
       : getChips(partialConfig.step);
 
-  // Step 5: when Claude lists categories as a "- " bullet list (e.g. "Last time you ran
-  // these: ... Are you running the same ones?"), show checkboxes instead of plain Yes/No so
-  // the organizer can toggle individual categories without typing.
-  const categoryBulletItems: string[] =
-    partialConfig.step === 5 && lastAssistantMsg
-      ? lastAssistantMsg.content
-          .split('\n')
-          .map((line) => line.trim())
-          .filter((line) => line.startsWith('- '))
-          .map((line) => line.slice(2).trim())
-          .filter((s) => s.length >= 3 && s.length <= 80 && !s.endsWith('?'))
-      : [];
+  // Step 5: Claude's own suggested_categories field drives the checkbox list — deterministic,
+  // unlike inferring it from prose formatting (bullets vs. commas), which Claude doesn't
+  // produce consistently turn to turn.
+  const categoryChoices: string[] = (partialConfig.suggested_categories ?? []).filter(
+    (s) => !isBlockedChip(s),
+  );
 
   // Legacy bold-text fallback — only used if Claude hasn't populated suggested_replies (e.g. an
   // older turn before this rolled out). No quote-based extraction: quoted text is often just an
@@ -521,8 +512,7 @@ export function WizardChat({ clubId, clubName, existingTournamentNames }: Props)
 
   const chips = [...new Set(baseChips)];
 
-  const showCategoryChecklist =
-    partialConfig.step === 5 && isConfirmationQuestion && categoryBulletItems.length >= 2;
+  const showCategoryChecklist = partialConfig.step === 5 && categoryChoices.length >= 2;
 
   return (
     <div className="flex h-full min-h-0">
@@ -580,8 +570,8 @@ export function WizardChat({ clubId, clubName, existingTournamentNames }: Props)
               Select categories
             </p>
             <CategoryChecklist
-              key={categoryBulletItems.join('|')}
-              items={categoryBulletItems}
+              key={categoryChoices.join('|')}
+              items={categoryChoices}
               onConfirm={(selected) => void sendMessage(`Running: ${selected.join(', ')}`)}
             />
           </div>

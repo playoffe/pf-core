@@ -62,7 +62,13 @@ function CategoryCard({ cat }: { cat: CategoryConfig }) {
           {cat.scoring?.points_per_set > 0 && (
             <p className="text-xs text-slate-500">
               {cat.scoring.points_per_set} pts · Best of {cat.scoring.sets_per_match}
-              {cat.scoring.deuce_rule ? ' · Deuce on' : ''}
+              {cat.scoring.scoring_format === 'traditional' ? ' · Traditional' : ''}
+              {' · '}
+              {cat.scoring.win_by === 1
+                ? 'Golden point'
+                : cat.scoring.deuce_cap
+                  ? `Deuce → cap ${cat.scoring.deuce_cap}`
+                  : 'Deuce'}
             </p>
           )}
         </div>

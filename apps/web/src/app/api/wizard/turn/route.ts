@@ -22,11 +22,20 @@ export interface WizardPartialConfig {
     format: string;
     draw_format: string;
     player_count: number;
-    scoring: { points_per_set: number; sets_per_match: number; deuce_rule: boolean };
+    scoring: WizardScoring;
   }> | null;
   notes: string | null;
   player_uploads: Array<{ category: string; count: number }> | null;
   suggested_replies: string[] | null;
+  suggested_categories: string[] | null;
+}
+
+export interface WizardScoring {
+  scoring_format: 'rally' | 'traditional';
+  points_per_set: number;
+  sets_per_match: 1 | 3 | 5;
+  win_by: 1 | 2;
+  deuce_cap: number | null;
 }
 
 export interface WizardTournamentConfig {
@@ -42,13 +51,10 @@ export interface WizardTournamentConfig {
     format: string;
     draw_format: string;
     player_count: number;
-    scoring: { points_per_set: number; sets_per_match: number; deuce_rule: boolean };
-    stage_scoring?: Array<{
-      stage: 'group_stage' | 'knockout' | 'semifinal' | 'final';
-      points_per_set: number;
-      sets_per_match: number;
-      deuce_rule: boolean;
-    }>;
+    scoring: WizardScoring;
+    stage_scoring?: Array<
+      Partial<WizardScoring> & { stage: 'group_stage' | 'knockout' | 'semifinal' | 'final' }
+    >;
   }>;
   notes: string | null;
   created_via: string;
@@ -89,9 +95,11 @@ const EMIT_CONFIG_TOOL = {
             scoring: {
               type: 'object',
               properties: {
+                scoring_format: { type: 'string', enum: ['rally', 'traditional'] },
                 points_per_set: { type: 'number' },
                 sets_per_match: { type: 'number' },
-                deuce_rule: { type: 'boolean' },
+                win_by: { type: 'number', enum: [1, 2], description: '1 = golden point, 2 = advantage/deuce' },
+                deuce_cap: { type: ['number', 'null'], description: 'Only meaningful when win_by is 2. Score at which deuce switches to golden point.' },
               },
             },
           },
@@ -113,6 +121,11 @@ const EMIT_CONFIG_TOOL = {
         description: 'Up to 5 short, literal reply options the organizer can tap instead of typing. Only actionable choices — never restate the question, and never include an inline example you mentioned just in passing.',
         items: { type: 'string' },
       },
+      suggested_categories: {
+        type: ['array', 'null'],
+        description: 'Step 5 only: when proposing or re-confirming a set of categories (e.g. suggesting last time\'s categories, or asking "are you running the same ones?"), list every category name here so the organizer can check/uncheck individual ones. Always populate this on every Step 5 turn where you are proposing or re-listing categories, regardless of how you phrase it in your reply text (bullets, commas, etc).',
+        items: { type: 'string' },
+      },
     },
     required: ['step'],
   },
@@ -130,17 +143,18 @@ function normalizeConfig(raw: Record<string, unknown>): WizardPartialConfig {
     categories: (raw.categories as WizardPartialConfig['categories']) ?? null,
     notes: (raw.notes as string | null) ?? null,
     player_uploads: (raw.player_uploads as WizardPartialConfig['player_uploads']) ?? null,
-    suggested_replies: normalizeSuggestedReplies(raw.suggested_replies),
+    suggested_replies: normalizeStringList(raw.suggested_replies, 5, 60),
+    suggested_categories: normalizeStringList(raw.suggested_categories, 12, 80),
   };
 }
 
-function normalizeSuggestedReplies(raw: unknown): string[] | null {
+function normalizeStringList(raw: unknown, maxItems: number, maxLen: number): string[] | null {
   if (!Array.isArray(raw)) return null;
   const cleaned = raw
     .filter((s): s is string => typeof s === 'string')
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s.length <= 60)
-    .slice(0, 5);
+    .filter((s) => s.length > 0 && s.length <= maxLen)
+    .slice(0, maxItems);
   return cleaned.length > 0 ? cleaned : null;
 }
 
@@ -159,9 +173,22 @@ function validatePartialConfig(config: WizardPartialConfig): string[] {
     for (const cat of config.categories) {
       if (!cat.name?.trim()) errors.push('category missing name');
       if (cat.scoring) {
-        const { points_per_set, sets_per_match } = cat.scoring;
-        if (![7, 11, 15, 21].includes(points_per_set)) errors.push(`invalid points_per_set: ${points_per_set}`);
-        if (![1, 3, 5].includes(sets_per_match)) errors.push(`invalid sets_per_match: ${sets_per_match}`);
+        const { scoring_format, points_per_set, sets_per_match, win_by, deuce_cap } = cat.scoring;
+        if (scoring_format && !['rally', 'traditional'].includes(scoring_format)) {
+          errors.push(`invalid scoring_format: ${scoring_format}`);
+        }
+        if (points_per_set != null && (points_per_set < 5 || points_per_set > 100)) {
+          errors.push(`points_per_set out of range: ${points_per_set}`);
+        }
+        if (sets_per_match != null && ![1, 3, 5].includes(sets_per_match)) {
+          errors.push(`invalid sets_per_match: ${sets_per_match}`);
+        }
+        if (win_by != null && ![1, 2].includes(win_by)) {
+          errors.push(`invalid win_by: ${win_by}`);
+        }
+        if (deuce_cap != null && deuce_cap < 5) {
+          errors.push(`deuce_cap too low: ${deuce_cap}`);
+        }
       }
     }
   }
@@ -221,7 +248,7 @@ async function fetchClubContext(clubId: string): Promise<ClubContext> {
     admin.from('clubs').select('name').eq('id', clubId).single(),
     admin
       .from('tournaments')
-      .select('id, venue, num_sets, points_per_set, win_by, tournament_categories(name, draw_format)')
+      .select('id, venue, scoring_format, num_sets, points_per_set, win_by, deuce_cap, tournament_categories(name, draw_format)')
       .eq('club_id', clubId)
       .eq('status', 'completed')
       .order('created_at', { ascending: false })
@@ -268,9 +295,17 @@ async function fetchClubContext(clubId: string): Promise<ClubContext> {
   // Most common scoring
   let mostCommonScoring = '';
   if (past.length > 0) {
-    const t = past[0] as { num_sets?: number | null; points_per_set?: number | null; win_by?: number | null };
+    const t = past[0] as {
+      scoring_format?: string | null;
+      num_sets?: number | null;
+      points_per_set?: number | null;
+      win_by?: number | null;
+      deuce_cap?: number | null;
+    };
     if (t.num_sets && t.points_per_set) {
-      mostCommonScoring = `${t.points_per_set} points per set, best of ${t.num_sets}, deuce rule ${t.win_by === 2 ? 'on' : 'off'}`;
+      const formatLabel = t.scoring_format === 'traditional' ? 'traditional service-point scoring' : 'rally scoring';
+      const endRule = t.win_by === 1 ? 'golden point' : t.deuce_cap ? `deuce, capped at ${t.deuce_cap}` : 'deuce, no cap';
+      mostCommonScoring = `${formatLabel}, ${t.points_per_set} points per set, best of ${t.num_sets}, ${endRule}`;
     }
   }
 
@@ -334,10 +369,11 @@ async function createTournamentFromConfig(
       end_date: config.end_date,
       court_count: config.courts,
       status: 'draft',
-      scoring_format: 'rally',
+      scoring_format: config.categories[0]?.scoring.scoring_format ?? 'rally',
       num_sets: config.categories[0]?.scoring.sets_per_match ?? 3,
       points_per_set: config.categories[0]?.scoring.points_per_set ?? 11,
-      win_by: config.categories[0]?.scoring.deuce_rule ? 2 : 1,
+      win_by: config.categories[0]?.scoring.win_by ?? 2,
+      deuce_cap: config.categories[0]?.scoring.deuce_cap ?? null,
       created_by: userId,
       display_code: '',
       slug: '',
@@ -358,10 +394,11 @@ async function createTournamentFromConfig(
     status: 'pending',
     max_entries: cat.player_count > 0 ? cat.player_count : null,
     scoring_override: true,
-    scoring_format: 'rally',
+    scoring_format: cat.scoring.scoring_format,
     num_sets: cat.scoring.sets_per_match,
     points_per_set: cat.scoring.points_per_set,
-    win_by: cat.scoring.deuce_rule ? 2 : 1,
+    win_by: cat.scoring.win_by,
+    deuce_cap: cat.scoring.deuce_cap ?? null,
   }));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -379,9 +416,10 @@ async function createTournamentFromConfig(
   const stageScoringRows: Array<{
     category_id: string;
     stage: string;
-    points_per_set: number;
-    num_sets: number;
-    win_by: number;
+    points_per_set?: number;
+    num_sets?: number;
+    win_by?: number;
+    deuce_cap?: number | null;
   }> = [];
 
   for (const cat of config.categories) {
@@ -394,9 +432,10 @@ async function createTournamentFromConfig(
       stageScoringRows.push({
         category_id: created.id,
         stage: ss.stage,
-        points_per_set: ss.points_per_set,
-        num_sets: ss.sets_per_match,
-        win_by: ss.deuce_rule ? 2 : 1,
+        ...(ss.points_per_set != null ? { points_per_set: ss.points_per_set } : {}),
+        ...(ss.sets_per_match != null ? { num_sets: ss.sets_per_match } : {}),
+        ...(ss.win_by != null ? { win_by: ss.win_by } : {}),
+        ...(ss.deuce_cap !== undefined ? { deuce_cap: ss.deuce_cap } : {}),
       });
     }
   }
@@ -531,6 +570,7 @@ export async function POST(req: NextRequest) {
       notes: null,
       player_uploads: null,
       suggested_replies: null,
+      suggested_categories: null,
     };
 
     return NextResponse.json({
