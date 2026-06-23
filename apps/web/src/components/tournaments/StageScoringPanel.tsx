@@ -177,6 +177,14 @@ function StageRow({
   function handleRemove() {
     startTransition(async () => {
       await deleteStageScoringAction(categoryId, stage);
+      // Reset the edit form back to the tournament-level defaults — otherwise it would
+      // still show the just-deleted category override if reopened (local state was only
+      // initialised from `existing` at mount and doesn't track it afterwards).
+      setNumSets(resolvedNumSets as 1 | 3 | 5);
+      setPointsPerSet(String(resolvedPointsPerSet));
+      setWinBy(resolvedWinBy as 1 | 2);
+      setDeuceCap(resolvedDeuceCap != null ? String(resolvedDeuceCap) : '');
+      setMsg(null);
       onRemoved(stage);
     });
   }
@@ -232,9 +240,9 @@ function StageRow({
               type="button"
               onClick={handleRemove}
               disabled={isPending}
-              className="text-xs text-slate-500 hover:text-red-400 transition-colors"
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
             >
-              Remove
+              Reset
             </button>
           )}
           <button
