@@ -93,13 +93,14 @@ export async function generateSmartScheduleAction(
     .maybeSingle();
   if (!mgr) return { error: 'Permission denied' };
 
-  // Fetch all schedulable matches for this tournament
+  // Fetch all schedulable matches for this tournament — including knockout
+  // matches whose participants aren't decided yet (group stage in progress,
+  // or an earlier knockout round unresolved); only id/round/category_id are
+  // used below, so placeholder matches schedule exactly like real ones.
   const { data: rawMatches } = await admin
     .from('matches')
     .select('id, round, group_name, category_id, status, winner_entry_id')
     .eq('tournament_id', t.id)
-    .not('entry_a_id', 'is', null)
-    .not('entry_b_id', 'is', null)
     .order('group_name', { ascending: true, nullsFirst: false })
     .order('round', { ascending: true });
 

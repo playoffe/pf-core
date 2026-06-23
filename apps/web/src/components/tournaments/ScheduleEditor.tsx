@@ -31,6 +31,10 @@ export interface MatchForScheduling {
   category_name: string;
   player_a: string;
   player_b: string;
+  /** True when the corresponding slot isn't a real entry yet — a knockout
+   *  placeholder like "1st Group A" or "Winner of Quarter-Final Match 1". */
+  player_a_is_placeholder?: boolean;
+  player_b_is_placeholder?: boolean;
 }
 
 interface Props {
@@ -264,26 +268,38 @@ export function ScheduleEditor({
   }, [matches, edits]);
 
   // ── Active category groups ─────────────────────────────────────────────────
+  // Group-stage matches are grouped by group name (alphabetical); knockout
+  // matches are split into one section per round (Quarter-Final, Semi-Final,
+  // Final, …) so the stage name is shown as a header before its placeholder
+  // matches, instead of lumping every knockout round into one flat list.
   const activeGroups = useMemo(() => {
-    const sorted = matches
-      .filter((m) => m.category_id === activeCatId)
-      .sort((a, b) => {
-        const ga = a.group_name ?? '￿';
-        const gb = b.group_name ?? '￿';
-        if (ga !== gb) return ga.localeCompare(gb);
-        return a.round - b.round;
-      });
-    const groupMap = new Map<string, MatchForScheduling[]>();
-    for (const m of sorted) {
-      const key = m.group_name ?? '__ko__';
-      if (!groupMap.has(key)) groupMap.set(key, []);
-      groupMap.get(key)!.push(m);
+    const catMatches = matches.filter((m) => m.category_id === activeCatId);
+
+    const groupStageMap = new Map<string, MatchForScheduling[]>();
+    const knockoutMap = new Map<number, MatchForScheduling[]>();
+    for (const m of catMatches) {
+      if (m.group_name !== null) {
+        if (!groupStageMap.has(m.group_name)) groupStageMap.set(m.group_name, []);
+        groupStageMap.get(m.group_name)!.push(m);
+      } else {
+        if (!knockoutMap.has(m.round)) knockoutMap.set(m.round, []);
+        knockoutMap.get(m.round)!.push(m);
+      }
     }
-    return Array.from(groupMap.entries()).map(([key, grpMatches]) => ({
-      key,
-      label: key === '__ko__' ? 'Knockout Stage' : key,
-      matches: grpMatches,
-    }));
+
+    const groupSections = Array.from(groupStageMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, grpMatches]) => ({ key, label: key, matches: grpMatches }));
+
+    const knockoutSections = Array.from(knockoutMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([round, grpMatches]) => ({
+        key: `__ko__::${round}`,
+        label: grpMatches[0]?.round_name ?? `Knockout Round ${round}`,
+        matches: grpMatches,
+      }));
+
+    return [...groupSections, ...knockoutSections];
   }, [matches, activeCatId]);
 
   // ── Current schedule for AI ───────────────────────────────────────────────
@@ -516,9 +532,9 @@ export function ScheduleEditor({
                         <td className="px-4 py-2.5">
                           {/* Player names */}
                           <div className="flex items-center gap-1 flex-wrap">
-                            <span className="text-sm font-medium text-white">{m.player_a}</span>
+                            <span className={m.player_a_is_placeholder ? 'text-sm text-slate-400 italic' : 'text-sm font-medium text-white'}>{m.player_a}</span>
                             <span className="text-slate-500 text-xs">vs</span>
-                            <span className="text-sm text-slate-300">{m.player_b}</span>
+                            <span className={m.player_b_is_placeholder ? 'text-sm text-slate-400 italic' : 'text-sm text-slate-300'}>{m.player_b}</span>
                             {isWalkover && (
                               <span className="ml-1 rounded-full bg-amber-900/30 px-2 py-0.5 text-[10px] font-semibold text-amber-400">
                                 Walkover
