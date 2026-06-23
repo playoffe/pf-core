@@ -118,12 +118,12 @@ const EMIT_CONFIG_TOOL = {
       },
       suggested_replies: {
         type: ['array', 'null'],
-        description: 'Up to 5 short, literal reply options the organizer can tap instead of typing. Only actionable choices — never restate the question, and never include an inline example you mentioned just in passing.',
+        description: 'Up to 5 short, literal reply options the organizer can tap instead of typing. Only actionable choices — never restate the question, and never include an inline example you mentioned just in passing. Do NOT use this field for category name suggestions on Step 5 — use suggested_categories instead, even when there is no club history and you are offering generic defaults.',
         items: { type: 'string' },
       },
       suggested_categories: {
         type: ['array', 'null'],
-        description: 'Step 5 only: when proposing or re-confirming a set of categories (e.g. suggesting last time\'s categories, or asking "are you running the same ones?"), list every category name here so the organizer can check/uncheck individual ones. Always populate this on every Step 5 turn where you are proposing or re-listing categories, regardless of how you phrase it in your reply text (bullets, commas, etc).',
+        description: 'Step 5 only: the single field for any list of candidate category names the organizer could pick from or toggle — whether suggesting last time\'s categories, offering generic defaults when there is no club history, confirming a freshly parsed list, or re-confirming after an edit. List every category name here, every time, regardless of how you phrase it in your reply text (bullets, commas, etc). Never put category names in suggested_replies instead.',
         items: { type: 'string' },
       },
     },
