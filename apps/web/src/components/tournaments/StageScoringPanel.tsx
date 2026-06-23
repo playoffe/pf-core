@@ -104,7 +104,8 @@ interface StageRowProps {
   effectivePointsPerSet: number;
   effectiveWinBy: number;
   effectiveDeuceCap: number | null;
-  onSaved: () => void;
+  onSaved: (row: StageScoringRow) => void;
+  onRemoved: (stage: StageKey) => void;
 }
 
 function StageRow({
@@ -117,6 +118,7 @@ function StageRow({
   effectiveWinBy,
   effectiveDeuceCap,
   onSaved,
+  onRemoved,
 }: StageRowProps) {
   const meta = STAGE_META[stage];
   const isOverriding = !!existing;
@@ -162,12 +164,12 @@ function StageRow({
         win_by: winBy,
         deuce_cap: deuceCap ? parseInt(deuceCap, 10) : null,
       });
-      if (res.error) {
-        setMsg({ text: res.error, ok: false });
+      if (res.error || !res.row) {
+        setMsg({ text: res.error ?? 'Failed to save stage scoring.', ok: false });
       } else {
         setMsg({ text: 'Saved', ok: true });
         setExpanded(false);
-        onSaved();
+        onSaved(res.row);
       }
     });
   }
@@ -175,7 +177,7 @@ function StageRow({
   function handleRemove() {
     startTransition(async () => {
       await deleteStageScoringAction(categoryId, stage);
-      onSaved();
+      onRemoved(stage);
     });
   }
 
@@ -366,9 +368,12 @@ export function StageScoringPanel({
 
   if (visibleStages.length === 0) return null;
 
-  function handleSaved() {
-    // Visual update is optimistic via StageRow local state.
-    // SSR truth refreshes on next navigation (revalidatePath in server action).
+  function handleSaved(row: StageScoringRow) {
+    setRows((prev) => [...prev.filter((r) => r.stage !== row.stage), row]);
+  }
+
+  function handleRemoved(stage: StageKey) {
+    setRows((prev) => prev.filter((r) => r.stage !== stage));
   }
 
   return (
@@ -399,6 +404,7 @@ export function StageScoringPanel({
           effectiveWinBy={effectiveWinBy}
           effectiveDeuceCap={effectiveDeuceCap}
           onSaved={handleSaved}
+          onRemoved={handleRemoved}
         />
       ))}
     </div>
