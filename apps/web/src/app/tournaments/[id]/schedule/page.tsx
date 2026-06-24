@@ -225,26 +225,39 @@ export default async function SchedulePage({ params }: Props) {
   const totalCount     = matches.filter((m) => m.status === 'scheduled').length;
 
   // ── Tournament days (for the day/order drag-and-drop UI) ──────────────────
+  // Built with pure UTC date math — parsing a "YYYY-MM-DD" string via
+  // `new Date(...)` interprets it in the server's local timezone, which can
+  // silently roll the date back/forward a day once converted back to a
+  // string (e.g. in any UTC+ timezone). Date.UTC() sidesteps that entirely.
   const startDateStr = tData.start_date ?? new Date().toISOString().slice(0, 10);
   const endDateStr = tData.end_date ?? startDateStr;
   const tournamentDays: string[] = [];
   {
-    let cursor = new Date(`${startDateStr}T00:00:00`);
-    const last = new Date(`${endDateStr}T00:00:00`);
-    while (cursor.getTime() <= last.getTime()) {
-      tournamentDays.push(cursor.toISOString().slice(0, 10));
-      cursor = new Date(cursor.getTime() + 24 * 60 * 60_000);
+    const [sy, sm, sd] = startDateStr.split('-').map(Number);
+    const [ey, em, ed] = endDateStr.split('-').map(Number);
+    let cursor = Date.UTC(sy, sm - 1, sd);
+    const last = Date.UTC(ey, em - 1, ed);
+    while (cursor <= last) {
+      tournamentDays.push(new Date(cursor).toISOString().slice(0, 10));
+      cursor += 24 * 60 * 60_000;
     }
   }
 
   // ── Category list for the day/order drag-and-drop UI ───────────────────────
+  // A category's stored schedule_day can end up outside the tournament's
+  // actual date range (e.g. the tournament's dates were edited afterwards, or
+  // it was saved before a since-fixed timezone bug) — fall back to the first
+  // tournament day rather than letting the category silently disappear from
+  // every rendered day column.
   const categorySeen = new Map<string, { id: string; name: string; day: string; order: number; matchCount: number }>();
   for (const m of allRaw) {
     if (!categorySeen.has(m.category_id)) {
+      const storedDay = m.tc?.schedule_day;
+      const day = storedDay && tournamentDays.includes(storedDay) ? storedDay : startDateStr;
       categorySeen.set(m.category_id, {
         id: m.category_id,
         name: m.tc?.name ?? 'Unknown category',
-        day: m.tc?.schedule_day ?? startDateStr,
+        day,
         order: m.tc?.schedule_order ?? 0,
         matchCount: 0,
       });

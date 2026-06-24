@@ -19,9 +19,14 @@ interface Props {
   initialCategories: CategoryItem[];
 }
 
+// Parses "YYYY-MM-DD" as a UTC calendar date and formats it back in UTC, so
+// the displayed day never shifts based on the viewer's local timezone offset
+// (e.g. `new Date("2026-07-04T00:00:00")` parsed as local time in a UTC+ zone
+// rolls back to July 3rd once converted — this avoids that entirely).
 function formatDay(d: string) {
-  return new Date(`${d}T00:00:00`).toLocaleDateString('en-AU', {
-    weekday: 'short', day: 'numeric', month: 'short',
+  const [y, m, day] = d.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, day)).toLocaleDateString('en-AU', {
+    weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
   });
 }
 
@@ -45,8 +50,10 @@ export function CategoryScheduleOrder({ tournamentSlug, days, initialCategories 
     const map = new Map<string, CategoryItem[]>();
     for (const day of days) map.set(day, []);
     for (const cat of [...categories].sort((a, b) => a.order - b.order)) {
-      if (!map.has(cat.day)) map.set(cat.day, []);
-      map.get(cat.day)!.push(cat);
+      // Fall back to the first day rather than dropping the category into an
+      // unrendered column it can never be dragged out of.
+      const day = days.includes(cat.day) ? cat.day : days[0];
+      map.get(day)?.push(cat);
     }
     return map;
   }, [categories, days]);
@@ -112,19 +119,19 @@ export function CategoryScheduleOrder({ tournamentSlug, days, initialCategories 
           </p>
         </div>
         {dirty && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-amber-400">Order changed — re-run "Schedule all matches" after saving</span>
             <button
               onClick={handleCancel}
               disabled={saving}
-              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-400 hover:text-white transition-colors disabled:opacity-50"
+              className="whitespace-nowrap rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               onClick={handleConfirm}
               disabled={saving}
-              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
+              className="whitespace-nowrap rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
             >
               {saving ? 'Saving…' : 'Confirm order'}
             </button>
@@ -138,7 +145,9 @@ export function CategoryScheduleOrder({ tournamentSlug, days, initialCategories 
         </div>
       )}
 
-      <div className={`grid gap-3 ${days.length > 1 ? 'sm:grid-cols-2 lg:grid-cols-3' : ''}`}>
+      {/* Stretch to fill the available width, but cap at 2 columns so each
+          category card stays clearly readable even with many tournament days. */}
+      <div className={`grid gap-3 ${days.length > 1 ? 'sm:grid-cols-2' : ''}`}>
         {days.map((day) => {
           const list = byDay.get(day) ?? [];
           return (

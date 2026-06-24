@@ -285,6 +285,19 @@ export function ScheduleEditor({
   const activeGroups = useMemo(() => {
     const catMatches = matches.filter((m) => m.category_id === activeCatId);
 
+    // Sort by the *live* edited time (not the original server value) so a
+    // freshly generated/edited schedule re-orders immediately, before saving.
+    function byScheduledTime(list: MatchForScheduling[]): MatchForScheduling[] {
+      return [...list].sort((a, b) => {
+        const ta = edits[a.id]?.time || '';
+        const tb = edits[b.id]?.time || '';
+        if (ta && tb) return ta < tb ? -1 : ta > tb ? 1 : 0;
+        if (ta) return -1;
+        if (tb) return 1;
+        return a.round - b.round;
+      });
+    }
+
     const groupStageMap = new Map<string, MatchForScheduling[]>();
     const knockoutMap = new Map<number, MatchForScheduling[]>();
     for (const m of catMatches) {
@@ -299,18 +312,18 @@ export function ScheduleEditor({
 
     const groupSections = Array.from(groupStageMap.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, grpMatches]) => ({ key, label: key, matches: grpMatches }));
+      .map(([key, grpMatches]) => ({ key, label: key, matches: byScheduledTime(grpMatches) }));
 
     const knockoutSections = Array.from(knockoutMap.entries())
       .sort(([a], [b]) => a - b)
       .map(([round, grpMatches]) => ({
         key: `__ko__::${round}`,
         label: grpMatches[0]?.round_name ?? `Knockout Round ${round}`,
-        matches: grpMatches,
+        matches: byScheduledTime(grpMatches),
       }));
 
     return [...groupSections, ...knockoutSections];
-  }, [matches, activeCatId]);
+  }, [matches, activeCatId, edits]);
 
   // ── Current schedule for AI ───────────────────────────────────────────────
   const currentScheduleForAI = useMemo<ScheduleUpdate[]>(() =>
