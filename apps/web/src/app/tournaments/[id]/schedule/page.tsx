@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { createAdminClient, createClient, getCurrentUser, getUserRoles } from '@/lib/supabase/server';
 import { AppNav } from '@/components/layout/AppNav';
 import { ScheduleEditor } from '@/components/tournaments/ScheduleEditor';
+import { CategoryScheduleOrder } from '@/components/tournaments/CategoryScheduleOrder';
 import { ShareScheduleButton } from '@/components/tournaments/ShareScheduleButton';
 import type { MatchForScheduling } from '@/components/tournaments/ScheduleEditor';
 import { isFeatureEnabled } from '@/lib/features';
@@ -28,14 +29,14 @@ export default async function SchedulePage({ params }: Props) {
   // Tournament + auth check — include scheduling params
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: t } = await (admin.from('tournaments') as any)
-    .select('id, name, slug, club_id, start_date, court_count, default_match_duration_mins, default_changeover_mins, default_start_time, scoring_format, num_sets')
+    .select('id, name, slug, club_id, start_date, end_date, court_count, default_match_duration_mins, default_changeover_mins, default_start_time, scoring_format, num_sets')
     .eq('slug', slug)
     .single() as { data: Record<string, unknown> | null };
   if (!t) notFound();
 
   // Extract typed fields from the any-cast result
   const tData = t as {
-    id: string; name: string; slug: string; club_id: string; start_date: string | null;
+    id: string; name: string; slug: string; club_id: string; start_date: string | null; end_date: string | null;
     court_count: number;
     default_match_duration_mins: number;
     default_changeover_mins: number;
@@ -80,7 +81,7 @@ export default async function SchedulePage({ params }: Props) {
         players!player_id(full_name),
         partner:players!partner_id(full_name)
       ),
-      tc:tournament_categories!category_id(name, draw_format, groups_count, advance_per_group, scoring_override, scoring_format, num_sets)
+      tc:tournament_categories!category_id(name, draw_format, groups_count, advance_per_group, scoring_override, scoring_format, num_sets, schedule_day, schedule_order)
     `)
     .eq('tournament_id', tData.id)
     .eq('status', 'scheduled')
@@ -103,6 +104,7 @@ export default async function SchedulePage({ params }: Props) {
     tc: {
       name: string; draw_format: string | null; groups_count: number | null; advance_per_group: number | null;
       scoring_override: boolean | null; scoring_format: string | null; num_sets: number | null;
+      schedule_day: string | null; schedule_order: number | null;
     } | null;
   };
 
@@ -222,6 +224,35 @@ export default async function SchedulePage({ params }: Props) {
   const scheduledCount = matches.filter((m) => m.scheduled_time).length;
   const totalCount     = matches.filter((m) => m.status === 'scheduled').length;
 
+  // ── Tournament days (for the day/order drag-and-drop UI) ──────────────────
+  const startDateStr = tData.start_date ?? new Date().toISOString().slice(0, 10);
+  const endDateStr = tData.end_date ?? startDateStr;
+  const tournamentDays: string[] = [];
+  {
+    let cursor = new Date(`${startDateStr}T00:00:00`);
+    const last = new Date(`${endDateStr}T00:00:00`);
+    while (cursor.getTime() <= last.getTime()) {
+      tournamentDays.push(cursor.toISOString().slice(0, 10));
+      cursor = new Date(cursor.getTime() + 24 * 60 * 60_000);
+    }
+  }
+
+  // ── Category list for the day/order drag-and-drop UI ───────────────────────
+  const categorySeen = new Map<string, { id: string; name: string; day: string; order: number; matchCount: number }>();
+  for (const m of allRaw) {
+    if (!categorySeen.has(m.category_id)) {
+      categorySeen.set(m.category_id, {
+        id: m.category_id,
+        name: m.tc?.name ?? 'Unknown category',
+        day: m.tc?.schedule_day ?? startDateStr,
+        order: m.tc?.schedule_order ?? 0,
+        matchCount: 0,
+      });
+    }
+    categorySeen.get(m.category_id)!.matchCount++;
+  }
+  const scheduleCategories = [...categorySeen.values()].sort((a, b) => a.order - b.order);
+
   // Derive default match duration from tournament scoring format (rally vs traditional)
   const scoringFormat  = (tData.scoring_format ?? 'rally') as 'rally' | 'traditional';
   const numSets        = (tData.num_sets ?? 1) as number;
@@ -313,6 +344,14 @@ export default async function SchedulePage({ params }: Props) {
             </Link>
           </div>
         </div>
+
+        {scheduleCategories.length > 1 && (
+          <CategoryScheduleOrder
+            tournamentSlug={slug}
+            days={tournamentDays}
+            initialCategories={scheduleCategories}
+          />
+        )}
 
         <ScheduleEditor
           tournamentSlug={slug}
