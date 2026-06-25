@@ -596,7 +596,6 @@ export async function POST(req: NextRequest) {
 
   } catch (err) {
     console.error('[wizard/turn] unhandled error:', err);
-    const message = err instanceof Error ? err.message : 'An unexpected error occurred';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
   }
 }
