@@ -3,13 +3,15 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { registerPlayerSchema, type RegisterPlayerInput } from '@pickleball/shared';
-import { registerAction, checkUsernameAction } from '@/lib/actions/auth';
+import { registerAction, checkUsernameAction, resendVerificationAction } from '@/lib/actions/auth';
 import { useState, useEffect } from 'react';
 import { useDebounce } from '@/hooks/useDebounce';
 
 export function RegisterForm({ returnUrl }: { returnUrl?: string }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
 
   const {
     register,
@@ -39,10 +41,37 @@ export function RegisterForm({ returnUrl }: { returnUrl?: string }) {
     if (usernameStatus === 'taken') return;
     const result = await registerAction(data, returnUrl);
     if (result?.error) { setServerError(result.error); return; }
-    // Hard navigation so AppNav always re-renders from server with the fresh session.
-    if (result?.redirectTo) {
-      window.location.href = result.redirectTo;
+    if (result?.pendingVerification) {
+      setPendingEmail(result.email);
     }
+  }
+
+  async function handleResend() {
+    if (!pendingEmail) return;
+    setResendState('sending');
+    await resendVerificationAction(pendingEmail, returnUrl);
+    setResendState('sent');
+  }
+
+  if (pendingEmail) {
+    return (
+      <div className="space-y-5 text-center">
+        <div className="text-4xl">📬</div>
+        <h2 className="text-lg font-semibold text-white">Check your email</h2>
+        <p className="text-sm text-slate-400">
+          We sent a confirmation link to <strong className="text-slate-200">{pendingEmail}</strong>.
+          Click the link to activate your account, then log in.
+        </p>
+        <button
+          type="button"
+          onClick={handleResend}
+          disabled={resendState !== 'idle'}
+          className="text-sm font-semibold text-brand-400 hover:text-brand-300 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {resendState === 'sent' ? 'Email sent — check your inbox' : resendState === 'sending' ? 'Sending...' : "Didn't get it? Resend email"}
+        </button>
+      </div>
+    );
   }
 
   return (
