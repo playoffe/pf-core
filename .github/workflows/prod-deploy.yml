@@ -127,6 +127,18 @@ jobs:
       - name: Pull Vercel environment
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
+      - name: Sync SES env vars to Vercel
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.PROD_SES_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PROD_SES_AWS_SECRET_ACCESS_KEY }}
+          SES_FROM_EMAIL:        ${{ secrets.PROD_SES_FROM_EMAIL }}
+          AWS_REGION:            ${{ env.AWS_REGION }}
+        run: |
+          for VAR in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY SES_FROM_EMAIL AWS_REGION; do
+            vercel env rm "$VAR" production --yes --token=${{ secrets.VERCEL_TOKEN }} 2>/dev/null || true
+            printf '%s' "${!VAR}" | vercel env add "$VAR" production --token=${{ secrets.VERCEL_TOKEN }}
+          done
+
       - name: Deploy to production
         run: vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }}
 

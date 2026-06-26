@@ -28,6 +28,22 @@ output "secrets_path_prefix" {
   value       = "/playoffe/${var.environment}"
 }
 
+output "ses_access_key_id" {
+  description = "AWS_ACCESS_KEY_ID for this environment's SES-send-only IAM user — set in Vercel project env vars"
+  value       = module.ses.access_key_id
+}
+
+output "ses_secret_access_key" {
+  description = "AWS_SECRET_ACCESS_KEY for this environment's SES-send-only IAM user — set in Vercel project env vars. Run `terraform output ses_secret_access_key` to reveal; never logged automatically."
+  value       = module.ses.secret_access_key
+  sensitive   = true
+}
+
+output "ses_dkim_tokens" {
+  description = "Add as 3 CNAME records in DNS: <token>._domainkey.<domain> -> <token>.dkim.amazonses.com"
+  value       = module.ses.dkim_tokens
+}
+
 output "cost_mode" {
   description = "Summary of cost optimisations active for this environment"
   value = join(", ", compact([

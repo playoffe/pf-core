@@ -27,7 +27,7 @@ async function sendViaSES(payload: EmailPayload): Promise<void> {
 
   await client.send(
     new SendEmailCommand({
-      Source: process.env.SES_FROM_EMAIL ?? 'noreply@pickleballplatform.com',
+      Source: process.env.SES_FROM_EMAIL ?? 'noreply@playoffe.com',
       Destination: { ToAddresses: [payload.to] },
       Message: {
         Subject: { Data: payload.subject, Charset: 'UTF-8' },

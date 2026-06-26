@@ -49,6 +49,15 @@ module "secrets" {
   x_access_token_secret     = var.x_access_token_secret
 }
 
+# ── SES: domain identity + send-only IAM user (for Vercel env vars) ──────────
+module "ses" {
+  source      = "./modules/ses"
+  name_prefix = local.name_prefix
+  environment = var.environment
+  aws_region  = var.aws_region
+  domain      = var.ses_domain
+}
+
 # ── ElastiCache: managed Redis (prod only) ────────────────────────────────────
 # staging uses Redis sidecar inside the ECS task — no separate cluster needed
 module "elasticache" {

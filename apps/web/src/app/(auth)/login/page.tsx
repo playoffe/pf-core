@@ -5,11 +5,11 @@ import Link from 'next/link';
 export const metadata: Metadata = { title: 'Log in' };
 
 interface Props {
-  searchParams: Promise<{ return?: string; redirectTo?: string; joined?: string }>;
+  searchParams: Promise<{ return?: string; redirectTo?: string; joined?: string; verified?: string }>;
 }
 
 export default async function LoginPage({ searchParams }: Props) {
-  const { return: returnUrl, redirectTo, joined } = await searchParams;
+  const { return: returnUrl, redirectTo, joined, verified } = await searchParams;
   // Support both ?return= (explicit links) and ?redirectTo= (middleware redirect)
   const effectiveReturnUrl = returnUrl ?? redirectTo;
 
@@ -26,6 +26,11 @@ export default async function LoginPage({ searchParams }: Props) {
         {joined && (
           <div className="mb-4 rounded-lg border border-green-800 bg-green-950/60 px-4 py-3 text-sm text-green-300">
             ✓ You&apos;ve been added as a club manager. Log in to access your dashboard.
+          </div>
+        )}
+        {verified && (
+          <div className="mb-4 rounded-lg border border-green-800 bg-green-950/60 px-4 py-3 text-sm text-green-300">
+            ✓ Email verified! Log in to access your account.
           </div>
         )}
         <div className="rounded-xl bg-surface-card px-8 py-10 ring-1 ring-surface-border">

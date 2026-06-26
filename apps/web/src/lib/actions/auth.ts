@@ -4,6 +4,11 @@ import { redirect } from 'next/navigation';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { registerPlayerSchema, type RegisterPlayerInput } from '@pickleball/shared';
 import { INITIAL_RATING } from '@pickleball/rating';
+import { consumeRateLimit } from '@/lib/rate-limit';
+import { sendEmail } from '@/lib/email/service';
+import { buildVerifyEmail } from '@/lib/email/templates/verify-email';
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
 export async function registerAction(input: RegisterPlayerInput, returnUrl?: string) {
   const parsed = registerPlayerSchema.safeParse(input);
@@ -12,6 +17,12 @@ export async function registerAction(input: RegisterPlayerInput, returnUrl?: str
   }
 
   const { email, password, full_name, username, gender, dob, location } = parsed.data;
+
+  // Cap signup attempts per email — registration creates a real auth user
+  // and sends an email, so it's a more expensive/abusable path than a simple read.
+  if (!consumeRateLimit(`register:${email.toLowerCase()}`, 5, 10 * 60_000)) {
+    return { error: 'Too many signup attempts for this email. Please wait a few minutes and try again.' };
+  }
 
   const admin = createAdminClient();
 
@@ -22,12 +33,22 @@ export async function registerAction(input: RegisterPlayerInput, returnUrl?: str
     return { error: 'Username is already taken' };
   }
 
-  const { data: authData, error: authError } = await admin.auth.admin.createUser({
+  // After clicking the email link, send the user to the login page (with a
+  // "verified" banner) rather than straight into the app — they still need
+  // to log in with their password since registerAction never signs them in.
+  const redirectTo = `${APP_URL}/api/auth/confirm?next=${encodeURIComponent('/login?verified=1')}`;
+
+  // generateLink with type 'signup' both creates the auth user (unconfirmed)
+  // and returns the confirmation link — replaces the old createUser() call,
+  // since we no longer sign the user in immediately.
+  const { data: linkData, error: authError } = await admin.auth.admin.generateLink({
+    type: 'signup',
     email,
     password,
-    email_confirm: false,
-    app_metadata: { roles: ['player'] },
+    options: { redirectTo, data: { roles: ['player'] } },
   });
+
+  const authData = { user: linkData?.user ?? null };
 
   if (authError || !authData.user) {
     if (authError?.message.includes('already')) {
@@ -35,6 +56,10 @@ export async function registerAction(input: RegisterPlayerInput, returnUrl?: str
     }
     return { error: 'Failed to create account. Please try again.' };
   }
+
+  await admin.auth.admin.updateUserById(authData.user.id, {
+    app_metadata: { roles: ['player'] },
+  });
 
   const { error: profileError } = await admin.from('players').insert({
     id: authData.user.id,
@@ -83,17 +108,56 @@ export async function registerAction(input: RegisterPlayerInput, returnUrl?: str
     updated_at: new Date().toISOString(),
   });
 
-  const supabase = await createClient();
-  await supabase.auth.signInWithPassword({ email, password });
+  // Don't sign in yet — the account stays unconfirmed until the user clicks
+  // the emailed link, which lands on /api/auth/confirm and exchanges the code
+  // for a session there.
+  const confirmUrl = linkData?.properties?.action_link;
+  if (confirmUrl) {
+    const payload = buildVerifyEmail({ recipientName: full_name, confirmUrl });
+    void sendEmail({ to: email, ...payload }).catch((err) => {
+      console.error(`[email] Failed to send verification email to ${email}:`, err);
+    });
+  }
+
+  return { pendingVerification: true as const, email };
+}
+
+export async function resendVerificationAction(email: string, returnUrl?: string) {
+  if (!consumeRateLimit(`resend-verify:${email.toLowerCase()}`, 3, 10 * 60_000)) {
+    return { error: 'Too many requests. Please wait a few minutes and try again.' };
+  }
 
   const destination = returnUrl && returnUrl.startsWith('/') ? returnUrl : '/dashboard';
-  return { redirectTo: destination };
+  const redirectTo = `${APP_URL}/api/auth/confirm?next=${encodeURIComponent(destination)}`;
+
+  // Use the dedicated resend API rather than admin.generateLink — generateLink
+  // with type 'signup' takes a password and would silently reset the user's
+  // existing password if called again for an already-created account.
+  const supabase = await createClient();
+  await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo: redirectTo },
+  });
+
+  // Resending shouldn't reveal whether the email exists or is already
+  // confirmed — always return the same success-shaped output to the caller.
+  return { success: true };
 }
 
 export async function loginAction(email: string, password: string, returnUrl?: string) {
+  if (!consumeRateLimit(`login:${email.toLowerCase()}`, 8, 5 * 60_000)) {
+    return { error: 'Too many login attempts. Please wait a few minutes and try again.' };
+  }
+
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) return { error: error.message };
+  if (error) {
+    if (error.message.toLowerCase().includes('email not confirmed')) {
+      return { error: 'Please verify your email before logging in. Check your inbox for the confirmation link.' };
+    }
+    return { error: error.message };
+  }
 
   // Super admins land on the platform overview, not the player dashboard
   const isSuperAdminUser = data.user?.app_metadata?.role === 'super_admin';
@@ -103,6 +167,33 @@ export async function loginAction(email: string, password: string, returnUrl?: s
   // Return the destination so the client can do a hard navigation (window.location.href),
   // which bypasses the Next.js Router Cache and guarantees a fresh AppNav render.
   return { redirectTo: destination };
+}
+
+export async function forgotPasswordAction(email: string) {
+  if (!consumeRateLimit(`forgot-password:${email.toLowerCase()}`, 3, 10 * 60_000)) {
+    return { error: 'Too many requests. Please wait a few minutes and try again.' };
+  }
+
+  const redirectTo = `${APP_URL}/api/auth/confirm?next=${encodeURIComponent('/reset-password')}`;
+
+  const supabase = await createClient();
+  // Don't surface whether the email exists — same response either way.
+  await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+
+  return { success: true };
+}
+
+export async function resetPasswordAction(password: string) {
+  if (password.length < 8) return { error: 'Password must be at least 8 characters' };
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) {
+    console.error('[reset-password] updateUser failed:', error.message);
+    return { error: error.message };
+  }
+
+  return { success: true };
 }
 
 export async function logoutAction() {
