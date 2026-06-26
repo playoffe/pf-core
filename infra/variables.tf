@@ -154,3 +154,9 @@ variable "supabase_storage_url" {
   description = "Base URL of the Supabase social-graphics storage bucket (for CloudFront origin)"
   type        = string
 }
+
+variable "ses_domain" {
+  description = "Domain to verify in SES and scope the send-only IAM user's policy to (e.g. playoffe.com)"
+  type        = string
+  default     = "playoffe.com"
+}
