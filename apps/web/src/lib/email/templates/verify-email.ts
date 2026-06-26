@@ -15,6 +15,8 @@ Thanks for signing up for PLAYOFFE! Click the link below to confirm your email a
 
 ${confirmUrl}
 
+This link expires in 24 hours. If it expires, you can request a new one from the login page.
+
 If you didn't create this account, you can safely ignore this email.
 
 — The PLAYOFFE Team
@@ -51,6 +53,11 @@ If you didn't create this account, you can safely ignore this email.
       Confirm email &amp; activate account
     </a>
   </div>
+
+  <p style="color: #6b7280; font-size: 14px;">
+    This link expires in <strong>24 hours</strong>. If it expires, you can request a new one
+    from the login page.
+  </p>
 
   <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;">
 

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { createClient, createAdminClient, getCurrentUser, isSuperAdmin, getUserRoles } from '@/lib/supabase/server';
+import { logoutAction } from '@/lib/actions/auth';
 import { isFeatureEnabled } from '@/lib/features';
 import { NotificationBell } from './NotificationBell';
 import { NavLink } from './NavLink';
@@ -121,7 +122,7 @@ export async function AppNav() {
             /* Super admin: no player features — just identity + sign out */
             <>
               <span className="hidden sm:block text-sm text-slate-500">{user?.email}</span>
-              <form action="/api/auth/signout" method="POST">
+              <form action={logoutAction}>
                 <button
                   type="submit"
                   className="text-xs text-slate-400 hover:text-white transition-colors"

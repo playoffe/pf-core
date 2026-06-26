@@ -33,8 +33,10 @@ export async function registerAction(input: RegisterPlayerInput, returnUrl?: str
     return { error: 'Username is already taken' };
   }
 
-  const destination = returnUrl && returnUrl.startsWith('/') ? returnUrl : '/dashboard';
-  const redirectTo = `${APP_URL}/api/auth/confirm?next=${encodeURIComponent(destination)}`;
+  // After clicking the email link, send the user to the login page (with a
+  // "verified" banner) rather than straight into the app — they still need
+  // to log in with their password since registerAction never signs them in.
+  const redirectTo = `${APP_URL}/api/auth/confirm?next=${encodeURIComponent('/login?verified=1')}`;
 
   // generateLink with type 'signup' both creates the auth user (unconfirmed)
   // and returns the confirmation link — replaces the old createUser() call,

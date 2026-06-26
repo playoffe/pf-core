@@ -28,8 +28,15 @@ file_size_limit = "50MiB"
 
 [auth]
 enabled = true
-site_url = "http://127.0.0.1:3000"
-additional_redirect_urls = ["https://localhost:3000"]
+site_url = "http://localhost:3000"
+# Wildcarded so /api/auth/confirm?next=... is actually accepted as a valid
+# redirect_to — without the wildcard, Supabase rejects any redirect target
+# that isn't an exact match and silently falls back to site_url (the home
+# page), regardless of what `next` the confirmation link was built with.
+# Also keep 127.0.0.1 variants since GoTrue falls back to the bare site_url
+# (not a wildcard match) on rejection — matching the host you actually browse
+# on (localhost) means that fallback also lands somewhere sane if ever hit.
+additional_redirect_urls = ["https://localhost:3000", "http://localhost:3000/**", "http://127.0.0.1:3000", "http://127.0.0.1:3000/**"]
 jwt_expiry = 3600
 enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10
@@ -41,6 +48,8 @@ minimum_password_length = 8
 enable_signup = true
 double_confirm_changes = true
 enable_confirmations = true
+# Signup confirmation / recovery link validity — 24 hours (default is 1 hour).
+otp_expiry = 86400
 
 [auth.sms]
 enable_signup = false
