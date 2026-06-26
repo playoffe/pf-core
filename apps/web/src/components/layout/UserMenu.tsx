@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { logoutAction } from '@/lib/actions/auth';
 
 interface Props {
   username: string;
@@ -106,7 +107,7 @@ export function UserMenu({ username, fullName, settingsHref }: Props) {
 
           {/* Sign out */}
           <div className="border-t border-surface-border py-1">
-            <form action="/api/auth/signout" method="POST">
+            <form action={logoutAction}>
               <button
                 type="submit"
                 role="menuitem"

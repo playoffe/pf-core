@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { logoutAction } from '@/lib/actions/auth';
 
 interface MobileNavProps {
   isLoggedIn: boolean;
@@ -161,7 +162,7 @@ export function MobileNav({ isLoggedIn, username, fullName, email, isSuperAdmin,
                 </span>
                 <p className="text-xs text-slate-400 truncate">{email}</p>
               </div>
-              <form action="/api/auth/signout" method="POST">
+              <form action={logoutAction}>
                 <button type="submit" className="text-xs text-slate-500 hover:text-white transition-colors shrink-0">
                   Sign out
                 </button>
@@ -180,7 +181,7 @@ export function MobileNav({ isLoggedIn, username, fullName, email, isSuperAdmin,
                 </div>
               </Link>
               {/* Sign out */}
-              <form action="/api/auth/signout" method="POST" className="shrink-0">
+              <form action={logoutAction} className="shrink-0">
                 <button type="submit" className="text-xs text-slate-500 hover:text-red-400 transition-colors">
                   Sign out
                 </button>
