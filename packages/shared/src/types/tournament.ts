@@ -32,6 +32,17 @@ export interface RubberLineupItem {
   play_format: 'singles' | 'doubles' | 'mixed_doubles';
 }
 
+/** A roster quota slot, e.g. { count: 2, gender: 'female', age_min: 35 }.
+ *  Enforced as a soft warning only — not a hard registration block. */
+export interface RosterCompositionRule {
+  count: number;
+  gender?: 'male' | 'female';
+  age_min?: number;
+  age_max?: number;
+}
+
+export type DeciderFormat = 'singles' | 'doubles';
+
 export interface TournamentCategory {
   id: string;
   tournament_id: string;
@@ -45,6 +56,8 @@ export interface TournamentCategory {
   max_age: number | null;
   skill_levels: string[];
   rubber_lineup: RubberLineupItem[];
+  roster_composition: RosterCompositionRule[];
+  decider_format: DeciderFormat | null;
   winner_entry_id: string | null;
   runner_up_entry_id: string | null;
   third_place_entry_id: string | null;
@@ -74,6 +87,8 @@ export interface TournamentTeam {
   category_id: string;
   name: string;
   captain_id: string;
+  marquee_player_id: string | null;
+  owner_name: string | null;
   status: EntryStatus;
   seed: number | null;
   registered_at: string;
@@ -88,7 +103,7 @@ export interface TeamMember {
   responded_at: string | null;
 }
 
-export type TieStatus = 'pending_lineups' | 'scheduled' | 'in_progress' | 'completed';
+export type TieStatus = 'pending_lineups' | 'scheduled' | 'in_progress' | 'awaiting_decider' | 'completed';
 
 export interface Tie {
   id: string;
@@ -103,6 +118,8 @@ export interface Tie {
   winner_team_id: string | null;
   rubbers_won_a: number;
   rubbers_won_b: number;
+  points_for_a: number;
+  points_against_a: number;
   point_diff_a: number;
   bracket_position: number | null;
   bracket_type: string | null;

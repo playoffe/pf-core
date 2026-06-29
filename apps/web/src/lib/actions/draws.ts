@@ -5,6 +5,7 @@ import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/
 import { generateDraw } from '@pickleball/draw-engine';
 import type { DrawConfig, DrawEntry } from '@pickleball/shared';
 import { createNotificationsForPlayers } from './notifications';
+import { checkAndAdvanceTie } from './scoring';
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 async function assertCategoryManager(categoryId: string, userId: string) {
@@ -345,10 +346,12 @@ async function generateTeamEventDraw(
           team_a_id: teamAId,
           team_b_id: teamBId,
           bracket_position: positionInRound,
-          // Bye: only one side present — resolve immediately, no rubbers needed.
-          status: (teamAId && teamBId) ? 'pending_lineups' : 'completed',
+          // Bye: exactly one side present — resolve immediately, no rubbers needed.
+          // Both null is a knockout placeholder awaiting group-stage promotion,
+          // not a bye — it stays 'pending_lineups' like a real pairing.
+          status: (teamAId && !teamBId) || (teamBId && !teamAId) ? 'completed' : 'pending_lineups',
           winner_team_id: (teamAId && !teamBId) ? teamAId : (teamBId && !teamAId) ? teamBId : null,
-          completed_at: (teamAId && teamBId) ? null : new Date().toISOString(),
+          completed_at: (teamAId && !teamBId) || (teamBId && !teamAId) ? new Date().toISOString() : null,
         })
         .select('id')
         .single();
@@ -1227,6 +1230,200 @@ export async function promoteGroupWinnersAction(categoryId: string) {
   revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}`);
   revalidatePath(`/tournaments/${tSlug}/scoring`);
   return { success: true, promoted: advancingEntries.length };
+}
+
+// ── Team-event group standings → knockout promotion ───────────────────────────
+// Mirrors computeGroupStandings/promoteGroupWinnersAction but ranks teams via
+// ties' own aggregates (rubbers_won_a/b, point_diff_a) instead of matches.
+async function computeTeamGroupStandings(categoryId: string): Promise<
+  | { error: string }
+  | { groupNames: string[]; rankedByGroup: Map<string, string[]>; allGroupTiesDone: boolean }
+> {
+  const admin = createAdminClient();
+
+  const { data: allTies } = await admin
+    .from('ties')
+    .select('id, group_name, status, team_a_id, team_b_id, winner_team_id, rubbers_won_a, rubbers_won_b, point_diff_a')
+    .eq('category_id', categoryId);
+
+  if (!allTies || allTies.length === 0) return { error: 'No ties found' };
+
+  const groupTies = allTies.filter((t) => t.group_name !== null);
+  if (groupTies.length === 0) return { error: 'No group-stage ties found' };
+
+  const allGroupTiesDone = groupTies.every((t) => t.status === 'completed');
+  const groupNames = [...new Set(groupTies.map((t) => t.group_name as string))].sort();
+
+  const wins = new Map<string, number>();
+  const losses = new Map<string, number>();
+  const rubbersWon = new Map<string, number>();
+  const rubbersLost = new Map<string, number>();
+  const pointDiff = new Map<string, number>();
+  const initTeam = (id: string) => {
+    if (!wins.has(id)) { wins.set(id, 0); losses.set(id, 0); rubbersWon.set(id, 0); rubbersLost.set(id, 0); pointDiff.set(id, 0); }
+  };
+
+  for (const t of groupTies) {
+    if (!t.team_a_id || !t.team_b_id) continue;
+    initTeam(t.team_a_id);
+    initTeam(t.team_b_id);
+    rubbersWon.set(t.team_a_id, (rubbersWon.get(t.team_a_id) ?? 0) + t.rubbers_won_a);
+    rubbersLost.set(t.team_a_id, (rubbersLost.get(t.team_a_id) ?? 0) + t.rubbers_won_b);
+    rubbersWon.set(t.team_b_id, (rubbersWon.get(t.team_b_id) ?? 0) + t.rubbers_won_b);
+    rubbersLost.set(t.team_b_id, (rubbersLost.get(t.team_b_id) ?? 0) + t.rubbers_won_a);
+    pointDiff.set(t.team_a_id, (pointDiff.get(t.team_a_id) ?? 0) + t.point_diff_a);
+    pointDiff.set(t.team_b_id, (pointDiff.get(t.team_b_id) ?? 0) - t.point_diff_a);
+    if (t.winner_team_id === t.team_a_id) { wins.set(t.team_a_id, (wins.get(t.team_a_id) ?? 0) + 1); losses.set(t.team_b_id, (losses.get(t.team_b_id) ?? 0) + 1); }
+    else if (t.winner_team_id === t.team_b_id) { wins.set(t.team_b_id, (wins.get(t.team_b_id) ?? 0) + 1); losses.set(t.team_a_id, (losses.get(t.team_a_id) ?? 0) + 1); }
+  }
+
+  const teamsByGroup = new Map<string, Set<string>>();
+  const tiesByGroup = new Map<string, typeof groupTies>();
+  for (const t of groupTies) {
+    const g = t.group_name as string;
+    if (!teamsByGroup.has(g)) teamsByGroup.set(g, new Set());
+    if (t.team_a_id) teamsByGroup.get(g)!.add(t.team_a_id);
+    if (t.team_b_id) teamsByGroup.get(g)!.add(t.team_b_id);
+    if (!tiesByGroup.has(g)) tiesByGroup.set(g, []);
+    tiesByGroup.get(g)!.push(t);
+  }
+
+  const rankedByGroup = new Map<string, string[]>();
+  for (const gName of groupNames) {
+    const teamIds = [...(teamsByGroup.get(gName) ?? [])];
+    const gTies = tiesByGroup.get(gName) ?? [];
+    const ranked = teamIds.sort((a, b) => {
+      if ((wins.get(b) ?? 0) !== (wins.get(a) ?? 0)) return (wins.get(b) ?? 0) - (wins.get(a) ?? 0);
+      if ((losses.get(a) ?? 0) !== (losses.get(b) ?? 0)) return (losses.get(a) ?? 0) - (losses.get(b) ?? 0);
+      if ((pointDiff.get(b) ?? 0) !== (pointDiff.get(a) ?? 0)) return (pointDiff.get(b) ?? 0) - (pointDiff.get(a) ?? 0);
+      if ((rubbersWon.get(b) ?? 0) !== (rubbersWon.get(a) ?? 0)) return (rubbersWon.get(b) ?? 0) - (rubbersWon.get(a) ?? 0);
+      if ((rubbersLost.get(a) ?? 0) !== (rubbersLost.get(b) ?? 0)) return (rubbersLost.get(a) ?? 0) - (rubbersLost.get(b) ?? 0);
+      const h2h = gTies.find((t) => (t.team_a_id === a && t.team_b_id === b) || (t.team_a_id === b && t.team_b_id === a));
+      if (h2h?.winner_team_id === b) return 1;
+      if (h2h?.winner_team_id === a) return -1;
+      return 0;
+    });
+    rankedByGroup.set(gName, ranked);
+  }
+
+  return { groupNames, rankedByGroup, allGroupTiesDone };
+}
+
+export async function promoteGroupWinnerTiesAction(categoryId: string) {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const cat = await assertCategoryManager(categoryId, user.id);
+  if (!cat) return { error: 'Permission denied' };
+
+  if (cat.draw_format !== 'group_stage_knockout') {
+    return { error: 'This action is only for group stage + knockout categories' };
+  }
+  if (cat.knockout_seeding === 'manual') {
+    return { error: 'This category uses manual knockout seeding' };
+  }
+
+  const admin = createAdminClient();
+
+  const standings = await computeTeamGroupStandings(categoryId);
+  if ('error' in standings) return { error: standings.error };
+  const { groupNames, rankedByGroup, allGroupTiesDone } = standings;
+  if (!allGroupTiesDone) return { error: 'One or more group-stage ties still to be played' };
+
+  const { data: allTies } = await admin
+    .from('ties')
+    .select('id, round, bracket_position, group_name, team_a_id, team_b_id, round_name')
+    .eq('category_id', categoryId)
+    .order('round', { ascending: true })
+    .order('bracket_position', { ascending: true });
+  if (!allTies) return { error: 'No ties found' };
+  const knockoutTies = allTies.filter((t) => t.group_name === null);
+  if (knockoutTies.length === 0) return { error: 'No knockout bracket found' };
+
+  const totalKnockoutTeams = knockoutTies.reduce((acc, t) => {
+    if (t.team_a_id) acc.add(t.team_a_id);
+    if (t.team_b_id) acc.add(t.team_b_id);
+    return acc;
+  }, new Set<string>()).size;
+  const topPerGroup = groupNames.length > 0 ? Math.round(totalKnockoutTeams / groupNames.length) || 2 : 2;
+
+  const n = groupNames.length;
+  const ranked = groupNames.map((g) => rankedByGroup.get(g) ?? []);
+  const advancingTeams: string[] = [];
+  for (let i = 0; i + 1 < n; i += 2) {
+    const gi = ranked[i];
+    const gj = ranked[i + 1];
+    for (let r = 1; r <= Math.floor(topPerGroup / 2); r++) {
+      const rOpp = topPerGroup + 1 - r;
+      const a1 = gi?.[r - 1];
+      const b1 = gj?.[rOpp - 1];
+      if (a1 && b1) advancingTeams.push(a1, b1);
+      const b2 = gj?.[r - 1];
+      const a2 = gi?.[rOpp - 1];
+      if (b2 && a2) advancingTeams.push(b2, a2);
+    }
+    if (topPerGroup % 2 === 1) {
+      const mid = (topPerGroup + 1) / 2;
+      const a = gi?.[mid - 1];
+      const b = gj?.[mid - 1];
+      if (a && b) advancingTeams.push(a, b);
+    }
+  }
+
+  if (advancingTeams.length === 0) return { error: 'No group results to promote' };
+
+  const emptyKnockout = knockoutTies
+    .filter((t) => !t.team_a_id && !t.team_b_id)
+    .sort((a, b) => a.round - b.round || (a.bracket_position ?? 0) - (b.bracket_position ?? 0));
+
+  if (emptyKnockout.length === 0) return { error: 'Knockout slots are already filled' };
+
+  const { data: cat2 } = await admin
+    .from('tournament_categories')
+    .select('rubber_lineup, tournament_id')
+    .eq('id', categoryId)
+    .single();
+  const rubberLineup = (cat2?.rubber_lineup ?? []) as { sequence: number }[];
+
+  let idx = 0;
+  let promotedCount = 0;
+  for (const tie of emptyKnockout) {
+    const teamA = advancingTeams[idx++] ?? null;
+    const teamB = advancingTeams[idx++] ?? null;
+    if (!teamA && !teamB) continue;
+
+    await admin.from('ties').update({
+      ...(teamA ? { team_a_id: teamA } : {}),
+      ...(teamB ? { team_b_id: teamB } : {}),
+    }).eq('id', tie.id);
+    promotedCount++;
+
+    if (teamA && teamB) {
+      const rubberRows = rubberLineup.map((r) => ({
+        tournament_id: cat2!.tournament_id,
+        category_id: categoryId,
+        round: tie.round,
+        round_name: tie.round_name,
+        group_name: null,
+        status: 'scheduled' as const,
+        sets: [],
+        tie_id: tie.id,
+        rubber_sequence: r.sequence,
+      }));
+      await admin.from('matches').insert(rubberRows);
+    } else {
+      // Bye straight into this knockout slot — resolve and advance immediately.
+      const winner = teamA ?? teamB;
+      await admin.from('ties').update({
+        status: 'completed', winner_team_id: winner, completed_at: new Date().toISOString(),
+      }).eq('id', tie.id);
+      await checkAndAdvanceTie(admin, tie.id);
+    }
+  }
+
+  const tSlug = cat.tournamentData.slug;
+  revalidatePath(`/tournaments/${tSlug}/categories/${cat.slug}`);
+  return { success: true, promoted: promotedCount };
 }
 
 // ── Reset knockout bracket (auto seeding) ──────────────────────────────────────

@@ -301,6 +301,9 @@ export default async function CategoryPage({ params }: Props) {
               currentAdvancePerGroup={(category as { advance_per_group?: number }).advance_per_group ?? 2}
               currentHasThirdPlaceMatch={(category as { has_third_place_match?: boolean }).has_third_place_match ?? false}
               currentKnockoutSeeding={(category as { knockout_seeding?: 'auto' | 'manual' }).knockout_seeding ?? 'auto'}
+              currentRubberLineup={(category as unknown as { rubber_lineup?: { sequence: number; name: string; play_format: 'singles' | 'doubles' | 'mixed_doubles' }[] }).rubber_lineup}
+              currentRosterComposition={(category as unknown as { roster_composition?: { count: number; gender?: 'male' | 'female'; age_min?: number; age_max?: number }[] }).roster_composition}
+              currentDeciderFormat={(category as { decider_format?: 'singles' | 'doubles' | null }).decider_format ?? null}
             />
           </div>
         </div>
@@ -405,7 +408,7 @@ export default async function CategoryPage({ params }: Props) {
           } : undefined}
         />
 
-        {isTeamEvent && isDrawn && <TeamBracketView ties={ties} />}
+        {isTeamEvent && isDrawn && <TeamBracketView ties={ties} categoryId={categoryId} />}
 
         {/* Stage scoring overrides — shown for elimination-type formats */}
         {['single_elimination', 'double_elimination', 'group_stage_knockout'].includes(drawFormat) && (

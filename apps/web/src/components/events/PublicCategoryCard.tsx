@@ -76,6 +76,7 @@ export function PublicCategoryCard({
   const [teamName, setTeamName] = useState('');
   const [memberUsernames, setMemberUsernames] = useState('');
   const [teamCreated, setTeamCreated] = useState(false);
+  const [teamWarning, setTeamWarning] = useState<string | null>(null);
 
   const doubles = isDoubles(category.play_format);
   const isTeamEvent = category.play_format === 'team_event';
@@ -130,6 +131,7 @@ export function PublicCategoryCard({
       setError(result.error);
     } else {
       setTeamCreated(true);
+      setTeamWarning(result.warning ?? null);
       setShowTeamForm(false);
       router.refresh();
     }
@@ -384,7 +386,10 @@ export function PublicCategoryCard({
       )}
 
       {teamCreated && (
-        <p className="mt-3 text-xs text-brand-400">✓ Team registered — roster invites sent.</p>
+        <>
+          <p className="mt-3 text-xs text-brand-400">✓ Team registered — roster invites sent.</p>
+          {teamWarning && <p className="mt-1 text-xs text-amber-400">⚠ {teamWarning}</p>}
+        </>
       )}
 
       {error && <p className="mt-3 text-xs text-red-400">{error}</p>}

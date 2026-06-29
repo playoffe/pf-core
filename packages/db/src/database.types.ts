@@ -725,6 +725,7 @@ export type Database = {
           entry_b_id: string | null
           group_name: string | null
           id: string
+          is_decider: boolean
           loser_slot: string | null
           loser_to_match_id: string | null
           paused_for_reassignment: boolean
@@ -762,6 +763,7 @@ export type Database = {
           entry_b_id?: string | null
           group_name?: string | null
           id?: string
+          is_decider?: boolean
           loser_slot?: string | null
           loser_to_match_id?: string | null
           paused_for_reassignment?: boolean
@@ -799,6 +801,7 @@ export type Database = {
           entry_b_id?: string | null
           group_name?: string | null
           id?: string
+          is_decider?: boolean
           loser_slot?: string | null
           loser_to_match_id?: string | null
           paused_for_reassignment?: boolean
@@ -1729,6 +1732,8 @@ export type Database = {
           lineup_a_submitted_at: string | null
           lineup_b_submitted_at: string | null
           point_diff_a: number
+          points_against_a: number
+          points_for_a: number
           round: number
           round_name: string | null
           rubbers_won_a: number
@@ -1752,6 +1757,8 @@ export type Database = {
           lineup_a_submitted_at?: string | null
           lineup_b_submitted_at?: string | null
           point_diff_a?: number
+          points_against_a?: number
+          points_for_a?: number
           round: number
           round_name?: string | null
           rubbers_won_a?: number
@@ -1775,6 +1782,8 @@ export type Database = {
           lineup_a_submitted_at?: string | null
           lineup_b_submitted_at?: string | null
           point_diff_a?: number
+          points_against_a?: number
+          points_for_a?: number
           round?: number
           round_name?: string | null
           rubbers_won_a?: number
@@ -1836,6 +1845,7 @@ export type Database = {
         Row: {
           advance_per_group: number
           created_at: string
+          decider_format: string | null
           deuce_cap: number | null
           draw_format: Database["public"]["Enums"]["draw_format_enum"]
           group_sizes: number[] | null
@@ -1850,6 +1860,7 @@ export type Database = {
           num_sets: number | null
           play_format: Database["public"]["Enums"]["play_format_enum"]
           points_per_set: number | null
+          roster_composition: Json
           rubber_lineup: Json
           runner_up_entry_id: string | null
           schedule_day: string | null
@@ -1868,6 +1879,7 @@ export type Database = {
         Insert: {
           advance_per_group?: number
           created_at?: string
+          decider_format?: string | null
           deuce_cap?: number | null
           draw_format: Database["public"]["Enums"]["draw_format_enum"]
           group_sizes?: number[] | null
@@ -1882,6 +1894,7 @@ export type Database = {
           num_sets?: number | null
           play_format: Database["public"]["Enums"]["play_format_enum"]
           points_per_set?: number | null
+          roster_composition?: Json
           rubber_lineup?: Json
           runner_up_entry_id?: string | null
           schedule_day?: string | null
@@ -1900,6 +1913,7 @@ export type Database = {
         Update: {
           advance_per_group?: number
           created_at?: string
+          decider_format?: string | null
           deuce_cap?: number | null
           draw_format?: Database["public"]["Enums"]["draw_format_enum"]
           group_sizes?: number[] | null
@@ -1914,6 +1928,7 @@ export type Database = {
           num_sets?: number | null
           play_format?: Database["public"]["Enums"]["play_format_enum"]
           points_per_set?: number | null
+          roster_composition?: Json
           rubber_lineup?: Json
           runner_up_entry_id?: string | null
           schedule_day?: string | null
@@ -2135,7 +2150,9 @@ export type Database = {
           captain_id: string
           category_id: string
           id: string
+          marquee_player_id: string | null
           name: string
+          owner_name: string | null
           registered_at: string
           seed: number | null
           status: Database["public"]["Enums"]["entry_status_enum"]
@@ -2145,7 +2162,9 @@ export type Database = {
           captain_id: string
           category_id: string
           id?: string
+          marquee_player_id?: string | null
           name: string
+          owner_name?: string | null
           registered_at?: string
           seed?: number | null
           status?: Database["public"]["Enums"]["entry_status_enum"]
@@ -2155,7 +2174,9 @@ export type Database = {
           captain_id?: string
           category_id?: string
           id?: string
+          marquee_player_id?: string | null
           name?: string
+          owner_name?: string | null
           registered_at?: string
           seed?: number | null
           status?: Database["public"]["Enums"]["entry_status_enum"]
@@ -2174,6 +2195,13 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "tournament_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tournament_teams_marquee_player_id_fkey"
+            columns: ["marquee_player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
             referencedColumns: ["id"]
           },
           {
@@ -2422,6 +2450,7 @@ export type Database = {
         | "scheduled"
         | "in_progress"
         | "completed"
+        | "awaiting_decider"
       tournament_status_enum:
         | "draft"
         | "registration_open"
@@ -2632,6 +2661,7 @@ export const Constants = {
         "scheduled",
         "in_progress",
         "completed",
+        "awaiting_decider",
       ],
       tournament_status_enum: [
         "draft",

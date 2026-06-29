@@ -3,8 +3,43 @@
 import { revalidatePath } from 'next/cache';
 import { createAdminClient, createClient, getCurrentUser } from '@/lib/supabase/server';
 import { checkPermission } from '@/lib/permissions';
-import { registerTeamSchema } from '@pickleball/shared';
+import { registerTeamSchema, type RosterCompositionRule } from '@pickleball/shared';
 import { sendTeamInviteNotification } from '@/lib/email/notifications';
+import { checkAndAdvanceTie } from './scoring';
+
+// ── Roster composition: soft warning only, never blocks registration ─────────
+function playerAge(dob: string | null): number | null {
+  if (!dob) return null;
+  const diff = Date.now() - new Date(dob).getTime();
+  return Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000));
+}
+
+function checkRosterComposition(
+  rules: RosterCompositionRule[],
+  roster: { gender: string; dob: string | null }[],
+): string | null {
+  if (!rules || rules.length === 0) return null;
+  const shortfalls: string[] = [];
+  for (const rule of rules) {
+    const matching = roster.filter((p) => {
+      if (rule.gender && p.gender !== rule.gender) return false;
+      const age = playerAge(p.dob);
+      if (rule.age_min !== undefined && (age === null || age < rule.age_min)) return false;
+      if (rule.age_max !== undefined && (age === null || age > rule.age_max)) return false;
+      return true;
+    });
+    if (matching.length < rule.count) {
+      const desc = [
+        rule.gender ? (rule.gender === 'male' ? 'men' : 'women') : 'players',
+        rule.age_min !== undefined ? `${rule.age_min}+` : '',
+        rule.age_max !== undefined ? `under ${rule.age_max}` : '',
+      ].filter(Boolean).join(' ');
+      shortfalls.push(`needs ${rule.count} ${desc} (has ${matching.length})`);
+    }
+  }
+  if (shortfalls.length === 0) return null;
+  return `Roster doesn't meet the category's composition rule: ${shortfalls.join('; ')}.`;
+}
 
 // ── Verify the calling user manages the tournament's club ──────────────────
 async function assertTournamentManager(tournamentId: string, userId: string) {
@@ -26,6 +61,35 @@ async function assertTournamentManager(tournamentId: string, userId: string) {
   return mgr ? t : null;
 }
 
+// ── A player can only be on one team per tournament (not just per category) ──
+async function findPlayersAlreadyOnATeam(
+  admin: ReturnType<typeof createAdminClient>,
+  tournamentId: string,
+  playerIds: string[],
+): Promise<string[]> {
+  if (playerIds.length === 0) return [];
+
+  const { data: captainTeams } = await admin
+    .from('tournament_teams')
+    .select('captain_id')
+    .eq('tournament_id', tournamentId)
+    .neq('status', 'withdrawn')
+    .in('captain_id', playerIds);
+
+  const { data: memberRows } = await admin
+    .from('team_members')
+    .select('player_id, tournament_teams!inner(tournament_id, status)')
+    .in('player_id', playerIds)
+    .in('status', ['active', 'provisional'])
+    .eq('tournament_teams.tournament_id', tournamentId)
+    .neq('tournament_teams.status', 'withdrawn');
+
+  return [...new Set([
+    ...(captainTeams ?? []).map((t) => t.captain_id),
+    ...(memberRows ?? []).map((m) => m.player_id),
+  ])];
+}
+
 // ── Organizer: add a team directly (no invite/confirm flow) ──────────────────
 // Mirrors addPlayerByEmailAction's organizer-add pattern — looks players up by
 // email and adds them immediately as 'active', bypassing the captain-invite flow.
@@ -35,6 +99,8 @@ export async function addTeamByOrganizerAction(
   teamName: string,
   captainEmail: string,
   memberEmails: string[],
+  marqueeEmail?: string,
+  ownerName?: string,
 ) {
   const user = await getCurrentUser();
   if (!user) return { error: 'Not authenticated' };
@@ -48,14 +114,14 @@ export async function addTeamByOrganizerAction(
 
   const { data: cat } = await admin
     .from('tournament_categories')
-    .select('id, play_format')
+    .select('id, play_format, roster_composition')
     .eq('id', categoryId)
     .single();
   if (!cat || cat.play_format !== 'team_event') return { error: 'This action is only for team event categories' };
 
   const { data: captain } = await admin
     .from('players')
-    .select('id')
+    .select('id, gender, dob')
     .eq('email', captainEmail.toLowerCase().trim())
     .maybeSingle();
   if (!captain) return { error: 'No PLAYOFFE account found for the captain email address' };
@@ -67,13 +133,30 @@ export async function addTeamByOrganizerAction(
 
   const { data: members } = await admin
     .from('players')
-    .select('id, email')
+    .select('id, email, gender, dob')
     .in('email', cleanedMemberEmails);
 
   const found = members ?? [];
   const foundEmails = new Set(found.map((m) => m.email.toLowerCase()));
   const missing = cleanedMemberEmails.filter((e) => !foundEmails.has(e));
   if (missing.length > 0) return { error: `No PLAYOFFE account found for: ${missing.join(', ')}` };
+
+  const conflicting = await findPlayersAlreadyOnATeam(admin, tournamentId, [captain.id, ...found.map((m) => m.id)]);
+  if (conflicting.length > 0) {
+    return { error: 'One or more players are already on a team in this tournament. A player can only be on one team per tournament.' };
+  }
+
+  let marqueePlayerId: string | null = null;
+  if (marqueeEmail?.trim()) {
+    const normMarquee = marqueeEmail.toLowerCase().trim();
+    if (normMarquee === captainEmail.toLowerCase().trim()) {
+      marqueePlayerId = captain.id;
+    } else {
+      const marqueeMember = found.find((m) => m.email.toLowerCase() === normMarquee);
+      if (!marqueeMember) return { error: 'Marquee player must be the captain or a roster member' };
+      marqueePlayerId = marqueeMember.id;
+    }
+  }
 
   const { data: team, error: teamErr } = await admin
     .from('tournament_teams')
@@ -82,6 +165,8 @@ export async function addTeamByOrganizerAction(
       category_id: categoryId,
       name: teamName.trim(),
       captain_id: captain.id,
+      marquee_player_id: marqueePlayerId,
+      owner_name: ownerName?.trim() || null,
       status: 'active',
     })
     .select('id')
@@ -99,8 +184,104 @@ export async function addTeamByOrganizerAction(
     }
   }
 
+  const warning = checkRosterComposition(
+    (cat.roster_composition ?? []) as unknown as RosterCompositionRule[],
+    [captain, ...found],
+  );
+
   revalidatePath(`/tournaments/${t.slug}/categories/${categoryId}`);
-  return { success: true, teamId: team.id };
+  return { success: true, teamId: team.id, warning };
+}
+
+// ── Organizer: reassign a team's captain ──────────────────────────────────────
+// The new captain must already be on the roster (active team_members row) or
+// be the existing captain being swapped for someone already on the roster.
+export async function reassignTeamCaptainAction(teamId: string, newCaptainId: string, tournamentId: string) {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const t = await assertTournamentManager(tournamentId, user.id);
+  if (!t) return { error: 'Permission denied' };
+
+  const admin = createAdminClient();
+
+  const { data: team } = await admin.from('tournament_teams').select('id, captain_id').eq('id', teamId).single();
+  if (!team) return { error: 'Team not found' };
+  if (team.captain_id === newCaptainId) return { success: true };
+
+  const { data: member } = await admin
+    .from('team_members')
+    .select('id')
+    .eq('team_id', teamId)
+    .eq('player_id', newCaptainId)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (!member) return { error: 'New captain must be an active roster member' };
+
+  const { error } = await admin.from('tournament_teams').update({ captain_id: newCaptainId }).eq('id', teamId);
+  if (error) return { error: 'Failed to reassign captain' };
+
+  revalidatePath(`/tournaments/${t.slug}`);
+  return { success: true };
+}
+
+// ── Walk over an entire tie to one team ───────────────────────────────────────
+// Shared core for the organizer-initiated walkoverTieAction and the automatic
+// cascade that runs when a team withdraws after the draw is generated. Marks
+// every not-yet-finished rubber 'walkover' and the tie 'completed' in one go.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function applyTieWalkover(admin: any, tieId: string, winningTeamId: string) {
+  const { data: tie } = await admin
+    .from('ties')
+    .select('id, category_id, team_a_id, team_b_id, status')
+    .eq('id', tieId)
+    .single();
+  if (!tie) return { error: 'Tie not found' };
+  if (winningTeamId !== tie.team_a_id && winningTeamId !== tie.team_b_id) {
+    return { error: 'Winning team must be one of the two teams in this tie' };
+  }
+  if (tie.status === 'completed') return { error: 'Tie is already completed' };
+
+  await admin
+    .from('matches')
+    .update({ status: 'walkover' })
+    .eq('tie_id', tieId)
+    .not('status', 'in', '("completed","walkover")');
+
+  const { data: cat } = await admin.from('tournament_categories').select('rubber_lineup').eq('id', tie.category_id).single();
+  const totalRubbers = ((cat?.rubber_lineup ?? []) as unknown[]).length;
+  const winnerIsA = winningTeamId === tie.team_a_id;
+
+  await admin.from('ties').update({
+    status: 'completed',
+    completed_at: new Date().toISOString(),
+    winner_team_id: winningTeamId,
+    rubbers_won_a: winnerIsA ? totalRubbers : 0,
+    rubbers_won_b: winnerIsA ? 0 : totalRubbers,
+  }).eq('id', tieId);
+
+  await checkAndAdvanceTie(admin, tieId);
+  return { success: true };
+}
+
+// ── Organizer: walk over an entire tie to one team ────────────────────────────
+export async function walkoverTieAction(tieId: string, winningTeamId: string) {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+
+  const { data: tie } = await admin.from('ties').select('tournament_id').eq('id', tieId).single();
+  if (!tie) return { error: 'Tie not found' };
+
+  const t = await assertTournamentManager(tie.tournament_id, user.id);
+  if (!t) return { error: 'Permission denied' };
+
+  const result = await applyTieWalkover(admin, tieId, winningTeamId);
+  if ('error' in result) return result;
+
+  revalidatePath(`/tournaments/${t.slug}`);
+  return { success: true };
 }
 
 // ── Organizer: remove a team ──────────────────────────────────────────────────
@@ -122,18 +303,32 @@ export async function removeTeamAction(teamId: string, tournamentId: string) {
 export async function getTeamsForCategoryAction(categoryId: string) {
   const admin = createAdminClient();
 
+  const { data: cat } = await admin
+    .from('tournament_categories')
+    .select('roster_composition')
+    .eq('id', categoryId)
+    .single();
+  const rules = (cat?.roster_composition ?? []) as unknown as RosterCompositionRule[];
+
   const { data: teams } = await admin
     .from('tournament_teams')
     .select(`
-      id, name, seed, status, registered_at,
-      captain:players!captain_id(id, full_name, username),
-      team_members(id, status, player:players!player_id(id, full_name, username))
+      id, name, seed, status, registered_at, owner_name,
+      captain:players!captain_id(id, full_name, username, gender, dob),
+      marquee:players!marquee_player_id(id, full_name, username),
+      team_members(id, status, player:players!player_id(id, full_name, username, gender, dob))
     `)
     .eq('category_id', categoryId)
     .neq('status', 'withdrawn')
     .order('registered_at', { ascending: true });
 
-  return teams ?? [];
+  return (teams ?? []).map((team) => {
+    const roster = [
+      ...(team.captain ? [team.captain] : []),
+      ...team.team_members.filter((m) => m.status === 'active' && m.player).map((m) => m.player!),
+    ];
+    return { ...team, composition_warning: checkRosterComposition(rules, roster) };
+  });
 }
 
 // ── Register a team with a roster ─────────────────────────────────────────────
@@ -149,7 +344,7 @@ export async function registerTeamAction(categoryId: string, name: string, membe
 
   const { data: cat } = await admin
     .from('tournament_categories')
-    .select('id, tournament_id, status, max_entries, play_format, name, tournaments(id, slug, status, registration_deadline, auto_approve_entries, name)')
+    .select('id, tournament_id, status, max_entries, play_format, name, roster_composition, tournaments(id, slug, status, registration_deadline, auto_approve_entries, name)')
     .eq('id', categoryId)
     .single();
 
@@ -173,7 +368,7 @@ export async function registerTeamAction(categoryId: string, name: string, membe
 
   const { data: members } = await admin
     .from('players')
-    .select('id, full_name, email, username')
+    .select('id, full_name, email, username, gender, dob')
     .in('username', cleanedUsernames);
 
   const found = members ?? [];
@@ -181,6 +376,11 @@ export async function registerTeamAction(categoryId: string, name: string, membe
   const missing = cleanedUsernames.filter((u) => !foundUsernames.has(u));
   if (missing.length > 0) return { error: `Player(s) not found: ${missing.map((u) => `@${u}`).join(', ')}` };
   if (found.some((m) => m.id === user.id)) return { error: "You can't add yourself as a roster member — you're the captain." };
+
+  const conflicting = await findPlayersAlreadyOnATeam(admin, cat.tournament_id, [user.id, ...found.map((m) => m.id)]);
+  if (conflicting.length > 0) {
+    return { error: 'You or one of the invited players is already on a team in this tournament. A player can only be on one team per tournament.' };
+  }
 
   // Capacity check (teams, not players) — active + pending count toward capacity
   const { count: activeCount } = await admin
@@ -214,7 +414,12 @@ export async function registerTeamAction(categoryId: string, name: string, membe
     return { error: 'Failed to invite roster members. Please try again.' };
   }
 
-  const { data: captain } = await admin.from('players').select('full_name').eq('id', user.id).single();
+  const { data: captain } = await admin.from('players').select('full_name, gender, dob').eq('id', user.id).single();
+
+  const warning = checkRosterComposition(
+    (cat.roster_composition ?? []) as unknown as RosterCompositionRule[],
+    captain ? [captain, ...found] : found,
+  );
 
   for (const member of found) {
     void sendTeamInviteNotification({
@@ -229,7 +434,7 @@ export async function registerTeamAction(categoryId: string, name: string, membe
 
   revalidatePath(`/events/${tournament.slug}`);
   revalidatePath('/dashboard');
-  return { success: true, teamId: team.id, willBeWaitlisted: isFull };
+  return { success: true, teamId: team.id, willBeWaitlisted: isFull, warning };
 }
 
 // ── Roster member confirm / decline ───────────────────────────────────────────
@@ -252,6 +457,13 @@ export async function confirmTeamInviteAction(memberId: string) {
 
   const team = member.tournament_teams as unknown as { id: string; tournament_id: string; tournaments: { slug: string } | null } | null;
   const tSlug = team?.tournaments?.slug ?? team?.tournament_id;
+
+  if (team) {
+    const conflicting = await findPlayersAlreadyOnATeam(admin, team.tournament_id, [user.id]);
+    if (conflicting.length > 0) {
+      return { error: "You're already on another team in this tournament — you can only be on one team per tournament." };
+    }
+  }
 
   await admin.from('team_members').update({ status: 'active', responded_at: new Date().toISOString() }).eq('id', memberId);
 
@@ -334,6 +546,20 @@ export async function withdrawTeamAction(teamId: string) {
 
   await admin.from('tournament_teams').update({ status: 'withdrawn' }).eq('id', teamId);
 
+  // If the draw has already been generated, this team's remaining ties walk
+  // over to the opponent automatically (no replacement-team mechanism for
+  // teams, unlike the entry-replacement flow for singles/doubles).
+  const { data: pendingTies } = await admin
+    .from('ties')
+    .select('id, team_a_id, team_b_id')
+    .or(`team_a_id.eq.${teamId},team_b_id.eq.${teamId}`)
+    .not('status', 'eq', 'completed');
+
+  for (const tie of pendingTies ?? []) {
+    const opponentId = tie.team_a_id === teamId ? tie.team_b_id : tie.team_a_id;
+    if (opponentId) await applyTieWalkover(admin, tie.id, opponentId);
+  }
+
   revalidatePath(`/events/${tSlug}`);
   revalidatePath(`/tournaments/${tSlug}`);
   revalidatePath('/dashboard');
@@ -371,9 +597,11 @@ export async function submitTieLineupAction(tieId: string, lineup: LineupSlot[])
   else if (teamB?.captain_id === user.id) { side = 'b'; captainTeam = teamB; }
   else return { error: 'Only a team captain can submit a lineup for this tie.' };
 
-  if (side === 'a' && tie.lineup_a_submitted_at) return { error: 'Your lineup is already locked in for this tie.' };
-  if (side === 'b' && tie.lineup_b_submitted_at) return { error: 'Your lineup is already locked in for this tie.' };
-
+  // Per-rubber lock: a captain can edit their lineup unilaterally, any time,
+  // for any rubber whose match hasn't started yet ('scheduled' status). Once
+  // a rubber's match leaves 'scheduled' (in_progress/completed/walkover),
+  // that rubber's assignment is frozen — but other not-yet-started rubbers in
+  // the same tie remain editable. No whole-tie lock.
   const { data: category } = await admin
     .from('tournament_categories')
     .select('rubber_lineup')
@@ -382,9 +610,22 @@ export async function submitTieLineupAction(tieId: string, lineup: LineupSlot[])
 
   const rubberLineup = (category?.rubber_lineup ?? []) as { sequence: number; name: string; play_format: string }[];
   const lineupBySeq = new Map(lineup.map((l) => [l.rubber_sequence, l]));
+  const entryColumn = side === 'a' ? 'entry_a_id' : 'entry_b_id';
+
+  const { data: rubberMatches } = await admin
+    .from('matches')
+    .select('id, rubber_sequence, status, entry_a_id, entry_b_id')
+    .eq('tie_id', tieId)
+    .eq('is_decider', false);
+
+  const matchBySeq = new Map((rubberMatches ?? []).map((m) => [m.rubber_sequence, m]));
 
   for (const rubber of rubberLineup) {
     const label = rubber.name || `Rubber ${rubber.sequence}`;
+    const match = matchBySeq.get(rubber.sequence);
+    if (!match) continue;
+    if (match.status !== 'scheduled') continue; // already started/completed — frozen, silently skip
+
     const slot = lineupBySeq.get(rubber.sequence);
     if (!slot) return { error: `Missing lineup for ${label}.` };
     const needsPartner = rubber.play_format === 'doubles' || rubber.play_format === 'mixed_doubles';
@@ -413,38 +654,207 @@ export async function submitTieLineupAction(tieId: string, lineup: LineupSlot[])
       if (!confirmedPartner && !isCaptainPartner) return { error: `Partner in ${label} is not a confirmed roster member.` };
     }
 
+    const existingEntryId = side === 'a' ? match.entry_a_id : match.entry_b_id;
+
+    if (existingEntryId) {
+      // Editing a previously submitted slot — update the existing entry in place.
+      const { error: updateErr } = await admin
+        .from('tournament_entries')
+        .update({ player_id: slot.player_id, partner_id: slot.partner_id ?? null })
+        .eq('id', existingEntryId);
+      if (updateErr) return { error: `Failed to update lineup for ${label}.` };
+    } else {
+      const { data: entry, error: entryErr } = await admin
+        .from('tournament_entries')
+        .insert({
+          tournament_id: tie.tournament_id,
+          category_id: tie.category_id,
+          player_id: slot.player_id,
+          partner_id: slot.partner_id ?? null,
+          team_id: captainTeam.id,
+          status: 'active',
+        })
+        .select('id')
+        .single();
+
+      if (entryErr || !entry) return { error: `Failed to register lineup for ${label}.` };
+
+      await admin
+        .from('matches')
+        .update({ [entryColumn]: entry.id })
+        .eq('id', match.id);
+    }
+  }
+
+  const lockField = side === 'a' ? 'lineup_a_submitted_at' : 'lineup_b_submitted_at';
+  const alreadySubmitted = side === 'a' ? tie.lineup_a_submitted_at : tie.lineup_b_submitted_at;
+  const otherSubmitted = side === 'a' ? tie.lineup_b_submitted_at : tie.lineup_a_submitted_at;
+  await admin
+    .from('ties')
+    .update({
+      ...(!alreadySubmitted && { [lockField]: new Date().toISOString() }),
+      ...(otherSubmitted && { status: 'scheduled' }),
+    })
+    .eq('id', tieId);
+
+  return { success: true };
+}
+
+// ── Fetch everything a captain's lineup-submission form needs for one tie ────
+export async function getTieLineupContext(tieId: string) {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'Not authenticated.' };
+
+  const admin = createAdminClient();
+
+  const { data: tie } = await admin
+    .from('ties')
+    .select('id, category_id, status, team_a_id, team_b_id, lineup_a_submitted_at, lineup_b_submitted_at')
+    .eq('id', tieId)
+    .single();
+  if (!tie || !tie.team_a_id || !tie.team_b_id) return { error: 'Tie not found.' };
+
+  const { data: category } = await admin
+    .from('tournament_categories')
+    .select('rubber_lineup, decider_format')
+    .eq('id', tie.category_id)
+    .single();
+
+  const { data: teamA } = await admin
+    .from('tournament_teams')
+    .select('id, name, captain_id, captain:players!captain_id(id, full_name)')
+    .eq('id', tie.team_a_id)
+    .single();
+  const { data: teamB } = await admin
+    .from('tournament_teams')
+    .select('id, name, captain_id, captain:players!captain_id(id, full_name)')
+    .eq('id', tie.team_b_id)
+    .single();
+
+  const mySide: 'a' | 'b' | null =
+    teamA?.captain_id === user.id ? 'a' : teamB?.captain_id === user.id ? 'b' : null;
+
+  async function rosterFor(teamId: string, captain: { id: string; full_name: string } | null) {
+    const { data: members } = await admin
+      .from('team_members')
+      .select('player:players!player_id(id, full_name)')
+      .eq('team_id', teamId)
+      .eq('status', 'active');
+    const memberPlayers = (members ?? []).map((m) => m.player as unknown as { id: string; full_name: string });
+    return captain ? [captain, ...memberPlayers] : memberPlayers;
+  }
+
+  const rosterA = teamA ? await rosterFor(teamA.id, teamA.captain as unknown as { id: string; full_name: string } | null) : [];
+  const rosterB = teamB ? await rosterFor(teamB.id, teamB.captain as unknown as { id: string; full_name: string } | null) : [];
+
+  const { data: matches } = await admin
+    .from('matches')
+    .select(`
+      id, rubber_sequence, is_decider, status,
+      entry_a:tournament_entries!entry_a_id(player_id, partner_id),
+      entry_b:tournament_entries!entry_b_id(player_id, partner_id)
+    `)
+    .eq('tie_id', tieId)
+    .order('rubber_sequence', { ascending: true });
+
+  return {
+    tieId: tie.id,
+    tieStatus: tie.status,
+    lineupASubmitted: !!tie.lineup_a_submitted_at,
+    lineupBSubmitted: !!tie.lineup_b_submitted_at,
+    rubberLineup: (category?.rubber_lineup ?? []) as { sequence: number; name: string; play_format: string }[],
+    deciderFormat: (category?.decider_format ?? null) as 'singles' | 'doubles' | null,
+    teamA: teamA ? { id: teamA.id, name: teamA.name, roster: rosterA } : null,
+    teamB: teamB ? { id: teamB.id, name: teamB.name, roster: rosterB } : null,
+    mySide,
+    matches: matches ?? [],
+  };
+}
+
+// ── Submit a captain's player(s) for a decider rubber ────────────────────────
+// Created automatically (checkAndAdvanceTie in scoring.ts) when a knockout
+// tie ends tied on rubbers and the category has a decider_format configured.
+// Same captain/roster validation as submitTieLineupAction, but for the single
+// extra decider match rather than the whole pre-configured lineup.
+export async function submitDeciderLineupAction(tieId: string, playerId: string, partnerId?: string) {
+  const user = await getCurrentUser();
+  if (!user) return { error: 'Not authenticated.' };
+
+  const admin = createAdminClient();
+
+  const { data: tie } = await admin
+    .from('ties')
+    .select('id, category_id, tournament_id, status, team_a_id, team_b_id')
+    .eq('id', tieId)
+    .single();
+
+  if (!tie || tie.status !== 'awaiting_decider' || !tie.team_a_id || !tie.team_b_id) {
+    return { error: 'This tie has no decider awaiting a lineup.' };
+  }
+
+  const { data: teamA } = await admin.from('tournament_teams').select('id, captain_id').eq('id', tie.team_a_id).single();
+  const { data: teamB } = await admin.from('tournament_teams').select('id, captain_id').eq('id', tie.team_b_id).single();
+
+  let side: 'a' | 'b';
+  let captainTeam: { id: string; captain_id: string };
+  if (teamA?.captain_id === user.id) { side = 'a'; captainTeam = teamA; }
+  else if (teamB?.captain_id === user.id) { side = 'b'; captainTeam = teamB; }
+  else return { error: 'Only a team captain can submit a decider lineup for this tie.' };
+
+  const { data: category } = await admin
+    .from('tournament_categories')
+    .select('decider_format')
+    .eq('id', tie.category_id)
+    .single();
+
+  const needsPartner = category?.decider_format === 'doubles';
+  if (needsPartner && !partnerId) return { error: 'The decider requires two players.' };
+  if (!needsPartner && partnerId) return { error: 'The decider is singles — only one player.' };
+
+  for (const pid of [playerId, ...(partnerId ? [partnerId] : [])]) {
+    const isCaptainPlaying = pid === captainTeam.captain_id;
+    if (!isCaptainPlaying) {
+      const { data: confirmedMember } = await admin
+        .from('team_members')
+        .select('id')
+        .eq('team_id', captainTeam.id)
+        .eq('player_id', pid)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (!confirmedMember) return { error: 'Decider player(s) must be confirmed roster members.' };
+    }
+  }
+
+  const { data: deciderMatch } = await admin
+    .from('matches')
+    .select('id, entry_a_id, entry_b_id')
+    .eq('tie_id', tieId)
+    .eq('is_decider', true)
+    .single();
+
+  if (!deciderMatch) return { error: 'Decider match not found.' };
+
+  const existingEntryId = side === 'a' ? deciderMatch.entry_a_id : deciderMatch.entry_b_id;
+  const entryColumn = side === 'a' ? 'entry_a_id' : 'entry_b_id';
+
+  if (existingEntryId) {
+    await admin.from('tournament_entries').update({ player_id: playerId, partner_id: partnerId ?? null }).eq('id', existingEntryId);
+  } else {
     const { data: entry, error: entryErr } = await admin
       .from('tournament_entries')
       .insert({
         tournament_id: tie.tournament_id,
         category_id: tie.category_id,
-        player_id: slot.player_id,
-        partner_id: slot.partner_id ?? null,
+        player_id: playerId,
+        partner_id: partnerId ?? null,
         team_id: captainTeam.id,
         status: 'active',
       })
       .select('id')
       .single();
-
-    if (entryErr || !entry) return { error: `Failed to register lineup for ${label}.` };
-
-    const entryColumn = side === 'a' ? 'entry_a_id' : 'entry_b_id';
-    await admin
-      .from('matches')
-      .update({ [entryColumn]: entry.id })
-      .eq('tie_id', tieId)
-      .eq('rubber_sequence', rubber.sequence);
+    if (entryErr || !entry) return { error: 'Failed to submit decider lineup.' };
+    await admin.from('matches').update({ [entryColumn]: entry.id }).eq('id', deciderMatch.id);
   }
-
-  const lockField = side === 'a' ? 'lineup_a_submitted_at' : 'lineup_b_submitted_at';
-  const otherLocked = side === 'a' ? tie.lineup_b_submitted_at : tie.lineup_a_submitted_at;
-  await admin
-    .from('ties')
-    .update({
-      [lockField]: new Date().toISOString(),
-      ...(otherLocked && { status: 'scheduled' }),
-    })
-    .eq('id', tieId);
 
   return { success: true };
 }

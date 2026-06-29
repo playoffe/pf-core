@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { removeTeamAction } from '@/lib/actions/teams';
+import { removeTeamAction, reassignTeamCaptainAction } from '@/lib/actions/teams';
 import { useConfirm } from '@/components/ui/ConfirmProvider';
 
 interface Player {
@@ -23,8 +23,11 @@ interface Team {
   name: string;
   seed: number | null;
   status: string;
+  owner_name: string | null;
   captain: Player | null;
+  marquee: Player | null;
   team_members: TeamMember[];
+  composition_warning?: string | null;
 }
 
 interface Props {
@@ -44,6 +47,7 @@ export function TeamRosterList({ teams, tournamentId }: Props) {
   const router = useRouter();
   const { confirm } = useConfirm();
   const [removing, setRemoving] = useState<string | null>(null);
+  const [reassigningTeam, setReassigningTeam] = useState<string | null>(null);
 
   async function handleRemove(teamId: string, teamName: string) {
     if (!await confirm({
@@ -56,6 +60,12 @@ export function TeamRosterList({ teams, tournamentId }: Props) {
     await removeTeamAction(teamId, tournamentId);
     router.refresh();
     setRemoving(null);
+  }
+
+  async function handleReassignCaptain(teamId: string, newCaptainId: string) {
+    await reassignTeamCaptainAction(teamId, newCaptainId, tournamentId);
+    setReassigningTeam(null);
+    router.refresh();
   }
 
   if (teams.length === 0) {
@@ -75,7 +85,10 @@ export function TeamRosterList({ teams, tournamentId }: Props) {
           <div key={team.id} className="rounded-xl bg-surface-card p-4 ring-1 ring-surface-border">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-white">{team.name}</p>
+                <p className="text-sm font-semibold text-white">
+                  {team.name}
+                  {team.owner_name && <span className="ml-2 text-xs font-normal text-slate-500">owned by {team.owner_name}</span>}
+                </p>
                 <p className="mt-0.5 text-xs text-slate-500">
                   Captain:{' '}
                   {team.captain ? (
@@ -83,12 +96,41 @@ export function TeamRosterList({ teams, tournamentId }: Props) {
                       {team.captain.full_name}
                     </Link>
                   ) : 'Unknown'}
+                  {team.marquee && (
+                    <span className="ml-2 rounded-full bg-brand-900/40 px-2 py-0.5 text-[10px] text-brand-300">
+                      ★ {team.marquee.full_name}
+                    </span>
+                  )}
                   {pendingCount > 0 && (
                     <span className="ml-2 rounded-full bg-amber-900/40 px-2 py-0.5 text-[10px] text-amber-300">
                       {pendingCount} invite{pendingCount !== 1 ? 's' : ''} pending
                     </span>
                   )}
                 </p>
+                {reassigningTeam === team.id ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <select
+                      defaultValue=""
+                      onChange={(e) => e.target.value && handleReassignCaptain(team.id, e.target.value)}
+                      className="rounded border border-slate-600 bg-surface px-2 py-1 text-xs text-white outline-none"
+                    >
+                      <option value="" disabled>Choose new captain…</option>
+                      {confirmedMembers.map((m) => (
+                        <option key={m.player!.id} value={m.player!.id}>{m.player!.full_name}</option>
+                      ))}
+                    </select>
+                    <button onClick={() => setReassigningTeam(null)} className="text-xs text-slate-500 hover:text-slate-300">Cancel</button>
+                  </div>
+                ) : (
+                  confirmedMembers.length > 0 && (
+                    <button
+                      onClick={() => setReassigningTeam(team.id)}
+                      className="mt-1.5 text-[11px] text-slate-500 hover:text-brand-300 transition-colors"
+                    >
+                      Reassign captain
+                    </button>
+                  )
+                )}
               </div>
               <button
                 onClick={() => handleRemove(team.id, team.name)}
@@ -111,6 +153,12 @@ export function TeamRosterList({ teams, tournamentId }: Props) {
                   </div>
                 ))}
               </div>
+            )}
+
+            {team.composition_warning && (
+              <p className="mt-2 rounded bg-amber-900/20 px-2 py-1 text-[11px] text-amber-300">
+                ⚠ {team.composition_warning}
+              </p>
             )}
           </div>
         );

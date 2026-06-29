@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createCategoryAction } from '@/lib/actions/categories';
 import { WinByDeuceFields } from './WinByDeuceFields';
-import { CATEGORY_TYPES, PLAY_FORMATS, DRAW_FORMATS } from '@pickleball/shared';
+import { RubberLineupEditor, RosterCompositionEditor, DeciderFormatSelect } from './RubberLineupEditor';
+import { CATEGORY_TYPES, PLAY_FORMATS, DRAW_FORMATS, type RosterCompositionRule } from '@pickleball/shared';
 import {
   suggestGroupConfig,
   deriveGroupSize,
@@ -52,6 +53,8 @@ export function AddCategoryInline({
     { sequence: 2, name: 'Rubber 2', play_format: 'singles' },
     { sequence: 3, name: 'Rubber 3', play_format: 'doubles' },
   ]);
+  const [rosterComposition, setRosterComposition] = useState<RosterCompositionRule[]>([]);
+  const [deciderFormat, setDeciderFormat] = useState<'singles' | 'doubles' | null>(null);
   const [maxEntries, setMaxEntries] = useState<string>('');
   const [minAge, setMinAge] = useState<string>('');
   const [maxAge, setMaxAge] = useState<string>('');
@@ -152,6 +155,8 @@ export function AddCategoryInline({
       max_age: maxAge ? Number(maxAge) : undefined,
       skill_levels: [],
       rubber_lineup: isTeamEvent ? rubberLineup : [],
+      roster_composition: isTeamEvent ? rosterComposition : [],
+      decider_format: isTeamEvent ? deciderFormat : null,
       scoring_override: scoringOverride,
       ...(scoringOverride && {
         scoring_format: scoringFormat,
@@ -286,58 +291,13 @@ export function AddCategoryInline({
         </div>
       </div>
 
-      {/* Rubber lineup — team_event only */}
+      {/* Rubber lineup / roster composition / decider — team_event only */}
       {isTeamEvent && (
-        <div className="rounded-lg border border-surface-border bg-surface px-4 py-3 space-y-2">
-          <p className="text-xs font-semibold text-slate-300">
-            Rubber lineup <span className="text-slate-500">(order each tie is played in)</span>
-          </p>
-          {rubberLineup.map((r, i) => (
-            <div key={r.sequence} className="flex items-center gap-2">
-              <span className="w-6 text-xs text-slate-500">{r.sequence}.</span>
-              <input
-                type="text"
-                value={r.name}
-                onChange={(e) => {
-                  const next = [...rubberLineup];
-                  next[i] = { ...r, name: e.target.value };
-                  setRubberLineup(next);
-                }}
-                placeholder={`Rubber ${r.sequence}`}
-                maxLength={40}
-                className={`${inputClass} flex-1`}
-              />
-              <select
-                value={r.play_format}
-                onChange={(e) => {
-                  const next = [...rubberLineup];
-                  next[i] = { ...r, play_format: e.target.value as typeof r.play_format };
-                  setRubberLineup(next);
-                }}
-                className={`${inputClass} cursor-pointer flex-1`}
-              >
-                <option value="singles">Singles</option>
-                <option value="doubles">Doubles</option>
-                <option value="mixed_doubles">Mixed Doubles</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setRubberLineup(rubberLineup.filter((_, j) => j !== i).map((x, j) => ({ ...x, sequence: j + 1 })))}
-                disabled={rubberLineup.length <= 1}
-                className="px-2 text-slate-500 hover:text-red-400 disabled:opacity-30 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={() => setRubberLineup([...rubberLineup, { sequence: rubberLineup.length + 1, name: `Rubber ${rubberLineup.length + 1}`, play_format: 'singles' }])}
-            className="text-xs font-medium text-brand-400 hover:text-brand-300 transition-colors"
-          >
-            + Add rubber
-          </button>
-        </div>
+        <>
+          <RubberLineupEditor value={rubberLineup} onChange={setRubberLineup} />
+          <RosterCompositionEditor value={rosterComposition} onChange={setRosterComposition} />
+          <DeciderFormatSelect value={deciderFormat} onChange={setDeciderFormat} />
+        </>
       )}
 
       {/* Limits */}

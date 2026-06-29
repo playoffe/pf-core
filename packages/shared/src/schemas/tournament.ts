@@ -31,6 +31,13 @@ const rubberLineupItemSchema = z.object({
   play_format: z.enum(['singles', 'doubles', 'mixed_doubles']),
 });
 
+const rosterCompositionRuleSchema = z.object({
+  count: z.number().int().min(1).max(50),
+  gender: z.enum(['male', 'female']).optional(),
+  age_min: z.number().int().min(0).max(120).optional(),
+  age_max: z.number().int().min(0).max(120).optional(),
+});
+
 export const createCategorySchema = z.object({
   name: z.string().min(2).max(80),
   type: z.enum(categoryTypeValues),
@@ -41,6 +48,8 @@ export const createCategorySchema = z.object({
   max_age: z.number().int().min(5).max(100).nullable().optional(),
   skill_levels: z.array(z.string()).default([]),
   rubber_lineup: z.array(rubberLineupItemSchema).default([]),
+  roster_composition: z.array(rosterCompositionRuleSchema).default([]),
+  decider_format: z.enum(['singles', 'doubles']).nullable().optional(),
 }).refine((data) => {
   if (data.play_format !== 'team_event') return true;
   if (data.rubber_lineup.length === 0) return false;
@@ -54,6 +63,7 @@ export const createCategorySchema = z.object({
 export const registerTeamSchema = z.object({
   name: z.string().min(2).max(80),
   member_usernames: z.array(z.string().min(2).max(30)).min(1).max(20),
+  owner_name: z.string().max(80).nullable().optional(),
 });
 
 export const scheduleMatchSchema = z.object({
