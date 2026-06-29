@@ -35,9 +35,9 @@ interface Props {
   tournamentId: string;
 }
 
-function Avatar({ name }: { name: string }) {
+function Avatar({ name, isCaptain }: { name: string; isCaptain?: boolean }) {
   return (
-    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-900 text-xs font-bold text-brand-300">
+    <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${isCaptain ? 'bg-brand-600 text-white' : 'bg-brand-900 text-brand-300'}`}>
       {name[0]?.toUpperCase()}
     </div>
   );
@@ -81,11 +81,22 @@ export function TeamRosterList({ teams, tournamentId }: Props) {
       {teams.map((team) => {
         const confirmedMembers = team.team_members.filter((m) => m.status === 'active' && m.player);
         const pendingCount = team.team_members.filter((m) => m.status === 'provisional').length;
+
+        // Captain might also be a playing roster member — show one pill per
+        // person, with the captain's pill highlighted, instead of duplicating
+        // them or omitting them from the roster row entirely.
+        const captainIsMember = team.captain && confirmedMembers.some((m) => m.player!.id === team.captain!.id);
+        const pillPeople: { id: string; full_name: string; username: string; isCaptain: boolean }[] = [
+          ...(team.captain && !captainIsMember ? [{ ...team.captain, isCaptain: true }] : []),
+          ...confirmedMembers.map((m) => ({ ...m.player!, isCaptain: m.player!.id === team.captain?.id })),
+        ];
+
         return (
           <div key={team.id} className="rounded-xl bg-surface-card p-4 ring-1 ring-surface-border">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-white">
+                  {team.composition_warning && <span className="mr-1.5" title={team.composition_warning}>⚠️</span>}
                   {team.name}
                   {team.owner_name && <span className="ml-2 text-xs font-normal text-slate-500">owned by {team.owner_name}</span>}
                 </p>
@@ -142,14 +153,18 @@ export function TeamRosterList({ teams, tournamentId }: Props) {
               </button>
             </div>
 
-            {confirmedMembers.length > 0 && (
+            {pillPeople.length > 0 && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                {confirmedMembers.map((m) => (
-                  <div key={m.id} className="flex items-center gap-1.5 rounded-full bg-surface px-2 py-1">
-                    <Avatar name={m.player!.full_name} />
-                    <Link href={`/p/${m.player!.username}`} className="text-xs text-slate-300 hover:text-brand-300 transition-colors">
-                      {m.player!.full_name}
+                {pillPeople.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`flex items-center gap-1.5 rounded-full px-2 py-1 ${p.isCaptain ? 'bg-brand-900/40 ring-1 ring-brand-700/60' : 'bg-surface'}`}
+                  >
+                    <Avatar name={p.full_name} isCaptain={p.isCaptain} />
+                    <Link href={`/p/${p.username}`} className={`text-xs transition-colors ${p.isCaptain ? 'text-brand-200 hover:text-brand-100' : 'text-slate-300 hover:text-brand-300'}`}>
+                      {p.full_name}
                     </Link>
+                    {p.isCaptain && <span className="text-[10px] text-brand-400">(C)</span>}
                   </div>
                 ))}
               </div>

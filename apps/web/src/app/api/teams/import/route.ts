@@ -56,8 +56,12 @@ export async function POST(request: Request) {
 
   const results = { teamsCreated: 0, linked: 0, provisional: 0, skipped: 0, warnings: [] as string[], errors: [] as string[] };
 
-  // Group parsed rows by team_name, in input order (first row per team = captain)
-  const teamGroups = new Map<string, { full_name: string; email: string; gender: 'male' | 'female' | 'other'; dob: string | null | undefined }[]>();
+  // Group parsed rows by team_name, in input order.
+  // A row can be flagged as captain via `is_captain` (true/1/yes); otherwise the
+  // first row for the team is the captain (backward compatible default).
+  type Row = { full_name: string; email: string; gender: 'male' | 'female' | 'other'; dob: string | null | undefined; isCaptain: boolean };
+  const teamGroups = new Map<string, Row[]>();
+  const teamOwnerNames = new Map<string, string>();
   for (const rawRow of rows) {
     const parsed = teamCsvImportRowSchema.safeParse(rawRow);
     if (!parsed.success) {
@@ -65,17 +69,19 @@ export async function POST(request: Request) {
       results.skipped++;
       continue;
     }
-    const { team_name, full_name, email, gender, dob } = parsed.data;
+    const { team_name, full_name, email, gender, dob, owner_name, is_captain } = parsed.data;
     if (!teamGroups.has(team_name)) teamGroups.set(team_name, []);
-    teamGroups.get(team_name)!.push({ full_name, email, gender, dob });
+    const isCaptain = ['true', '1', 'yes', 'y'].includes((is_captain ?? '').toLowerCase());
+    teamGroups.get(team_name)!.push({ full_name, email, gender, dob, isCaptain });
+    if (owner_name && !teamOwnerNames.has(team_name)) teamOwnerNames.set(team_name, owner_name);
   }
 
-  async function resolvePlayer(row: { full_name: string; email: string; gender: 'male' | 'female' | 'other'; dob: string | null | undefined }) {
+  async function resolvePlayer(row: Row) {
     const email = row.email.toLowerCase();
     const { data: existing } = await admin.from('players').select('id, gender, dob').eq('email', email).maybeSingle();
     if (existing) {
       results.linked++;
-      return existing;
+      return { ...existing, isCaptain: row.isCaptain };
     }
 
     const claimToken = randomBytes(32).toString('hex');
@@ -108,7 +114,7 @@ export async function POST(request: Request) {
     });
 
     results.provisional++;
-    return { id: authUser.user.id, gender: row.gender, dob: row.dob ?? null };
+    return { id: authUser.user.id, gender: row.gender, dob: row.dob ?? null, isCaptain: row.isCaptain };
   }
 
   function playerAge(dob: string | null): number | null {
@@ -121,7 +127,7 @@ export async function POST(request: Request) {
   for (const [teamName, members] of teamGroups) {
     if (members.length === 0) continue;
 
-    const resolved: { id: string; gender: 'male' | 'female' | 'other'; dob: string | null }[] = [];
+    const resolved: { id: string; gender: 'male' | 'female' | 'other'; dob: string | null; isCaptain: boolean }[] = [];
     for (const row of members) {
       const player = await resolvePlayer(row);
       if (player) resolved.push(player);
@@ -129,7 +135,10 @@ export async function POST(request: Request) {
     }
     if (resolved.length === 0) continue;
 
-    const [captain, ...roster] = resolved;
+    // Captain is whichever row was flagged `is_captain`; if none (or more than
+    // one) was flagged, fall back to the first row for the team.
+    const flaggedCaptains = resolved.filter((p) => p.isCaptain);
+    const captain = flaggedCaptains.length === 1 ? flaggedCaptains[0] : resolved[0];
 
     const { data: existingTeam } = await admin
       .from('tournament_teams')
@@ -145,7 +154,10 @@ export async function POST(request: Request) {
 
     const { data: team, error: teamErr } = await admin
       .from('tournament_teams')
-      .insert({ tournament_id, category_id, name: teamName, captain_id: captain.id, status: 'active' })
+      .insert({
+        tournament_id, category_id, name: teamName, captain_id: captain.id, status: 'active',
+        owner_name: teamOwnerNames.get(teamName) ?? null,
+      })
       .select('id')
       .single();
     if (teamErr || !team) {
@@ -155,9 +167,7 @@ export async function POST(request: Request) {
     }
     results.teamsCreated++;
 
-    if (roster.length > 0) {
-      await admin.from('team_members').insert(roster.map((m) => ({ team_id: team.id, player_id: m.id, status: 'active' as const })));
-    }
+    await admin.from('team_members').insert(resolved.map((m) => ({ team_id: team.id, player_id: m.id, status: 'active' as const })));
 
     if (rules.length > 0) {
       const shortfalls: string[] = [];

@@ -146,7 +146,8 @@ export default async function CategoryPage({ params }: Props) {
   };
   const typedEntries = entries as unknown as EntryRow[];
 
-  const entryCount = typedEntries.length;
+  const isTeamEvent = (category as { play_format: string }).play_format === 'team_event';
+  const entryCount = isTeamEvent ? teams.length : typedEntries.length;
   const maxEntries = (category as { max_entries: number | null }).max_entries;
   const categoryStatus = (category as { status: string }).status;
   const drawFormat = (category as { draw_format: string }).draw_format;
@@ -206,7 +207,6 @@ export default async function CategoryPage({ params }: Props) {
 
   // For formats where groups or standings are meaningful, show StandingsTable
   // instead of a flat entry list once the draw is generated.
-  const isTeamEvent = (category as { play_format: string }).play_format === 'team_event';
   const STANDINGS_FORMATS = ['round_robin', 'group_stage_knockout'];
   const showGroupStandings = isDrawn && (isTeamEvent || STANDINGS_FORMATS.includes(drawFormat));
 

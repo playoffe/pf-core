@@ -9,6 +9,8 @@ interface ParsedRow {
   email: string;
   gender: string;
   dob?: string;
+  owner_name?: string;
+  is_captain?: string;
 }
 
 interface ImportResults {
@@ -36,6 +38,8 @@ function parseCSV(text: string): { rows: ParsedRow[]; headerError: string | null
   const emailIdx = header.indexOf('email');
   const genderIdx = header.indexOf('gender');
   const dobIdx = header.indexOf('dob');
+  const ownerIdx = header.indexOf('owner_name');
+  const captainIdx = header.indexOf('is_captain');
 
   if (teamIdx === -1 || nameIdx === -1 || emailIdx === -1 || genderIdx === -1) {
     return { rows: [], headerError: 'CSV must include columns: team_name, full_name, email, gender' };
@@ -51,6 +55,8 @@ function parseCSV(text: string): { rows: ParsedRow[]; headerError: string | null
       gender: cols[genderIdx] ?? '',
     };
     if (dobIdx !== -1 && cols[dobIdx]) row.dob = cols[dobIdx];
+    if (ownerIdx !== -1 && cols[ownerIdx]) row.owner_name = cols[ownerIdx];
+    if (captainIdx !== -1 && cols[captainIdx]) row.is_captain = cols[captainIdx];
     if (row.team_name || row.full_name || row.email) rows.push(row);
   }
 
@@ -156,7 +162,9 @@ export function ImportTeamsPanel({ tournamentId, categoryId }: Props) {
             <code className="text-brand-300">gender</code> (male / female / other)
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            Optional: <code className="text-slate-400">dob</code>
+            Optional: <code className="text-slate-400">dob</code>,{' '}
+            <code className="text-slate-400">owner_name</code> (per team),{' '}
+            <code className="text-slate-400">is_captain</code> (true/false — defaults to the team&apos;s first row)
           </p>
           <p className="text-xs text-slate-500 mt-2">
             One row per player — group rows by <code className="text-slate-400">team_name</code>.

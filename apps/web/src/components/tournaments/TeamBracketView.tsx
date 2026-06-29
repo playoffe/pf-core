@@ -195,21 +195,37 @@ export function TeamBracketView({ ties, categoryId, isManager = true }: Props) {
             )}
           </div>
           {promoteError && <p className="mb-2 text-xs text-red-400">{promoteError}</p>}
-          <div className="flex gap-4 overflow-x-auto pb-2">
-            {rounds.map((round) => {
-              const roundTies = knockoutTies.filter((t) => t.round === round);
-              return (
-                <div key={round} className="flex flex-col gap-3 min-w-[260px]">
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                    {roundTies[0]?.round_name ?? `Round ${round}`}
-                  </p>
-                  {roundTies.map((tie) => (
-                    <TieCard key={tie.id} tie={tie} isExpanded={expanded.has(tie.id)} onToggle={() => toggle(tie.id)} isManager={isManager} />
-                  ))}
-                </div>
-              );
-            })}
-          </div>
+          {(() => {
+            // First round has the most ties — every later round's ties are
+            // given proportionally more flex height so they land centered
+            // between their two feeder ties, same trick BracketView uses for
+            // singles/doubles instead of stacking everything at the top.
+            const maxSlots = knockoutTies.filter((t) => t.round === rounds[0]).length;
+            return (
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                {rounds.map((round) => {
+                  const roundTies = knockoutTies.filter((t) => t.round === round);
+                  const slotsPerTie = maxSlots / roundTies.length;
+                  return (
+                    <div key={round} className="flex flex-col min-w-[260px]" style={{ minHeight: `${Math.max(maxSlots * 96, 200)}px` }}>
+                      <p className="mb-3 text-center text-xs font-bold uppercase tracking-widest text-slate-500">
+                        {roundTies[0]?.round_name ?? `Round ${round}`}
+                      </p>
+                      <div className="flex flex-1 flex-col">
+                        {roundTies.map((tie) => (
+                          <div key={tie.id} className="flex items-center justify-center py-2" style={{ flex: slotsPerTie }}>
+                            <div className="w-full">
+                              <TieCard tie={tie} isExpanded={expanded.has(tie.id)} onToggle={() => toggle(tie.id)} isManager={isManager} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </section>
       )}
     </>

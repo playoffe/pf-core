@@ -14,20 +14,30 @@ export function AddTeamByEmail({ tournamentId, categoryId }: Props) {
   const router = useRouter();
 
   const [teamName, setTeamName] = useState('');
-  const [captainEmail, setCaptainEmail] = useState('');
   const [memberEmails, setMemberEmails] = useState<string[]>(['']);
+  const [captainEmail, setCaptainEmail] = useState('');
   const [marqueeEmail, setMarqueeEmail] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const canSubmit = teamName.trim() !== '' && captainEmail.trim() !== '' && memberEmails.some((e) => e.trim() !== '');
+  const cleanedMemberEmails = memberEmails.map((e) => e.trim()).filter(Boolean);
+  const canSubmit = teamName.trim() !== '' && cleanedMemberEmails.length > 0 && captainEmail.trim() !== '';
 
   function updateMember(i: number, value: string) {
     const next = [...memberEmails];
     next[i] = value;
     setMemberEmails(next);
+    // If the captain's email was removed/edited away, clear the selection.
+    if (captainEmail && !next.map((e) => e.trim()).includes(captainEmail)) setCaptainEmail('');
+  }
+
+  function removeMember(i: number) {
+    const removedEmail = memberEmails[i].trim();
+    const next = memberEmails.filter((_, j) => j !== i);
+    setMemberEmails(next);
+    if (captainEmail === removedEmail) setCaptainEmail('');
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -41,8 +51,8 @@ export function AddTeamByEmail({ tournamentId, categoryId }: Props) {
       tournamentId,
       categoryId,
       teamName.trim(),
+      cleanedMemberEmails,
       captainEmail.trim(),
-      memberEmails.map((e) => e.trim()).filter(Boolean),
       marqueeEmail.trim() || undefined,
       ownerName.trim() || undefined,
     );
@@ -52,8 +62,8 @@ export function AddTeamByEmail({ tournamentId, categoryId }: Props) {
     } else {
       setSuccess(result.warning ? `Team added. ⚠ ${result.warning}` : 'Team added successfully.');
       setTeamName('');
-      setCaptainEmail('');
       setMemberEmails(['']);
+      setCaptainEmail('');
       setMarqueeEmail('');
       setOwnerName('');
       router.refresh();
@@ -81,14 +91,6 @@ export function AddTeamByEmail({ tournamentId, categoryId }: Props) {
           />
         </div>
 
-        <SearchField
-          label="Captain"
-          value={captainEmail}
-          onChange={setCaptainEmail}
-          onClear={() => setError(null)}
-          disabled={loading}
-        />
-
         <div>
           <p className="mb-1.5 text-xs font-medium text-slate-400">Owner <span className="text-slate-500">(display only, optional)</span></p>
           <input
@@ -102,7 +104,7 @@ export function AddTeamByEmail({ tournamentId, categoryId }: Props) {
         </div>
 
         <SearchField
-          label="Marquee player (optional, display only — captain or a roster member)"
+          label="Marquee player (optional, display only — must be a roster member)"
           value={marqueeEmail}
           onChange={setMarqueeEmail}
           onClear={() => setError(null)}
@@ -110,29 +112,43 @@ export function AddTeamByEmail({ tournamentId, categoryId }: Props) {
         />
 
         <div>
-          <p className="mb-1.5 text-xs font-medium text-slate-400">Roster members</p>
+          <p className="mb-1.5 text-xs font-medium text-slate-400">
+            Roster members <span className="text-slate-500">(pick which one is captain)</span>
+          </p>
           <div className="space-y-2">
-            {memberEmails.map((email, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <div className="flex-1">
-                  <SearchField
-                    label=""
-                    value={email}
-                    onChange={(v) => updateMember(i, v)}
-                    onClear={() => setError(null)}
-                    disabled={loading}
+            {memberEmails.map((email, i) => {
+              const trimmed = email.trim();
+              return (
+                <div key={i} className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="captain"
+                    checked={trimmed !== '' && captainEmail === trimmed}
+                    onChange={() => setCaptainEmail(trimmed)}
+                    disabled={loading || trimmed === ''}
+                    title="Make captain"
+                    className="shrink-0 accent-brand-600"
                   />
+                  <div className="flex-1">
+                    <SearchField
+                      label=""
+                      value={email}
+                      onChange={(v) => updateMember(i, v)}
+                      onClear={() => setError(null)}
+                      disabled={loading}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeMember(i)}
+                    disabled={memberEmails.length <= 1}
+                    className="px-2 text-slate-500 hover:text-red-400 disabled:opacity-30 transition-colors"
+                  >
+                    ✕
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setMemberEmails(memberEmails.filter((_, j) => j !== i))}
-                  disabled={memberEmails.length <= 1}
-                  className="px-2 text-slate-500 hover:text-red-400 disabled:opacity-30 transition-colors"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <button
             type="button"

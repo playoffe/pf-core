@@ -16,6 +16,8 @@ export const csvImportRowSchema = z.object({
 
 export const teamCsvImportRowSchema = csvImportRowSchema.extend({
   team_name: z.string().min(2).max(80),
+  owner_name: z.string().max(80).optional().nullable(),
+  is_captain: z.string().optional().nullable(),
 });
 
 export const bulkImportSchema = z.object({

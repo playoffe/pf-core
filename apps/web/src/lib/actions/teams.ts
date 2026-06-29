@@ -98,8 +98,8 @@ export async function addTeamByOrganizerAction(
   tournamentId: string,
   categoryId: string,
   teamName: string,
-  captainEmail: string,
   memberEmails: string[],
+  captainEmail: string,
   marqueeEmail?: string,
   ownerName?: string,
 ) {
@@ -120,16 +120,11 @@ export async function addTeamByOrganizerAction(
     .single();
   if (!cat || cat.play_format !== 'team_event') return { error: 'This action is only for team event categories' };
 
-  const { data: captain } = await admin
-    .from('players')
-    .select('id, gender, dob')
-    .eq('email', captainEmail.toLowerCase().trim())
-    .maybeSingle();
-  if (!captain) return { error: 'No PLAYOFFE account found for the captain email address' };
-
   const cleanedMemberEmails = [...new Set(memberEmails.map((e) => e.toLowerCase().trim()).filter(Boolean))];
-  if (cleanedMemberEmails.includes(captainEmail.toLowerCase().trim())) {
-    return { error: 'Captain cannot also be listed as a roster member' };
+  const normCaptainEmail = captainEmail.toLowerCase().trim();
+  if (!normCaptainEmail) return { error: 'Choose a captain from the roster' };
+  if (!cleanedMemberEmails.includes(normCaptainEmail)) {
+    return { error: 'The captain must be one of the roster members listed below' };
   }
 
   const { data: members } = await admin
@@ -142,7 +137,9 @@ export async function addTeamByOrganizerAction(
   const missing = cleanedMemberEmails.filter((e) => !foundEmails.has(e));
   if (missing.length > 0) return { error: `No PLAYOFFE account found for: ${missing.join(', ')}` };
 
-  const conflicting = await findPlayersAlreadyOnATeam(admin, tournamentId, [captain.id, ...found.map((m) => m.id)]);
+  const captain = found.find((m) => m.email.toLowerCase() === normCaptainEmail)!;
+
+  const conflicting = await findPlayersAlreadyOnATeam(admin, tournamentId, found.map((m) => m.id));
   if (conflicting.length > 0) {
     return { error: 'One or more players are already on a team in this tournament. A player can only be on one team per tournament.' };
   }
@@ -150,13 +147,9 @@ export async function addTeamByOrganizerAction(
   let marqueePlayerId: string | null = null;
   if (marqueeEmail?.trim()) {
     const normMarquee = marqueeEmail.toLowerCase().trim();
-    if (normMarquee === captainEmail.toLowerCase().trim()) {
-      marqueePlayerId = captain.id;
-    } else {
-      const marqueeMember = found.find((m) => m.email.toLowerCase() === normMarquee);
-      if (!marqueeMember) return { error: 'Marquee player must be the captain or a roster member' };
-      marqueePlayerId = marqueeMember.id;
-    }
+    const marqueeMember = found.find((m) => m.email.toLowerCase() === normMarquee);
+    if (!marqueeMember) return { error: 'Marquee player must be a roster member' };
+    marqueePlayerId = marqueeMember.id;
   }
 
   const { data: team, error: teamErr } = await admin
@@ -175,19 +168,17 @@ export async function addTeamByOrganizerAction(
 
   if (teamErr || !team) return { error: 'Failed to create team' };
 
-  if (found.length > 0) {
-    const { error: membersErr } = await admin
-      .from('team_members')
-      .insert(found.map((m) => ({ team_id: team.id, player_id: m.id, status: 'active' as const })));
-    if (membersErr) {
-      await admin.from('tournament_teams').delete().eq('id', team.id);
-      return { error: 'Failed to add roster members' };
-    }
+  const { error: membersErr } = await admin
+    .from('team_members')
+    .insert(found.map((m) => ({ team_id: team.id, player_id: m.id, status: 'active' as const })));
+  if (membersErr) {
+    await admin.from('tournament_teams').delete().eq('id', team.id);
+    return { error: 'Failed to add roster members' };
   }
 
   const warning = checkRosterComposition(
     (cat.roster_composition ?? []) as unknown as RosterCompositionRule[],
-    [captain, ...found],
+    found,
   );
 
   revalidatePath(`/tournaments/${t.slug}/categories/${categoryId}`);
@@ -829,7 +820,8 @@ export async function getTieLineupContext(tieId: string) {
       .eq('team_id', teamId)
       .eq('status', 'active');
     const memberPlayers = (members ?? []).map((m) => m.player as unknown as { id: string; full_name: string });
-    return captain ? [captain, ...memberPlayers] : memberPlayers;
+    if (!captain) return memberPlayers;
+    return [captain, ...memberPlayers.filter((m) => m.id !== captain.id)];
   }
 
   const rosterA = teamA ? await rosterFor(teamA.id, teamA.captain as unknown as { id: string; full_name: string } | null) : [];

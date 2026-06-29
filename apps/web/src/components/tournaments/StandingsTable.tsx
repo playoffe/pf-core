@@ -301,10 +301,15 @@ function buildTeamStandings(ties: TieWithTeams[]): Map<string, TeamStanding> {
   }
 
   for (const tie of ties) {
-    if (tie.status !== 'completed' || !tie.team_a || !tie.team_b) continue;
+    if (!tie.team_a || !tie.team_b) continue;
 
+    // Always list both teams (even before any ties are played) — matches the
+    // singles/doubles GroupSection behavior of showing every entrant with a
+    // 0-0 record until results come in, instead of hiding them entirely.
     const a = getOrCreate(tie.team_a.id, tie.team_a.name);
     const b = getOrCreate(tie.team_b.id, tie.team_b.name);
+
+    if (tie.status !== 'completed') continue;
 
     a.played++;
     b.played++;
