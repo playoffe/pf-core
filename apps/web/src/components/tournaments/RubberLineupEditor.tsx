@@ -5,6 +5,14 @@ import type { RosterCompositionRule } from '@pickleball/shared';
 const inputClass =
   'block w-full rounded-lg border border-slate-600 bg-surface px-3 py-1.5 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30';
 
+// Same look as inputClass but without a baked-in `w-full` — for fields that
+// need an explicit fixed/flex width (e.g. the count/age inputs in one row),
+// since combining `w-full` with a width override in the same class string is
+// unreliable (both target `width`, and Tailwind's generated stylesheet order
+// — not the className attribute order — decides which one wins).
+const compactInputClass =
+  'block rounded-lg border border-slate-600 bg-surface px-3 py-1.5 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30';
+
 export interface RubberLineupRow {
   sequence: number;
   name: string;
@@ -77,7 +85,7 @@ export function RosterCompositionEditor({ value, onChange }: { value: RosterComp
         Roster composition <span className="text-slate-500">(optional — checked as a soft warning at registration, not enforced)</span>
       </p>
       {value.map((rule, i) => (
-        <div key={i} className="flex items-center gap-2">
+        <div key={i} className="flex items-center gap-1.5">
           <input
             type="number"
             min={1}
@@ -88,7 +96,7 @@ export function RosterCompositionEditor({ value, onChange }: { value: RosterComp
               next[i] = { ...rule, count: parseInt(e.target.value, 10) || 1 };
               onChange(next);
             }}
-            className={`${inputClass} w-16`}
+            className={`${compactInputClass} w-12 shrink-0 px-1.5`}
           />
           <select
             value={rule.gender ?? ''}
@@ -97,7 +105,7 @@ export function RosterCompositionEditor({ value, onChange }: { value: RosterComp
               next[i] = { ...rule, gender: (e.target.value || undefined) as RosterCompositionRule['gender'] };
               onChange(next);
             }}
-            className={`${inputClass} cursor-pointer flex-1`}
+            className={`${compactInputClass} cursor-pointer w-28 shrink-0 px-2`}
           >
             <option value="">Any gender</option>
             <option value="male">Men</option>
@@ -114,7 +122,7 @@ export function RosterCompositionEditor({ value, onChange }: { value: RosterComp
               next[i] = { ...rule, age_min: e.target.value ? parseInt(e.target.value, 10) : undefined };
               onChange(next);
             }}
-            className={`${inputClass} w-24`}
+            className={`${compactInputClass} flex-1 min-w-0 px-2`}
           />
           <input
             type="number"
@@ -127,12 +135,12 @@ export function RosterCompositionEditor({ value, onChange }: { value: RosterComp
               next[i] = { ...rule, age_max: e.target.value ? parseInt(e.target.value, 10) : undefined };
               onChange(next);
             }}
-            className={`${inputClass} w-24`}
+            className={`${compactInputClass} flex-1 min-w-0 px-2`}
           />
           <button
             type="button"
             onClick={() => onChange(value.filter((_, j) => j !== i))}
-            className="px-2 text-slate-500 hover:text-red-400 transition-colors"
+            className="px-1 text-slate-500 hover:text-red-400 transition-colors shrink-0"
           >
             ✕
           </button>
