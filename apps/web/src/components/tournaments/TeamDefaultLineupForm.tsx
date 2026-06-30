@@ -21,9 +21,12 @@ const selectClass = 'flex-1 min-w-0 rounded border border-slate-600 bg-surface p
 export function TeamDefaultLineupForm({ team, rubberLineup }: Props) {
   const router = useRouter();
 
+  // Captain might also be a playing roster member (a team_members row) —
+  // dedupe so they don't show up twice in the player/partner dropdowns.
+  const memberPlayers = team.team_members.filter((m) => m.status === 'active' && m.player).map((m) => m.player!);
   const roster = [
     ...(team.captain ? [team.captain] : []),
-    ...team.team_members.filter((m) => m.status === 'active' && m.player).map((m) => m.player!),
+    ...memberPlayers.filter((p) => p.id !== team.captain?.id),
   ];
 
   const initialPicks: Record<number, { player_id: string; partner_id: string }> = {};

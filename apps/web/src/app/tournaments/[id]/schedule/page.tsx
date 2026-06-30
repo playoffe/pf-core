@@ -227,15 +227,16 @@ export default async function SchedulePage({ params }: Props) {
 
   // Rubber matches need a label distinguishing them from their tie's other
   // rubbers — singles/doubles matches are already one-per-round-slot, but a
-  // tie can have several rubber rows sharing the same round/round_name.
-  function buildRoundName(m: RawMatch): string | null {
-    if (!m.tie_id) return m.round_name;
-    if (m.is_decider) return m.round_name ? `${m.round_name} · Decider` : 'Decider';
+  // tie can have several rubber rows sharing the same round/round_name. Kept
+  // separate from round_name (which must stay the plain stage name — it's
+  // also used as the section header for the whole round/group, not just one row).
+  function buildRubberLabel(m: RawMatch): string | null {
+    if (!m.tie_id) return null;
+    if (m.is_decider) return 'Decider';
     const rubberName = m.rubber_sequence
       ? m.tc?.rubber_lineup?.find((r) => r.sequence === m.rubber_sequence)?.name
       : null;
-    const label = rubberName ?? (m.rubber_sequence ? `Rubber ${m.rubber_sequence}` : null);
-    return label ? `${m.round_name ?? 'Tie'} · ${label}` : m.round_name;
+    return rubberName ?? (m.rubber_sequence ? `Rubber ${m.rubber_sequence}` : null);
   }
 
   const matches: MatchForScheduling[] = allRaw.map((m) => ({
@@ -244,7 +245,8 @@ export default async function SchedulePage({ params }: Props) {
     court: m.court,
     scheduled_time: m.scheduled_time,
     round: m.round,
-    round_name: buildRoundName(m),
+    round_name: m.round_name,
+    rubber_label: buildRubberLabel(m),
     group_name: m.group_name,
     category_id: m.category_id,
     category_name: m.tc?.name ?? 'Unknown category',
@@ -266,6 +268,15 @@ export default async function SchedulePage({ params }: Props) {
 
   const scheduledCount = matches.filter((m) => m.scheduled_time).length;
   const totalCount     = matches.filter((m) => m.status === 'scheduled').length;
+
+  // Team-event categories' rubber order (for the "reorder before scheduling"
+  // control) — every row for a category carries the same rubber_lineup, so
+  // just take it from the first tie_id row seen per category.
+  const rubberLineupByCategory: Record<string, { sequence: number; name: string; play_format: string }[]> = {};
+  for (const m of allRaw) {
+    if (!m.tie_id || rubberLineupByCategory[m.category_id]) continue;
+    rubberLineupByCategory[m.category_id] = m.tc?.rubber_lineup ?? [];
+  }
 
   // ── Tournament days (for the day/order drag-and-drop UI) ──────────────────
   // Built with pure UTC date math — parsing a "YYYY-MM-DD" string via
@@ -420,6 +431,7 @@ export default async function SchedulePage({ params }: Props) {
           matches={matches}
           aiEnabled={aiEnabled}
           aiConfigured={aiConfigured}
+          rubberLineupByCategory={rubberLineupByCategory}
         />
       </main>
     </div>
