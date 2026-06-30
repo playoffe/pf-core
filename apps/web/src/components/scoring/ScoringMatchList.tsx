@@ -382,7 +382,10 @@ export const ScoringMatchList = memo(function ScoringMatchList({
                   assignedRefereeName={first.assignedRefereeName}
                   maxCourts={maxCourts}
                   activeReferees={activeReferees}
-                  rubbers={rubbers.map((r) => ({ id: r.id, label: r.rubberLabel ?? 'Rubber', isPlaceholder: r.isPlaceholder }))}
+                  rubbers={rubbers.map((r) => ({
+                    id: r.id, label: r.rubberLabel ?? 'Rubber', isPlaceholder: r.isPlaceholder,
+                    playerA: r.playerA, playerB: r.playerB,
+                  }))}
                 />
               );
             })}

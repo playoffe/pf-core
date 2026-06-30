@@ -14,6 +14,10 @@ interface RubberRow {
   id: string;
   label: string;
   isPlaceholder?: boolean;
+  /** Player names for this rubber (or partner pairs) — shown once a lineup
+   *  is in, whether submitted manually or applied from a team's default. */
+  playerA?: string;
+  playerB?: string;
 }
 
 interface Props {
@@ -100,12 +104,20 @@ export function TieAssignmentCard({
           {groupName ? ` · ${groupName}` : ''}
         </p>
 
-        {/* Rubber list */}
+        {/* Rubber list — shows the actual lineup once it's set (submitted by
+            the captain, or applied from a team's saved default), otherwise
+            just the rubber name + an "awaiting lineup" note. */}
         <div className="mt-3 space-y-1">
           {rubbers.map((r) => (
-            <div key={r.id} className="flex items-center justify-between text-xs">
-              <span className="text-slate-400">{r.label}</span>
-              {r.isPlaceholder && <span className="text-slate-600">Awaiting lineup</span>}
+            <div key={r.id} className="flex items-center justify-between text-xs gap-2">
+              <span className="text-slate-500 shrink-0">{r.label}</span>
+              {r.isPlaceholder ? (
+                <span className="text-slate-600">Awaiting lineup</span>
+              ) : (
+                <span className="text-slate-300 text-right truncate">
+                  {r.playerA || 'TBD'} <span className="text-slate-600">vs</span> {r.playerB || 'TBD'}
+                </span>
+              )}
             </div>
           ))}
         </div>

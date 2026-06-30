@@ -187,11 +187,13 @@ export default async function ScoringHubPage({ params, searchParams }: Props) {
 
   // Team-event rubber matches: prefer the actual rubber lineup once the
   // captain has submitted it, otherwise fall back to the tie's team name
-  // (known immediately from the draw) instead of a bare "TBD".
-  function rubberSlotName(entry: MatchRow['ea'], teamName: string | null | undefined, rubberPlayFormat?: string): string {
+  // (known immediately from the draw) instead of a bare "TBD". A partner is
+  // shown whenever the entry actually has one — that alone is enough signal
+  // it's a doubles/mixed-doubles rubber, no need to separately look up the
+  // rubber's configured play_format.
+  function rubberSlotName(entry: MatchRow['ea'], teamName: string | null | undefined): string {
     if (entry?.players) {
-      const isDoubles = rubberPlayFormat === 'doubles' || rubberPlayFormat === 'mixed_doubles';
-      return isDoubles && entry.partner ? `${entry.players.full_name} / ${entry.partner.full_name}` : entry.players.full_name;
+      return entry.partner ? `${entry.players.full_name} / ${entry.partner.full_name}` : entry.players.full_name;
     }
     return teamName ?? 'TBD';
   }

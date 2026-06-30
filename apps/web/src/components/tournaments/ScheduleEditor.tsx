@@ -654,6 +654,9 @@ export function ScheduleEditor({
                         ⚠️ {groupInvalidated} on removed court{groupInvalidated !== 1 ? 's' : ''}
                       </span>
                     )}
+                    <span className="hidden sm:flex items-center gap-1 text-[10px] text-slate-600">
+                      <span aria-hidden>⠿</span> Drag to reorder
+                    </span>
                   </div>
 
                   {/* Advanced toggle */}
@@ -712,7 +715,11 @@ export function ScheduleEditor({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-surface-border bg-surface/40">
-                    <th className="px-4 py-2 text-left text-[10px] font-medium text-slate-500 w-8">#</th>
+                    <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-500 w-12">
+                      <span className="flex items-center gap-1" title="Drag the ⠿ handle to reorder matches">
+                        <span aria-hidden>⠿</span> Order
+                      </span>
+                    </th>
                     <th className="px-4 py-2 text-left text-[10px] font-medium text-slate-500">Match</th>
                     <th className="hidden sm:table-cell px-4 py-2 text-left text-[10px] font-medium text-slate-500 w-44">Date &amp; time</th>
                     <th className="hidden sm:table-cell px-4 py-2 text-left text-[10px] font-medium text-slate-500 w-20">Court</th>
@@ -745,19 +752,19 @@ export function ScheduleEditor({
                         }`}
                       >
                         <td className="px-2 py-2.5 text-xs text-slate-500">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1.5">
                             {isFirstOfBlock ? (
                               <span
                                 draggable
                                 onDragStart={() => setDragState({ sectionKey, blockKey })}
                                 onDragEnd={() => setDragState(null)}
-                                title="Drag to reorder"
-                                className="cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400 select-none"
+                                title="Drag to reorder this match (or whole tie)"
+                                className="flex h-6 w-6 shrink-0 items-center justify-center rounded cursor-grab active:cursor-grabbing text-base leading-none text-slate-400 bg-surface-border/40 hover:bg-surface-border hover:text-white transition-colors select-none"
                               >
                                 ⠿
                               </span>
                             ) : (
-                              <span className="w-[1ch]" />
+                              <span className="w-6 shrink-0" />
                             )}
                             {idx + 1}
                           </div>
